@@ -46,7 +46,7 @@ export function routeMode({ objective = '', requestedMode = 'adaptive', complexi
 }
 
 export function createTaskState({ id, objective, constraints = '', mode = 'adaptive', complexity = 'auto' }) {
-  if (!String(id ?? '').trim()) throw new Error('workflow id 不能为空')
+  if (!String(id ?? '').trim()) throw new Error('taskState id 不能为空')
   if (!String(objective ?? '').trim()) throw new Error('objective 不能为空')
   if (mode !== 'adaptive' && !getMode(mode)) throw new Error(`未知工作模式：${mode}`)
   const selected = routeMode({ objective, requestedMode: mode, complexity })
@@ -71,7 +71,7 @@ export function createTaskState({ id, objective, constraints = '', mode = 'adapt
 }
 
 export function transitionTaskState(workflow, nextPhase, note = '') {
-  if (!workflow || workflow.status !== 'active') throw new Error('工作流不存在或已结束')
+  if (!workflow || workflow.status !== 'active') throw new Error('任务状态不存在或已结束')
   if (!TRANSITIONS[workflow.phase]?.includes(nextPhase)) {
     throw new Error(`非法阶段转换：${workflow.phase} -> ${nextPhase}`)
   }
@@ -120,7 +120,7 @@ export function createTaskStateStore() {
     create(input) {
       const id = String(input.id ?? '').trim()
       if (!id) throw new Error('workflow id 不能为空')
-      if (workflows.has(id)) throw new Error('工作流 ID 已存在')
+      if (workflows.has(id)) throw new Error('任务 ID 已存在')
       const workflow = createTaskState({ ...input, id })
       workflows.set(workflow.id, workflow)
       return workflow

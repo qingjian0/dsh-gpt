@@ -2,7 +2,7 @@
   "name": "@dsh-external/dsh-gpt-runtime",
   "version": "0.1.0",
   "private": false,
-  "description": "A transparent, configurable GPT-style workflow plugin for DeepSeek Harness.",
+  "description": "A configurable GPT-style DSH runtime plugin with a bundled, on-demand skill library.",
   "type": "module",
   "main": "src/index.js",
   "exports": {
@@ -10,6 +10,7 @@
   },
   "files": [
     "src",
+    "skills",
     "README.md",
     "docs",
     "cordis.patch.yml"
@@ -17,7 +18,9 @@
   "peerDependencies": {
     "@deepseek-ai/cordis": "*",
     "@deepseek-ai/dsh-tools": "*",
-    "@deepseek-ai/schemastery": "*"
+    "@deepseek-ai/schemastery": "*",
+    "@deepseek-ai/dsh-skill": "*",
+    "@deepseek-ai/dsh-tool-skill": "*"
   },
   "dsh": {
     "bundle": {

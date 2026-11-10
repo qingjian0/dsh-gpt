@@ -57,7 +57,7 @@ DSH-GPT 是一个以 Plugin 为运行骨架、Skills 为按需加载工作方法
 | recovery | 故障恢复模式 | 根因定位、最小修复和回归 |
 | parallel | 多任务并行模式 | 并行独立任务和冲突处理 |
 
-## 工作流工具
+## 任务状态工具
 
 - `gpt_mode_list`：列出模式和适用策略。
 - `gpt_task_state_start`：创建任务并选择模式。
@@ -67,9 +67,15 @@ DSH-GPT 是一个以 Plugin 为运行骨架、Skills 为按需加载工作方法
 - `gpt_task_state_finish`：完成、阻塞、失败或取消任务；completed 必须先进入 deliver。
 - `gpt_task_plan`：生成独立任务大纲，不执行外部操作。
 
-## DSH 原生 Skills 集成
+## DSH 原生能力集成
 
-本 Bundle 以 DSH 官方 @deepseek-ai/dsh-base 为基础。基础层已经提供 systemPrompt、tools、Skill Registry、Skill Consumer 和 filesystem Provider；本项目的 cordis.patch.yml 只插入 DSH-GPT 插件本身，避免重复注册服务。若使用非 base 的自定义 Profile，必须自行挂载这些 DSH 服务后再加载本插件。
+本 Bundle 以 DSH 官方 @deepseek-ai/dsh-base 为基础。基础层已经提供 systemPrompt、tools、Skill Registry、Skill Consumer、filesystem Provider，以及 workflowEngine 和 workflow 工具；本项目的 cordis.patch.yml 只插入 DSH-GPT 插件本身，避免重复注册服务。若使用非 base 的自定义 Profile，必须自行挂载这些 DSH 服务后再加载本插件。
+
+## DSH 原生多 Agent 编排
+
+DSH Base 已提供 `workflow` 工具（`@deepseek-ai/dsh-tool-workflow`）和 `ctx.workflowEngine`。它们负责脚本化 subagent 编排、并行执行、阶段日志和运行生命周期。用户要求大型多 Agent 工作流时优先使用这套原生能力；一两项委派使用普通 subagent。
+
+本插件的 `gpt_task_state_*` 工具只是轻量任务状态记录器，负责 understand / inspect / plan / execute / verify / deliver 阶段、证据和验收元数据，不执行 subagent，也不替代 DSH 的 workflow engine。
 
 ## 配置
 

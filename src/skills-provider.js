@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { BUNDLED_SKILL_RANK } from '@deepseek-ai/dsh-skill'
+import { stripSkillFrontmatter } from './skill-content.js'
 
 const PROVIDER_NAME = 'dsh-gpt-bundled'
 
@@ -76,11 +77,12 @@ export function registerBundledSkills(ctx) {
     async get(candidate, options = {}) {
       if (options.signal?.aborted) throw options.signal.reason
       const selected = byName.get(candidate.name)
-      if (!selected || selected.locator !== candidate.locator) return undefined
-      const content = await readFile(new URL(selected.locator, import.meta.url), {
+      if (!selected || selected.locator.href !== candidate.locator?.href) return undefined
+      const raw = await readFile(selected.locator, {
         encoding: 'utf8',
         signal: options.signal,
       })
+      const content = stripSkillFrontmatter(raw, selected.name)
       return {
         name: selected.name,
         description: selected.description,

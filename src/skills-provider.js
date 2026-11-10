@@ -41,6 +41,12 @@ const definitions = [
     whenToUse: 'Use when a tool, build, test, network request, or workflow fails or behaves inconsistently.',
     file: '../skills/error-recovery/SKILL.md',
   },
+  {
+    name: 'agent-execution',
+    description: '规范多步骤 Agent 任务的完整执行循环，包括目标理解、上下文检查、计划、技能选择、工具调用、结果观察、验证和交付。',
+    whenToUse: 'Use for any substantial multi-step task that requires planning, tool use, iterative execution, or a verifiable deliverable.',
+    file: '../skills/agent-execution/SKILL.md',
+  },
 ]
 
 const candidates = definitions.map((definition) => ({

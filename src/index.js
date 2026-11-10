@@ -125,7 +125,7 @@ export function apply(ctx, config) {
         failures: counters.failures,
         lastTool: counters.lastTool,
         lastCallAt: counters.lastCallAt,
-        scope: '仅统计本插件实例注册的工具调用；任务状态状态仅驻留内存。',
+        scope: '仅统计本插件实例注册的工具调用；任务状态仅驻留内存。',
       })
     },
   })

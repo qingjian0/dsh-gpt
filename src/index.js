@@ -2,7 +2,7 @@ import Schema from '@deepseek-ai/schemastery'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 
 export const name = 'dsh-gpt-runtime'
-export const inject = ['tools']
+export const inject = ['tools', 'systemPrompt']
 
 export const Config = Schema.object({
   enabled: Schema.boolean().default(true),
@@ -11,7 +11,7 @@ export const Config = Schema.object({
   verbosity: Schema.union(['concise', 'balanced', 'detailed']).default('balanced'),
   executionPolicy: Schema.union(['assist', 'confirm-sensitive-actions']).default('confirm-sensitive-actions'),
   promptProfile: Schema.string().default(
-    '你是一个严谨、透明的任务执行助手。先理解目标与约束，再给出可验证的步骤；调用工具前说明目的，调用后核对结果。区分已完成、进行中、失败和未验证事项。不得声称访问了未授权的内部信息，不得编造执行结果。'
+    '你是一个严谨、透明的任务执行助手。先理解目标与约束，再给出可验证的步骤；调用工具前说明目的，调用后核对结果。区分已完成、进行中、失败和未验证事项。不得声称访问了未授权的内部信息，不得编造执行结果。对不可逆或敏感操作，先取得明确授权。'
   ),
 })
 
@@ -36,6 +36,14 @@ function asText(value) {
 
 export function apply(ctx, config) {
   if (!config.enabled) return
+
+  // Register an additive persona section in DSH's real system-prompt assembly.
+  // Keep it after the deployment persona prefix and before first-party policy sections.
+  ctx.systemPrompt.section({
+    name: 'dsh-gpt:persona',
+    order: ctx.systemPrompt.getSectionOrder('DEPLOYMENT_PERSONA_PREFIX') + 1,
+    text: config.promptProfile,
+  })
 
   const register = (definition) => {
     const execute = definition.execute
@@ -69,6 +77,8 @@ export function apply(ctx, config) {
         language: config.language,
         verbosity: config.verbosity,
         executionPolicy: config.executionPolicy,
+        promptSection: 'dsh-gpt:persona',
+        promptSectionOrder: ctx.systemPrompt.getSectionOrder('DEPLOYMENT_PERSONA_PREFIX') + 1,
         uptimeSeconds: Math.floor((Date.now() - counters.startedAt) / 1000),
         calls: counters.calls,
         failures: counters.failures,
@@ -81,7 +91,7 @@ export function apply(ctx, config) {
 
   register({
     name: 'gpt_prompt_profile',
-    description: 'Return the user-configured DSH-GPT prompt profile. This is a plugin-owned prompt template, not the host system prompt.',
+    description: 'Return the DSH-GPT prompt profile registered as an additive system-prompt section. Does not read or reveal other plugins’ or the host’s private prompt sections.',
     parameters: {},
     output: {
       schema: { type: 'string' },
@@ -93,8 +103,9 @@ export function apply(ctx, config) {
         language: config.language,
         verbosity: config.verbosity,
         executionPolicy: config.executionPolicy,
+        promptSection: 'dsh-gpt:persona',
         promptProfile: config.promptProfile,
-        note: 'This template is exposed as plugin data. It is not automatically injected into the host system prompt.',
+        injection: 'Registered through ctx.systemPrompt.section() and included in DSH prompt assembly.',
       })
     },
   })

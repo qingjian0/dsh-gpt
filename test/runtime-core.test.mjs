@@ -43,6 +43,8 @@ test('workflow store isolates task state and rejects duplicate IDs', () => {
   const store = createWorkflowStore()
   store.create({ id: 'a', objective: '任务 A' })
   assert.throws(() => store.create({ id: 'a', objective: '重复' }), /已存在/)
+  assert.throws(() => store.create({ id: ' a ', objective: '空白绕过重复检查' }), /已存在/)
+  assert.throws(() => store.create({ id: '   ', objective: '空 ID' }), /不能为空/)
   assert.equal(store.get('a').phase, 'understand')
   assert.equal(store.list().length, 1)
 })

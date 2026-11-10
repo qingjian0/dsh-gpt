@@ -1,7 +1,7 @@
 import Schema from '@deepseek-ai/schemastery'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { registerBundledSkills, bundledSkillNames } from './skills-provider.js'
-import { MODES, createWorkflowStore } from './runtime-core.js'
+import { MODES, createTaskStateStore } from './runtime-core.js'
 
 export const name = 'dsh-gpt-runtime'
 export const inject = ['tools', 'systemPrompt', 'skills']
@@ -40,7 +40,7 @@ export function apply(ctx, config) {
     lastTool: null,
     lastCallAt: null,
   }
-  const workflowStore = createWorkflowStore()
+  const workflowStore = createTaskStateStore()
 
   function recordCall(toolName, failed = false) {
     counters.calls += 1
@@ -63,8 +63,9 @@ export function apply(ctx, config) {
     config.promptProfile,
     '',
     '【模式与工作流】',
-    '开始复杂任务前，先使用 gpt_mode_list 确认模式，按用户指定模式执行；用户未指定时使用自适应路由。用 gpt_workflow_start 建立任务状态，并按 understand → inspect → plan → execute → verify → deliver 推进。允许 verify → execute 回到执行阶段修正问题。',
-    '简单问答不必强行启动工作流。极速模式减少非必要步骤，但不得省略必要核验；严格验证模式必须以独立证据验收。批量/并行模式只并行无依赖且互不冲突的任务。',
+    '开始复杂任务前，先使用 gpt_mode_list 确认模式，按用户指定模式执行；用户未指定时使用自适应路由。用 gpt_task_state_start 建立轻量任务阶段记录，并按 understand → inspect → plan → execute → verify → deliver 推进；允许 verify → execute 回退修正。',
+    '简单问答不必强行启动任务状态记录。极速模式减少非必要步骤，但不得省略必要核验；严格验证模式必须以独立证据验收。批量/并行模式只并行无依赖且互不冲突的任务。',
+    '需要多个 subagent 的大型并行编排时，使用 DSH 原生 workflow 工具（dsh-tool-workflow / ctx.workflowEngine）；一两项委派优先使用 DSH subagent 工具。本插件的 gpt_task_state_* 只追踪任务阶段与证据，不执行 subagent，也不替代 DSH workflow engine。',
     '只记录可审查的决策摘要、依据、证据、阻塞项和验收标准；不要生成或声称提供隐藏思维链、逐字内心独白或私有推理过程。',
     '',
     '【技能使用规则】',
@@ -189,7 +190,7 @@ export function apply(ctx, config) {
   })
 
   register({
-    name: 'gpt_workflow_start',
+    name: 'gpt_task_state_start',
     description: '为复杂任务建立可追踪工作流，自动路由或按用户指定模式启动。',
     parameters: {
       id: { type: 'string', required: true, description: '当前任务唯一 ID。' },
@@ -205,7 +206,7 @@ export function apply(ctx, config) {
   })
 
   register({
-    name: 'gpt_workflow_status',
+    name: 'gpt_task_state_status',
     description: '读取一个工作流或列出当前进程中的工作流状态。',
     parameters: { id: { type: 'string', description: '工作流 ID；不填则列出全部。' } },
     output,
@@ -218,7 +219,7 @@ export function apply(ctx, config) {
   })
 
   register({
-    name: 'gpt_workflow_advance',
+    name: 'gpt_task_state_advance',
     description: '推进工作流阶段；只允许合法阶段转换，verify 阶段可返回 execute 修正。',
     parameters: {
       id: { type: 'string', required: true, description: '工作流 ID。' },
@@ -232,7 +233,7 @@ export function apply(ctx, config) {
   })
 
   register({
-    name: 'gpt_workflow_update',
+    name: 'gpt_task_state_update',
     description: '向工作流追加可审查的决策摘要、证据、阻塞项或验收标准；不收集隐藏思维链。',
     parameters: {
       id: { type: 'string', required: true, description: '工作流 ID。' },
@@ -248,7 +249,7 @@ export function apply(ctx, config) {
   })
 
   register({
-    name: 'gpt_workflow_finish',
+    name: 'gpt_task_state_finish',
     description: '结束工作流。completed 仅允许在 deliver 阶段；其他状态用于明确记录阻塞、失败或取消。',
     parameters: {
       id: { type: 'string', required: true, description: '工作流 ID。' },

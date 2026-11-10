@@ -69,11 +69,7 @@ DSH-GPT 是一个以 Plugin 为运行骨架、Skills 为按需加载工作方法
 
 ## DSH 原生 Skills 集成
 
-本 Bundle 以 DSH 官方 @deepseek-ai/dsh-base 为基础（由基础层提供 systemPrompt 与 tools 服务）；目标 Profile 需要组合：
-- @deepseek-ai/dsh-skill：提供 Skill Registry。
-- @deepseek-ai/dsh-tool-skill：提供模型可见技能目录和按需加载工具。
-- @deepseek-ai/dsh-skill-filesystem：可选，需单独加入 Profile，发现项目和用户本地 Skills。
-- @dsh-external/dsh-gpt-runtime：本项目插件和内置技能 Provider。
+本 Bundle 以 DSH 官方 @deepseek-ai/dsh-base 为基础。基础层已经提供 systemPrompt、tools、Skill Registry、Skill Consumer 和 filesystem Provider；本项目的 cordis.patch.yml 只插入 DSH-GPT 插件本身，避免重复注册服务。若使用非 base 的自定义 Profile，必须自行挂载这些 DSH 服务后再加载本插件。
 
 ## 配置
 

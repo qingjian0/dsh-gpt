@@ -46,7 +46,7 @@ export function routeMode({ objective = '', requestedMode = 'adaptive', complexi
 }
 
 export function createTaskState({ id, objective, constraints = '', mode = 'adaptive', complexity = 'auto' }) {
-  if (!String(id ?? '').trim()) throw new Error('taskState id 不能为空')
+  if (!String(id ?? '').trim()) throw new Error('任务 ID 不能为空')
   if (!String(objective ?? '').trim()) throw new Error('objective 不能为空')
   if (mode !== 'adaptive' && !getMode(mode)) throw new Error(`未知工作模式：${mode}`)
   const selected = routeMode({ objective, requestedMode: mode, complexity })
@@ -70,81 +70,81 @@ export function createTaskState({ id, objective, constraints = '', mode = 'adapt
   }
 }
 
-export function transitionTaskState(workflow, nextPhase, note = '') {
-  if (!workflow || workflow.status !== 'active') throw new Error('任务状态不存在或已结束')
-  if (!TRANSITIONS[workflow.phase]?.includes(nextPhase)) {
-    throw new Error(`非法阶段转换：${workflow.phase} -> ${nextPhase}`)
+export function transitionTaskState(taskState, nextPhase, note = '') {
+  if (!taskState || taskState.status !== 'active') throw new Error('任务状态不存在或已结束')
+  if (!TRANSITIONS[taskState.phase]?.includes(nextPhase)) {
+    throw new Error(`非法阶段转换：${taskState.phase} -> ${nextPhase}`)
   }
   const timestamp = now()
   return {
-    ...workflow,
+    ...taskState,
     phase: nextPhase,
     updatedAt: timestamp,
-    history: [...workflow.history, { phase: nextPhase, status: 'entered', note: String(note).slice(0, 1000), at: timestamp }],
+    history: [...taskState.history, { phase: nextPhase, status: 'entered', note: String(note).slice(0, 1000), at: timestamp }],
   }
 }
 
-export function updateTaskState(workflow, patch = {}) {
-  if (!workflow || workflow.status !== 'active') throw new Error('工作流不存在或已结束')
+export function updateTaskState(taskState, patch = {}) {
+  if (!taskState || taskState.status !== 'active') throw new Error('任务状态不存在或已结束')
   const allowed = ['decisionSummary', 'evidence', 'blockers', 'acceptanceCriteria']
-  const next = { ...workflow }
+  const next = { ...taskState }
   for (const key of allowed) {
     if (patch[key] !== undefined) {
       if (!Array.isArray(patch[key])) throw new Error(`${key} 必须是数组`)
-      next[key] = [...workflow[key], ...patch[key].map((item) => String(item).slice(0, 2000))]
+      next[key] = [...taskState[key], ...patch[key].map((item) => String(item).slice(0, 2000))]
     }
   }
   next.updatedAt = now()
   return next
 }
 
-export function finishTaskState(workflow, { outcome = 'completed', summary = '' } = {}) {
-  if (!workflow || workflow.status !== 'active') throw new Error('工作流不存在或已结束')
-  if (outcome === 'completed' && workflow.phase !== 'deliver') {
+export function finishTaskState(taskState, { outcome = 'completed', summary = '' } = {}) {
+  if (!taskState || taskState.status !== 'active') throw new Error('任务状态不存在或已结束')
+  if (outcome === 'completed' && taskState.phase !== 'deliver') {
     throw new Error('只有进入 deliver 阶段后才能标记完成；请先完成独立验证和交付')
   }
   if (!['completed', 'blocked', 'failed', 'cancelled'].includes(outcome)) throw new Error('无效的结束状态')
   const timestamp = now()
   return {
-    ...workflow,
+    ...taskState,
     status: outcome,
     summary: String(summary).slice(0, 4000),
     updatedAt: timestamp,
-    history: [...workflow.history, { phase: workflow.phase, status: outcome, at: timestamp }],
+    history: [...taskState.history, { phase: taskState.phase, status: outcome, at: timestamp }],
   }
 }
 
 export function createTaskStateStore() {
-  const workflows = new Map()
+  const taskStates = new Map()
   return {
     create(input) {
       const id = String(input.id ?? '').trim()
-      if (!id) throw new Error('workflow id 不能为空')
-      if (workflows.has(id)) throw new Error('任务 ID 已存在')
-      const workflow = createTaskState({ ...input, id })
-      workflows.set(workflow.id, workflow)
-      return workflow
+      if (!id) throw new Error('taskState id 不能为空')
+      if (taskStates.has(id)) throw new Error('任务 ID 已存在')
+      const taskState = createTaskState({ ...input, id })
+      taskStates.set(taskState.id, taskState)
+      return taskState
     },
     get(id) {
-      return workflows.get(id) ?? null
+      return taskStates.get(id) ?? null
     },
     transition(id, phase, note) {
-      const updated = transitionTaskState(workflows.get(id), phase, note)
-      workflows.set(id, updated)
+      const updated = transitionTaskState(taskStates.get(id), phase, note)
+      taskStates.set(id, updated)
       return updated
     },
     update(id, patch) {
-      const updated = updateTaskState(workflows.get(id), patch)
-      workflows.set(id, updated)
+      const updated = updateTaskState(taskStates.get(id), patch)
+      taskStates.set(id, updated)
       return updated
     },
     finish(id, options) {
-      const updated = finishTaskState(workflows.get(id), options)
-      workflows.set(id, updated)
+      const updated = finishTaskState(taskStates.get(id), options)
+      taskStates.set(id, updated)
       return updated
     },
     list() {
-      return [...workflows.values()].map(({ id, objective, mode, phase, status, updatedAt }) => ({
+      return [...taskStates.values()].map(({ id, objective, mode, phase, status, updatedAt }) => ({
         id, objective, mode, phase, status, updatedAt,
       }))
     },

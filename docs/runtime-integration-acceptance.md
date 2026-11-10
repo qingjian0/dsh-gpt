@@ -8,7 +8,7 @@
 - [ ] DSH Profile 能解析 manifest 与 cordis.patch.yml。
 - [ ] Plugin 正常加载，所有 inject 服务均可用。
 - [ ] Plugin 卸载时 Provider、工具和提示词段落被正确清理（注册 disposer 由 Cordis Context 生命周期管理）。
-- [ ] 两个不同 Cordis Context 分别加载插件时，工作流与计数器状态完全隔离。
+- [ ] 两个不同 Cordis Context 分别加载插件时，任务状态与计数器状态完全隔离。
 - [ ] 重复加载/卸载不会产生重复工具或重复 Provider。
 
 ## B. Skills
@@ -26,7 +26,7 @@
 - [ ] 自适应路由对工程、研究、批量、并行、故障和简单任务选择合理。
 - [ ] 模式只影响工作策略，不改变宿主工具权限。
 
-## D. 工作流状态机
+## D. 任务状态机
 - [ ] 创建任务后进入 understand。
 - [ ] 阶段按 understand → inspect → plan → execute → verify → deliver 推进。
 - [ ] verify 可回退 execute，其他非法跳转被拒绝。

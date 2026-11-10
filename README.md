@@ -41,7 +41,7 @@ DSH-GPT 是一个以 Plugin 为运行骨架、Skills 为按需加载工作方法
 | error-recovery | 故障分类、根因定位、回归与停止条件 |
 | agent-execution | 完整 Agent 执行循环、迭代、验证和交付 |
 
-每个技能都是独立的 skills/<name>/SKILL.md，使用 DSH 原生 YAML frontmatter。Bundled Provider 只发布名称和描述；完整正文在调用时才读取。
+每个技能都是独立的 skills/<name>/SKILL.md，使用 DSH 原生 YAML frontmatter。Bundled Provider 的 list() 只发布候选元数据；get() 按需读取文件、剥离 frontmatter，并返回纯指令正文。候选项使用 URL locator 和绝对 resourceBase，遵循 DSH SkillProvider 契约。
 
 ## 工作模式
 
@@ -69,10 +69,10 @@ DSH-GPT 是一个以 Plugin 为运行骨架、Skills 为按需加载工作方法
 
 ## DSH 原生 Skills 集成
 
-目标 Profile 需要组合：
+本 Bundle 以 DSH 官方 @deepseek-ai/dsh-base 为基础（由基础层提供 systemPrompt 与 tools 服务）；目标 Profile 需要组合：
 - @deepseek-ai/dsh-skill：提供 Skill Registry。
 - @deepseek-ai/dsh-tool-skill：提供模型可见技能目录和按需加载工具。
-- @deepseek-ai/dsh-skill-filesystem：可选，发现项目和用户本地 Skills。
+- @deepseek-ai/dsh-skill-filesystem：可选，需单独加入 Profile，发现项目和用户本地 Skills。
 - @dsh-external/dsh-gpt-runtime：本项目插件和内置技能 Provider。
 
 ## 配置
@@ -90,7 +90,7 @@ DSH-GPT 是一个以 Plugin 为运行骨架、Skills 为按需加载工作方法
 
 ## 验证状态与限制
 
-运行 `npm test` 执行静态契约、模式路由和工作流状态机测试。真实 DSH 宿主集成仍需验证插件加载/卸载、Provider 注册、技能发现与正文加载、模型工具可见性、真实工具执行和重启行为。静态测试通过不代表真实宿主集成已经验收。
+当前兼容范围：Node.js >=24.9.0、DSH >=0.2.2-rc.1 且 <0.3.0。运行 `npm test` 执行静态契约、Skill frontmatter 解析、模式路由和工作流状态机测试。真实 DSH 宿主集成仍需验证插件加载/卸载、Provider 注册、技能发现与正文加载、模型工具可见性、真实工具执行和重启行为。静态测试通过不代表真实宿主集成已经验收。
 
 ## 许可证
 

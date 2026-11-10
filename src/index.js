@@ -58,6 +58,7 @@ export function apply(ctx, config) {
     name: 'dsh-gpt:persona',
     order: ctx.systemPrompt.getSectionOrder('DEPLOYMENT_PERSONA_PREFIX') + 1,
     text: promptText,
+    interpolate: false,
   })
 
   const register = (definition) => {

@@ -2,14 +2,15 @@
 
 ## 架构定位
 
-采用 Plugin + Runtime Workflow + Skills 混合方案，不自建第二套模型 Agent Loop。DSH Host 仍负责模型调用、Session、权限和真实工具执行；本插件提供可配置的模式路由和任务阶段状态机。
+采用 Plugin + Task State Tracker + Skills 混合方案，不自建第二套模型 Agent Loop 或多 Agent Workflow Engine。DSH Host 仍负责模型调用、Session、权限和真实工具执行；本插件提供可配置的模式路由和任务阶段状态机。
 
 | 层 | 职责 | 实现归属 |
 |---|---|---|
 | Host Runtime | Agent Loop、模型请求、Session、权限、工具调度 | DSH |
 | DSH-GPT Plugin | 提示词段落、配置、工具注册、Skill Provider | 本仓库 |
 | Mode Router | 9 种模式目录和自适应模式选择 | src/runtime-core.js |
-| Workflow Engine | 阶段状态机、任务状态、证据和验收元数据 | src/runtime-core.js |
+| Task State Engine | 轻量阶段状态机、任务状态、证据和验收元数据 | src/runtime-core.js |
+| Multi-Agent Workflow | 脚本化 subagent 编排与运行生命周期 | DSH 原生 ctx.workflowEngine / dsh-tool-workflow |
 | Skill Registry | Provider 合并、作用域、优先级、按需读取 | @deepseek-ai/dsh-skill |
 | Skill Consumer | 会话技能目录、模型侧 skill 工具、显式命令 | @deepseek-ai/dsh-tool-skill |
 | Local Skill Provider | 项目/用户目录发现和变更监控 | @deepseek-ai/dsh-skill-filesystem |
@@ -53,11 +54,11 @@ understand -> inspect -> plan -> execute -> verify -> deliver
 ## 工作流工具契约
 
 - `gpt_mode_list`：返回模式目录。
-- `gpt_workflow_start`：以唯一 ID 创建工作流；mode 可指定模式，adaptive 自动路由。
-- `gpt_workflow_status`：查询工作流状态或列表。
-- `gpt_workflow_advance`：执行合法状态转换。
-- `gpt_workflow_update`：追加决策摘要、证据、阻塞项和验收标准。
-- `gpt_workflow_finish`：按规则结束工作流。
+- `gpt_task_state_start`：以唯一 ID 创建工作流；mode 可指定模式，adaptive 自动路由。
+- `gpt_task_state_status`：查询工作流状态或列表。
+- `gpt_task_state_advance`：执行合法状态转换。
+- `gpt_task_state_update`：追加决策摘要、证据、阻塞项和验收标准。
+- `gpt_task_state_finish`：按规则结束工作流。
 - `gpt_task_plan`：生成计划，不触发外部副作用。
 
 决策摘要只保留结论、理由要点和证据引用，不记录隐藏思维链或逐字内心独白。
@@ -66,12 +67,13 @@ understand -> inspect -> plan -> execute -> verify -> deliver
 
 1. DSH 接收用户消息并进入 Agent Loop。
 2. DSH 组装全局与当前作用域的 System Prompt；本插件通过 `ctx.systemPrompt.section()` 以外部扩展顺序 100 贡献 dsh-gpt:persona（persona prefix 为 0，first-party plan policy 为 500）。
-3. 对复杂任务，模型使用 gpt_mode_list 选择工作模式，并调用 gpt_workflow_start 建立状态。
+3. 对复杂任务，模型使用 gpt_mode_list 选择工作模式，并调用 gpt_task_state_start 建立状态。
 4. 模型按 understand → inspect → plan → execute → verify → deliver 推进；必要时从 verify 回到 execute。
 5. DSH Skill Consumer 暴露技能目录；模型按需调用官方 skill 工具加载完整正文。
-6. 模型按技能工作方法选择 DSH 工具；DSH 校验参数、权限和调用范围，再执行工具。
-7. 模型观察工具结果、追加证据和状态，必要时修正。
-8. 独立验收后进入 deliver，报告证据、未完成项和风险。
+6. 需要大规模 subagent 编排时，使用 DSH 原生 workflow 工具；本插件任务状态工具只记录阶段、证据和验收元数据。
+7. 模型按技能工作方法选择 DSH 工具；DSH 校验参数、权限和调用范围，再执行工具。
+8. 模型观察工具结果、追加证据和状态，必要时修正。
+9. 独立验收后进入 deliver，报告证据、未完成项和风险。
 
 简单问答无需强制建立工作流。
 
@@ -90,7 +92,7 @@ src/skills-provider.js 实现官方 SkillProvider 契约：
 - dsh-gpt:persona 是本插件自己的附加提示词段落，不覆盖 DSH 或其他插件段落。
 - 技能正文按需加载，不把全部技能全文塞入常驻系统提示词。
 - Skill 是指令，不是工具，也不是授权。
-- Workflow Engine 管理任务阶段，不取代 DSH Agent Loop 或真实工具调度。
+- Task State Engine 只管理任务阶段，不取代 DSH Agent Loop、原生 workflowEngine 或真实工具调度。
 - executionPolicy 只是模型行为指导；宿主权限、审批和工具策略始终有效。
 - 不提取或复制其他产品的私有系统提示词、隐藏指令或隐藏推理。
 

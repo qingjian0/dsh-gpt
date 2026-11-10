@@ -31,6 +31,7 @@ test('all bundled skills have valid frontmatter and matching kebab-case names', 
     'research',
     'verification',
     'error-recovery',
+    'agent-execution',
   ]
   for (const name of names) {
     const body = await readFile(new URL(`skills/${name}/SKILL.md`, root), 'utf8')

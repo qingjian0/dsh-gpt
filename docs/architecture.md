@@ -1,64 +1,65 @@
-# DSH-GPT Runtime Architecture
+# DSH-GPT Runtime 架构
 
-## Goal
+## 目标
 
-Provide a DSH-native, inspectable implementation of a GPT-style assistant workflow without depending on private OpenAI internals.
+基于 DSH 官方插件接口实现一套原生、可配置、可审计的 GPT 风格助手工作流，不依赖 OpenAI 私有内部实现。
 
-## Layers
+## 分层
 
-1. **Host runtime (DSH)** — owns the model provider, conversation/session lifecycle, tool scheduler, permissions, and plugin lifecycle.
-2. **DSH-GPT plugin** — contributes a persona section, planning contract, and plugin-local observability tools.
-3. **Model** — interprets the user's request, decides whether a registered tool is relevant, and synthesizes a response from tool results.
-4. **External capabilities** — remain separate DSH tools/plugins and are invoked only through their registered interfaces and host policy.
+1. **DSH 宿主运行时**：负责模型供应商、会话生命周期、工具调度、权限策略和插件生命周期。
+2. **DSH-GPT 插件**：贡献独立人设段落、任务规划契约和插件自身的运行统计工具。
+3. **模型**：理解用户请求，根据当前提示词和可用工具 Schema 决定是否调用工具，并整合工具结果。
+4. **外部能力**：由独立 DSH 工具或插件提供，只能通过注册接口和宿主策略调用。
 
-## Request lifecycle
+## 请求与执行流程
 
-1. DSH's agent loop claims a queued user prompt and opens a turn in the session log.
-2. DSH assembles the prompt from global and scoped system-prompt contributors.
-3. The model receives the assembled prompt, conversation history, and available tool schemas.
-4. The model may choose a registered tool and construct arguments.
-5. DSH validates and dispatches the tool call through its guarded tool pipeline.
-6. The tool's `execute` function runs.
-7. `output.render` converts the canonical result into model-readable content.
-8. DSH appends model-visible facts to the session log; the model may continue with another step or produce a final response.
+1. DSH Agent Loop 认领排队的用户请求，并在 Session Log 中开启轮次。
+2. DSH System Prompt 服务组装全局和当前作用域的系统提示词段落。
+3. 模型接收组装后的提示词、对话历史和可用工具 Schema。
+4. 模型判断是否需要工具，并生成符合参数 Schema 的调用参数。
+5. DSH 校验并通过受保护的 Tool Registry 执行工具调用。
+6. 工具的 `execute` 函数执行具体逻辑。
+7. `output.render` 将规范化结果转换为模型可读内容。
+8. DSH 将模型可见事实写入 Session Log；模型可继续下一步工具调用，也可生成最终回复。
 
-This describes the public DSH architecture and plugin contract; it is not a claim to reproduce ChatGPT's private internal orchestration.
+以上描述基于 DSH 公开架构与插件契约，不代表复刻 ChatGPT 的私有内部调度流程。
 
-## Prompt/configuration model
+## 系统提示词与配置
 
-- `promptProfile` is a user-owned, plugin-specific prompt template.
-- The plugin registers it as the additive section `dsh-gpt:persona` through `ctx.systemPrompt.section()`.
-- The section order is resolved relative to DSH's named `DEPLOYMENT_PERSONA_PREFIX` slot.
-- The plugin does not register a `complete` section and therefore does not replace other host or plugin prompt sections.
-- The plugin's prompt inspection tool returns only its own configured contribution.
+- `promptProfile` 是用户拥有和维护的插件行为指令。
+- 插件将它与语言、回答详细度、执行策略提示组合成 `dsh-gpt:persona` 段落。
+- 通过 `ctx.systemPrompt.section()` 注册，顺序位于 DSH 的 `DEPLOYMENT_PERSONA_PREFIX` 之后。
+- 插件不注册 `complete` 段落，不会替换宿主或其他插件的提示词。
+- 提示词查看工具只返回本插件自己的配置内容。
+- 执行策略字段只作为模型行为提示，实际权限仍由 DSH 宿主控制。
 
-## Observability
+## 可观测性
 
-The scaffold records only:
-- plugin-local tool call count;
-- plugin-local failure count;
-- last tool name;
-- last tool call timestamp;
-- plugin instance start time.
+当前只记录：
+- 插件工具调用次数；
+- 插件工具失败次数；
+- 最近调用的工具名称；
+- 最近调用时间；
+- 插件实例启动时间。
 
-It deliberately excludes:
-- hidden model reasoning;
-- provider-private request/response payloads;
-- credentials, cookies, and session identifiers;
-- prompts or instructions not explicitly supplied to this plugin.
+明确不记录：
+- 隐藏推理过程；
+- 模型供应商私有请求/响应负载；
+- 凭据、Cookie、会话标识；
+- 用户未明确提供给本插件的其他提示词内容。
 
-## Security
+## 安全原则
 
-- Keep host permission and policy enforcement authoritative.
-- Do not add shell/network/file access implicitly.
-- Do not log secrets or full conversation content.
-- Treat user-configured prompt text as untrusted input, not as a way to override host policy.
-- Require explicit authorization for irreversible or sensitive actions.
+- DSH 宿主权限和策略始终具有最终控制权。
+- 不隐式增加 Shell、网络或文件系统访问能力。
+- 不记录密钥和完整对话内容。
+- 用户配置的提示词视为普通输入，不能覆盖宿主安全策略。
+- 不可逆或敏感操作必须经过明确授权。
 
-## Roadmap
+## 后续路线
 
-- [ ] Verify manifest and patch composition against the target DSH release.
-- [ ] Add real-host load/unload integration tests.
-- [ ] Add an optional dynamic context provider after confirming the exact context data contract and scope requirements.
-- [ ] Add structured lifecycle events if the selected DSH release exposes stable event names and payload schemas.
-- [ ] Add operator-facing diagnostics without collecting private conversation data.
+- [ ] 在目标 DSH 版本验证 Bundle Manifest 和 Patch 组合。
+- [ ] 增加真实宿主的加载/卸载集成测试。
+- [ ] 在确认上下文数据契约与作用域要求后，增加可选动态上下文提供方。
+- [ ] 仅在目标 DSH 版本提供稳定事件名称和载荷 Schema 时，增加结构化生命周期事件。
+- [ ] 增加不收集私有对话数据的运维诊断能力。

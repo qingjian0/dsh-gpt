@@ -11,6 +11,10 @@ test('plugin declares DSH tools, system prompt, and skills services', async () =
   assert.match(source, /ctx\.systemPrompt\.section\(/)
   assert.match(source, /registerBundledSkills\(ctx\)/)
   assert.match(source, /interpolate: false/)
+  assert.match(source, /order: 100/)
+  assert.match(source, /const workflowStore = createWorkflowStore\\(\\)/)
+  assert.doesNotMatch(source, /^const workflowStore = createWorkflowStore\\(\\)/m)
+  assert.doesNotMatch(source, /^const counters =/m)
 })
 
 test('plugin exposes mode and stateful workflow tools', async () => {
@@ -35,6 +39,8 @@ test('bundled provider follows the DSH SkillProvider contract', async () => {
   assert.match(source, /async get\(/)
   assert.match(source, /modelInvocable: true, userInvocable: true/)
   assert.match(source, /source: 'bundled'/)
+  assert.match(source, /locator = new URL\\(/)
+  assert.match(source, /stripSkillFrontmatter\\(raw, selected.name\\)/)
 })
 
 test('all bundled skills have valid frontmatter and matching kebab-case names', async () => {

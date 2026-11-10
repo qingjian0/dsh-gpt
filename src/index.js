@@ -19,21 +19,6 @@ export const Config = Schema.object({
   ),
 })
 
-const counters = {
-  startedAt: Date.now(),
-  calls: 0,
-  failures: 0,
-  lastTool: null,
-  lastCallAt: null,
-}
-
-function recordCall(toolName, failed = false) {
-  counters.calls += 1
-  if (failed) counters.failures += 1
-  counters.lastTool = toolName
-  counters.lastCallAt = new Date().toISOString()
-}
-
 function asText(value) {
   return typeof value === 'string' ? value : JSON.stringify(value, null, 2)
 }
@@ -46,6 +31,24 @@ const output = {
 
 export function apply(ctx, config) {
   if (!config.enabled) return
+
+  // State belongs to this Cordis plugin context, not the shared ESM module.
+  // Multiple agents/scopes must not observe one another's counters or workflows.
+  const counters = {
+    startedAt: Date.now(),
+    calls: 0,
+    failures: 0,
+    lastTool: null,
+    lastCallAt: null,
+  }
+  const workflowStore = createWorkflowStore()
+
+  function recordCall(toolName, failed = false) {
+    counters.calls += 1
+    if (failed) counters.failures += 1
+    counters.lastTool = toolName
+    counters.lastCallAt = new Date().toISOString()
+  }
 
   if (config.skillsEnabled) registerBundledSkills(ctx)
 
@@ -75,7 +78,8 @@ export function apply(ctx, config) {
 
   ctx.systemPrompt.section({
     name: 'dsh-gpt:persona',
-    order: ctx.systemPrompt.getSectionOrder('DEPLOYMENT_PERSONA_PREFIX') + 1,
+    // External plugin contribution: after the persona prefix (0), before first-party policy (500).
+    order: 100,
     text: promptText,
     interpolate: false,
   })
@@ -115,7 +119,7 @@ export function apply(ctx, config) {
         bundledSkills: config.skillsEnabled ? bundledSkillNames : [],
         modes: MODES.map(({ id, label }) => ({ id, label })),
         activeWorkflows: workflowStore.list(),
-        promptSectionOrder: ctx.systemPrompt.getSectionOrder('DEPLOYMENT_PERSONA_PREFIX') + 1,
+        promptSectionOrder: 100,
         uptimeSeconds: Math.floor((Date.now() - counters.startedAt) / 1000),
         calls: counters.calls,
         failures: counters.failures,
@@ -192,8 +196,8 @@ export function apply(ctx, config) {
       id: { type: 'string', required: true, description: '当前任务唯一 ID。' },
       objective: { type: 'string', required: true, description: '任务目标。' },
       constraints: { type: 'string', description: '约束、偏好、风险和期限。' },
-      mode: { type: 'string', description: '模式 ID；留空使用插件默认模式。' },
-      complexity: { type: 'string', description: 'low、normal、high 或 auto。' },
+      mode: { type: 'string', enum: MODES.map(({ id }) => id), description: '模式 ID；留空使用插件默认模式。' },
+      complexity: { type: 'string', enum: ['low', 'normal', 'high', 'auto'], description: '任务复杂度。' },
     },
     output,
     async execute({ id, objective, constraints = '', mode = config.defaultMode, complexity = 'auto' }) {
@@ -219,7 +223,7 @@ export function apply(ctx, config) {
     description: '推进工作流阶段；只允许合法阶段转换，verify 阶段可返回 execute 修正。',
     parameters: {
       id: { type: 'string', required: true, description: '工作流 ID。' },
-      phase: { type: 'string', required: true, description: '下一阶段：inspect、plan、execute、verify、deliver。' },
+      phase: { type: 'string', required: true, enum: ['inspect', 'plan', 'execute', 'verify', 'deliver'], description: '下一阶段。' },
       note: { type: 'string', description: '阶段切换依据或简短记录。' },
     },
     output,
@@ -249,7 +253,7 @@ export function apply(ctx, config) {
     description: '结束工作流。completed 仅允许在 deliver 阶段；其他状态用于明确记录阻塞、失败或取消。',
     parameters: {
       id: { type: 'string', required: true, description: '工作流 ID。' },
-      outcome: { type: 'string', required: true, description: 'completed、blocked、failed 或 cancelled。' },
+      outcome: { type: 'string', required: true, enum: ['completed', 'blocked', 'failed', 'cancelled'], description: '工作流结束状态。' },
       summary: { type: 'string', description: '交付摘要或结束原因。' },
     },
     output,

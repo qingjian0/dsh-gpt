@@ -33,7 +33,7 @@
 
 自适应路由是启发式初选，不是模型能力保证。用户显式指定的模式优先于自动路由。执行模式仅指导工作策略，不授予额外工具权限。
 
-## 工作流状态机
+## 任务状态机
 
 ```text
 understand -> inspect -> plan -> execute -> verify -> deliver
@@ -51,14 +51,14 @@ understand -> inspect -> plan -> execute -> verify -> deliver
 
 只有 deliver 阶段允许以 completed 结束。blocked、failed、cancelled 可在任何活动阶段明确结束。状态机允许 verify 回退到 execute 修正问题，不允许跳过阶段。
 
-## 工作流工具契约
+## 任务状态工具契约
 
 - `gpt_mode_list`：返回模式目录。
-- `gpt_task_state_start`：以唯一 ID 创建工作流；mode 可指定模式，adaptive 自动路由。
-- `gpt_task_state_status`：查询工作流状态或列表。
-- `gpt_task_state_advance`：执行合法状态转换。
+- `gpt_task_state_start`：以唯一 ID 创建任务状态记录；mode 可指定模式，adaptive 自动路由。
+- `gpt_task_state_status`：查询任务状态或列表。
+- `gpt_task_state_advance`：执行合法阶段转换。
 - `gpt_task_state_update`：追加决策摘要、证据、阻塞项和验收标准。
-- `gpt_task_state_finish`：按规则结束工作流。
+- `gpt_task_state_finish`：按规则结束任务状态记录。
 - `gpt_task_plan`：生成计划，不触发外部副作用。
 
 决策摘要只保留结论、理由要点和证据引用，不记录隐藏思维链或逐字内心独白。
@@ -67,7 +67,7 @@ understand -> inspect -> plan -> execute -> verify -> deliver
 
 1. DSH 接收用户消息并进入 Agent Loop。
 2. DSH 组装全局与当前作用域的 System Prompt；本插件通过 `ctx.systemPrompt.section()` 以外部扩展顺序 100 贡献 dsh-gpt:persona（persona prefix 为 0，first-party plan policy 为 500）。
-3. 对复杂任务，模型使用 gpt_mode_list 选择工作模式，并调用 gpt_task_state_start 建立状态。
+3. 对复杂任务，模型使用 gpt_mode_list 选择工作模式，并调用 gpt_task_state_start 建立任务阶段记录。
 4. 模型按 understand → inspect → plan → execute → verify → deliver 推进；必要时从 verify 回到 execute。
 5. DSH Skill Consumer 暴露技能目录；模型按需调用官方 skill 工具加载完整正文。
 6. 需要大规模 subagent 编排时，使用 DSH 原生 workflow 工具；本插件任务状态工具只记录阶段、证据和验收元数据。
@@ -75,7 +75,7 @@ understand -> inspect -> plan -> execute -> verify -> deliver
 8. 模型观察工具结果、追加证据和状态，必要时修正。
 9. 独立验收后进入 deliver，报告证据、未完成项和风险。
 
-简单问答无需强制建立工作流。
+简单问答无需强制建立任务状态记录。
 
 ## Bundled Skill Provider
 

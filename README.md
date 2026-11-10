@@ -92,7 +92,7 @@ DSH Base 已提供 `workflow` 工具（`@deepseek-ai/dsh-tool-workflow`）和 `c
 
 ## 验证状态与限制
 
-当前兼容范围：Node.js >=24.9.0、DSH >=0.2.2-rc.1 且 <0.3.0。运行 `npm test` 执行静态契约、Skill frontmatter 解析、模式路由和工作流状态机测试。真实 DSH 宿主集成仍需验证插件加载/卸载、Provider 注册、技能发现与正文加载、模型工具可见性、真实工具执行和重启行为。静态测试通过不代表真实宿主集成已经验收。
+当前兼容范围：Node.js >=24.9.0、DSH >=0.2.2-rc.1 且 <0.3.0。运行 `npm test` 执行静态契约、Skill frontmatter 解析、模式路由和任务状态机测试。完整 API 对照见 [DSH API 兼容性审计](docs/dsh-api-compatibility-audit.md)。真实 DSH 宿主集成仍需验证插件加载/卸载、Provider 注册、技能发现与正文加载、模型工具可见性、真实工具执行和重启行为。静态测试通过不代表真实宿主集成已经验收。
 
 ## 许可证
 

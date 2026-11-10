@@ -118,8 +118,10 @@ export function createWorkflowStore() {
   const workflows = new Map()
   return {
     create(input) {
-      if (workflows.has(input.id)) throw new Error('工作流 ID 已存在')
-      const workflow = createWorkflow(input)
+      const id = String(input.id ?? '').trim()
+      if (!id) throw new Error('workflow id 不能为空')
+      if (workflows.has(id)) throw new Error('工作流 ID 已存在')
+      const workflow = createWorkflow({ ...input, id })
       workflows.set(workflow.id, workflow)
       return workflow
     },

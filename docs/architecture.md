@@ -98,7 +98,7 @@ src/skills-provider.js 实现官方 SkillProvider 契约：
 
 ## 状态与可观测性边界
 
-- 工作流存储与工具计数器均在每个 apply(ctx, config) 调用内部创建，避免不同 Cordis scope 共享状态；仍只保存在插件进程内存，插件或 DSH 重启后不持久化。
+- 任务状态存储与工具计数器均在每个 apply(ctx, config) 调用内部创建，避免不同 Cordis scope 共享状态；仍只保存在插件进程内存，插件或 DSH 重启后不持久化。
 - 插件计数仅覆盖本插件注册的工具调用，不是完整模型请求或宿主 Agent Loop Trace。
 - 后续持久化应优先接入 DSH Session/Memory/State 公开接口，避免创建冲突状态源。
 - 追踪应只记录工具名、时间、状态、阶段和证据引用，不记录凭据、完整私有负载或隐藏推理。
@@ -109,7 +109,7 @@ src/skills-provider.js 实现官方 SkillProvider 契约：
 - [ ] 七个 bundled Skills 被发现且正文按需读取，返回内容不含 YAML frontmatter。
 - [ ] Provider candidate 使用有效 URL locator 和 directory resourceBase，get() 返回完整 SkillDefinition。
 - [ ] 两个独立 Cordis Context 的工作流与工具计数器互相隔离。
-- [ ] gpt_mode_list 和全部工作流工具在模型侧可见。
+- [ ] gpt_mode_list 和全部任务状态工具在模型侧可见。
 - [ ] 模式选择与状态机在真实任务中按预期工作。
 - [ ] 宿主工具权限、审批和失败处理不被绕过。
 - [ ] 重启后的状态行为符合文档（当前为内存态）。

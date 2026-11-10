@@ -1,23 +1,32 @@
 # DSH-GPT Runtime
 
-DSH-GPT 是一个以 Plugin 为运行骨架、Skills 为按需加载工作方法的 DeepSeek Harness 扩展。插件负责系统提示词贡献、技能提供方注册、运行配置和状态工具；技能正文通过 DSH 官方 Skill Registry 与 Skill Tool 按需加载。
+DSH-GPT 是一个以 Plugin 为运行骨架、Skills 为按需加载工作方法的 DeepSeek Harness 扩展。除七个专业 Skills 外，插件还提供显式模式注册、任务模式路由和可追踪工作流状态机。
 
 ## 设计原则
 
-- **Plugin = Runtime**：注册和生命周期、提示词段落、运行配置、工具与诊断。
+- **Plugin = Runtime Extension**：提示词段落、配置、模式路由、工作流工具、Skill Provider 和诊断。
+- **Workflow = Execution Control**：以明确状态推进任务，管理阶段、决策摘要、证据、阻塞项和验收标准。
 - **Skills = Instructions**：专业工作流程、判断规则、检查清单和交付标准。
 - **DSH = Host**：Agent Loop、模型调用、会话、工具调度、权限和审批。
 - **Tools = Actions**：实际读写文件、访问网络、操作 GitHub 等能力由 DSH 原生工具或其他插件提供。
 
-不复制或替换 DSH Agent Loop，不另造工具调度器，不把 Skill 指令当作权限授权。
+不复制或替换 DSH Agent Loop，不绕过宿主权限。工作流状态机管理任务阶段，但实际工具执行仍由 DSH Host 完成。
 
 ## 当前功能
 
+### Runtime / Modes
+- 9 种工作模式：自适应、极速、深度研究、工程交付、批量执行、严格验证、自动规划、故障恢复、多任务并行。
+- 自适应路由按任务描述和复杂度选择专业模式；用户可在启动工作流时显式指定模式。
+- 工作流状态机：understand → inspect → plan → execute → verify → deliver；验证发现问题时允许 verify → execute 回退。
+- 严格完成门槛：只有进入 deliver 阶段才能标记 completed。
+- 结构化记录决策摘要、证据、阻塞项和验收标准；不收集隐藏思维链。
+- 当前工作流状态驻留插件进程内存，重启不持久化；这不是跨重启任务队列。
+
 ### Plugin
 - 通过 ctx.systemPrompt.section() 注入独立的 dsh-gpt:persona 提示词段落。
-- 支持中文、回答详细度、执行策略提示和用户自定义行为指令。
+- 支持中文、回答详细度、默认模式、执行策略提示和用户自定义行为指令。
 - 通过 ctx.skills.registerProvider() 注册随插件打包的技能库。
-- 提供 gpt_runtime_status、gpt_prompt_profile、gpt_task_plan 三个诊断/规划工具。
+- 提供运行状态、提示词配置、模式目录、任务规划和工作流管理工具。
 - 只统计本插件工具调用；不采集宿主私有提示词、密钥、Cookie 或隐藏推理。
 
 ### Bundled Skills
@@ -32,27 +41,39 @@ DSH-GPT 是一个以 Plugin 为运行骨架、Skills 为按需加载工作方法
 | error-recovery | 故障分类、根因定位、回归与停止条件 |
 | agent-execution | 完整 Agent 执行循环、迭代、验证和交付 |
 
-每个技能都是独立的 skills/<name>/SKILL.md，使用 DSH 原生 YAML frontmatter。插件的 bundled provider 只发布名称和描述；完整正文在调用时才读取。
+每个技能都是独立的 skills/<name>/SKILL.md，使用 DSH 原生 YAML frontmatter。Bundled Provider 只发布名称和描述；完整正文在调用时才读取。
+
+## 工作模式
+
+| ID | 模式 | 主要用途 |
+|---|---|---|
+| adaptive | 自适应模式 | 根据任务复杂度自动路由 |
+| fast | 极速模式 | 简单任务的最短可靠路径 |
+| deep-research | 深度研究模式 | 多来源研究与证据交叉验证 |
+| engineering | 工程交付模式 | 仓库修改、测试、审查和交付 |
+| batch | 批量执行模式 | 依赖分组、批次执行和汇总 |
+| strict | 严格验证模式 | 独立验收和风险检查 |
+| planning | 自动规划模式 | 目标、依赖、风险和里程碑 |
+| recovery | 故障恢复模式 | 根因定位、最小修复和回归 |
+| parallel | 多任务并行模式 | 并行独立任务和冲突处理 |
+
+## 工作流工具
+
+- `gpt_mode_list`：列出模式和适用策略。
+- `gpt_workflow_start`：创建任务并选择模式。
+- `gpt_workflow_status`：读取单个或全部任务状态。
+- `gpt_workflow_advance`：推进合法阶段。
+- `gpt_workflow_update`：追加决策摘要、证据、阻塞项和验收标准。
+- `gpt_workflow_finish`：完成、阻塞、失败或取消任务；completed 必须先进入 deliver。
+- `gpt_task_plan`：生成独立任务大纲，不执行外部操作。
 
 ## DSH 原生 Skills 集成
 
-本插件提供 bundled skills，但模型侧的目录与 skill 加载工具由 DSH 官方消费者提供。目标 Profile 需要组合：
-
-- @deepseek-ai/dsh-skill：提供 ctx.skills 注册表。
+目标 Profile 需要组合：
+- @deepseek-ai/dsh-skill：提供 Skill Registry。
 - @deepseek-ai/dsh-tool-skill：提供模型可见技能目录和按需加载工具。
-- @deepseek-ai/dsh-skill-filesystem：可选但推荐，发现项目和用户本地 Skills。
+- @deepseek-ai/dsh-skill-filesystem：可选，发现项目和用户本地 Skills。
 - @dsh-external/dsh-gpt-runtime：本项目插件和内置技能 Provider。
-
-仓库的 cordis.patch.yml 给出组合示例；实际包版本、Profile 插入位置和发布渠道必须按目标 DSH 安装环境验证。
-
-## 安装与开发
-
-1. 使用目标 DSH 版本支持的 Node.js 运行环境。
-2. 将本包安装到目标 DSH Profile 可加载的插件目录。
-3. 按 cordis.patch.yml 将 Skill Registry、Skill Tool Consumer 和 DSH-GPT 加入同一 Profile。
-4. 可选启用 dsh-skill-filesystem，以便同时发现工作区和用户 Skills。
-5. 启动 DSH，确认可见 skill 工具和七个 bundled skills。
-6. 在多步骤任务中检查模型是否先加载匹配 Skill，再执行 DSH 工具。
 
 ## 配置
 
@@ -63,14 +84,13 @@ DSH-GPT 是一个以 Plugin 为运行骨架、Skills 为按需加载工作方法
 | profileName | DSH-GPT 默认配置 | 配置档名称 |
 | language | zh-CN | 输出语言提示 |
 | verbosity | balanced | concise / balanced / detailed |
+| defaultMode | adaptive | 默认工作模式 |
 | executionPolicy | confirm-sensitive-actions | 行为提示，不替代宿主权限 |
 | promptProfile | 内置中文规范 | 用户自定义行为指令 |
 
 ## 验证状态与限制
 
-运行 npm test 执行静态契约测试。正式发布前仍须在真实 DSH 宿主完成插件加载/卸载、技能目录发现、技能正文按需加载、用户显式调用、Profile 提示词顺序和模型可见工具等集成验收。
-
-静态测试通过不代表真实宿主集成已经验收。
+运行 `npm test` 执行静态契约、模式路由和工作流状态机测试。真实 DSH 宿主集成仍需验证插件加载/卸载、Provider 注册、技能发现与正文加载、模型工具可见性、真实工具执行和重启行为。静态测试通过不代表真实宿主集成已经验收。
 
 ## 许可证
 

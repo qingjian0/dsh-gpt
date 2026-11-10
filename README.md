@@ -30,6 +30,7 @@ DSH-GPT 是一个以 Plugin 为运行骨架、Skills 为按需加载工作方法
 | research | 多来源研究、证据分级、交叉验证 |
 | verification | 静态、单元、集成、宿主和交付验收 |
 | error-recovery | 故障分类、根因定位、回归与停止条件 |
+| agent-execution | 完整 Agent 执行循环、迭代、验证和交付 |
 
 每个技能都是独立的 skills/<name>/SKILL.md，使用 DSH 原生 YAML frontmatter。插件的 bundled provider 只发布名称和描述；完整正文在调用时才读取。
 
@@ -50,7 +51,7 @@ DSH-GPT 是一个以 Plugin 为运行骨架、Skills 为按需加载工作方法
 2. 将本包安装到目标 DSH Profile 可加载的插件目录。
 3. 按 cordis.patch.yml 将 Skill Registry、Skill Tool Consumer 和 DSH-GPT 加入同一 Profile。
 4. 可选启用 dsh-skill-filesystem，以便同时发现工作区和用户 Skills。
-5. 启动 DSH，确认可见 skill 工具和六个 bundled skills。
+5. 启动 DSH，确认可见 skill 工具和七个 bundled skills。
 6. 在多步骤任务中检查模型是否先加载匹配 Skill，再执行 DSH 工具。
 
 ## 配置

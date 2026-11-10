@@ -1,70 +1,75 @@
 # DSH-GPT Runtime
 
-一个面向 DeepSeek Harness（DSH）的 GPT 风格工作流插件。基于 DSH 官方 Cordis 插件机制实现，提供可配置的人设提示词、运行配置、任务规划和插件自身的调用统计。
+DSH-GPT 是一个以 Plugin 为运行骨架、Skills 为按需加载工作方法的 DeepSeek Harness 扩展。插件负责系统提示词贡献、技能提供方注册、运行配置和状态工具；技能正文通过 DSH 官方 Skill Registry 与 Skill Tool 按需加载。
 
-> 本项目不提取或复刻 OpenAI 未公开的系统指令、隐藏提示词、私有配置、凭据或隐藏推理过程。项目实现的是独立编写、用户可配置、可审计的功能方案。
+## 设计原则
+
+- **Plugin = Runtime**：注册和生命周期、提示词段落、运行配置、工具与诊断。
+- **Skills = Instructions**：专业工作流程、判断规则、检查清单和交付标准。
+- **DSH = Host**：Agent Loop、模型调用、会话、工具调度、权限和审批。
+- **Tools = Actions**：实际读写文件、访问网络、操作 GitHub 等能力由 DSH 原生工具或其他插件提供。
+
+不复制或替换 DSH Agent Loop，不另造工具调度器，不把 Skill 指令当作权限授权。
 
 ## 当前功能
 
-- **系统提示词扩展**：通过 `ctx.systemPrompt.section()` 将插件自己的行为规范作为独立段落注入 DSH 系统提示词组装。
-- **运行配置**：可配置语言、回答详细度、执行策略提示和自定义行为指令。
-- **运行状态**：查看插件配置、运行时长、插件自身工具调用次数、失败次数和最近调用信息。
-- **提示词查看**：读取本插件实际注册的提示词段落，不读取宿主或其他插件的提示词。
-- **任务规划**：根据目标和约束生成可审查的六阶段执行大纲。
+### Plugin
+- 通过 ctx.systemPrompt.section() 注入独立的 dsh-gpt:persona 提示词段落。
+- 支持中文、回答详细度、执行策略提示和用户自定义行为指令。
+- 通过 ctx.skills.registerProvider() 注册随插件打包的技能库。
+- 提供 gpt_runtime_status、gpt_prompt_profile、gpt_task_plan 三个诊断/规划工具。
+- 只统计本插件工具调用；不采集宿主私有提示词、密钥、Cookie 或隐藏推理。
 
-## 功能边界
+### Bundled Skills
 
-- 插件只注册自己的 `dsh-gpt:persona` 段落，不替换或覆盖宿主完整系统提示词。
-- 运行统计只覆盖本插件注册的工具，不代表 DSH、模型供应商或其他插件的完整调用链路。
-- 任务规划工具只生成计划，不会执行 Shell、网络、文件、GitHub 或其他外部操作。
-- `executionPolicy` 是传递给模型的行为提示，不代替 DSH 宿主权限、审批和安全策略。
-- 不收集密钥、Cookie、会话标识、隐藏提示词或隐藏思维链。
+| Skill | 用途 |
+|---|---|
+| task-planning | 目标拆解、依赖、风险、验收 |
+| tool-orchestration | 工具发现、串并行、权限、结果归并 |
+| code-engineering | 仓库理解、编码、测试、Git 纪律 |
+| research | 多来源研究、证据分级、交叉验证 |
+| verification | 静态、单元、集成、宿主和交付验收 |
+| error-recovery | 故障分类、根因定位、回归与停止条件 |
 
-## DSH 插件规范
+每个技能都是独立的 skills/<name>/SKILL.md，使用 DSH 原生 YAML frontmatter。插件的 bundled provider 只发布名称和描述；完整正文在调用时才读取。
 
-按官方 Cordis 插件结构实现：
+## DSH 原生 Skills 集成
 
-- `name`
-- `inject = ['tools', 'systemPrompt']`
-- `apply(ctx, config)`
-- `ctx.systemPrompt.section(...)`
-- `ctx.tools.register(defineTool(...))`
-- `package.json#dsh.bundle.patch`
+本插件提供 bundled skills，但模型侧的目录与 skill 加载工具由 DSH 官方消费者提供。目标 Profile 需要组合：
 
-提示词段落使用 DSH 的 `DEPLOYMENT_PERSONA_PREFIX` 命名位置确定顺序，插入在部署人设前缀之后。目标 DSH 版本和 Profile 组合仍需在实际宿主中验证。
+- @deepseek-ai/dsh-skill：提供 ctx.skills 注册表。
+- @deepseek-ai/dsh-tool-skill：提供模型可见技能目录和按需加载工具。
+- @deepseek-ai/dsh-skill-filesystem：可选但推荐，发现项目和用户本地 Skills。
+- @dsh-external/dsh-gpt-runtime：本项目插件和内置技能 Provider。
+
+仓库的 cordis.patch.yml 给出组合示例；实际包版本、Profile 插入位置和发布渠道必须按目标 DSH 安装环境验证。
 
 ## 安装与开发
 
-1. 使用目标 DSH 版本所支持的 Node.js 运行环境。
-2. 按目标 Profile 的常规插件流程安装本包。
-3. 将 Bundle 加入指定 Profile 的组合配置。
-4. 启动 Web UI 前先检查组合后的配置。
-5. 启动 DSH，在对话中调用：`gpt_runtime_status`、`gpt_prompt_profile`、`gpt_task_plan`。
-
-本地开发可参考 DSH 官方 scratch-plugin 与 `--patch` 工作流。仓库内的 `cordis.patch.yml` 是示例；实际使用时可能需要按所选 DSH 版本调整插入目标。
+1. 使用目标 DSH 版本支持的 Node.js 运行环境。
+2. 将本包安装到目标 DSH Profile 可加载的插件目录。
+3. 按 cordis.patch.yml 将 Skill Registry、Skill Tool Consumer 和 DSH-GPT 加入同一 Profile。
+4. 可选启用 dsh-skill-filesystem，以便同时发现工作区和用户 Skills。
+5. 启动 DSH，确认可见 skill 工具和六个 bundled skills。
+6. 在多步骤任务中检查模型是否先加载匹配 Skill，再执行 DSH 工具。
 
 ## 配置
 
-查看 `cordis.patch.yml`。插件通过 Schemastery Schema 校验配置并提供默认值。
+| 字段 | 默认值 | 说明 |
+|---|---|---|
+| enabled | true | 启用 Plugin |
+| skillsEnabled | true | 注册内置 Skill Provider |
+| profileName | DSH-GPT 默认配置 | 配置档名称 |
+| language | zh-CN | 输出语言提示 |
+| verbosity | balanced | concise / balanced / detailed |
+| executionPolicy | confirm-sensitive-actions | 行为提示，不替代宿主权限 |
+| promptProfile | 内置中文规范 | 用户自定义行为指令 |
 
-| 配置项 | 作用 |
-|---|---|
-| `enabled` | 是否启用插件 |
-| `profileName` | 配置档名称 |
-| `language` | 默认输出语言 |
-| `verbosity` | 回答详细程度：简洁、平衡、详细 |
-| `executionPolicy` | 执行策略提示：辅助或敏感操作前确认 |
-| `promptProfile` | 用户自定义行为指令，实际注入插件提示词段落 |
+## 验证状态与限制
 
-## 测试
+运行 npm test 执行静态契约测试。正式发布前仍须在真实 DSH 宿主完成插件加载/卸载、技能目录发现、技能正文按需加载、用户显式调用、Profile 提示词顺序和模型可见工具等集成验收。
 
-运行：
-
-```sh
-npm test
-```
-
-当前包含静态插件契约测试。正式发布前仍需在真实 DSH 宿主中完成插件加载、卸载、提示词组装和工具调用集成测试。
+静态测试通过不代表真实宿主集成已经验收。
 
 ## 许可证
 

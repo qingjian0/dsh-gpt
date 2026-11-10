@@ -1,65 +1,62 @@
 # DSH-GPT Runtime 架构
 
-## 目标
+## 架构定位
 
-基于 DSH 官方插件接口实现一套原生、可配置、可审计的 GPT 风格助手工作流，不依赖 OpenAI 私有内部实现。
+采用 Plugin + Skills 混合方案，但不自建第二套 Agent Runtime。
 
-## 分层
+| 层 | 职责 | 实现归属 |
+|---|---|---|
+| Host Runtime | Agent Loop、模型请求、Session、权限、工具调度 | DSH |
+| DSH-GPT Plugin | 提示词段落、配置、Skill Provider、诊断工具 | 本仓库 |
+| Skill Registry | Provider 合并、作用域、优先级、按需读取 | @deepseek-ai/dsh-skill |
+| Skill Consumer | 会话技能目录、模型侧 skill 工具、显式命令 | @deepseek-ai/dsh-tool-skill |
+| Local Skill Provider | 项目/用户目录发现和变更监控 | @deepseek-ai/dsh-skill-filesystem |
+| Bundled Skills | 专业工作流程和检查清单 | 本仓库 skills/*/SKILL.md |
+| Action Tools | 文件、网络、GitHub、终端等实际操作 | DSH 原生工具或其他插件 |
 
-1. **DSH 宿主运行时**：负责模型供应商、会话生命周期、工具调度、权限策略和插件生命周期。
-2. **DSH-GPT 插件**：贡献独立人设段落、任务规划契约和插件自身的运行统计工具。
-3. **模型**：理解用户请求，根据当前提示词和可用工具 Schema 决定是否调用工具，并整合工具结果。
-4. **外部能力**：由独立 DSH 工具或插件提供，只能通过注册接口和宿主策略调用。
+## 请求执行流程
 
-## 请求与执行流程
+1. DSH 接收用户消息并进入 Agent Loop。
+2. DSH 组装全局与当前作用域的 System Prompt；本插件通过 ctx.systemPrompt.section() 贡献 dsh-gpt:persona。
+3. DSH Skill Consumer 观察当前工作目录下的 Skill Registry，并把可用技能名称和简短描述加入会话上下文。
+4. 模型根据用户目标和技能描述判断是否需要某项技能。
+5. 模型调用官方 skill 工具，Registry 从胜出的 Provider 读取该技能的完整正文。
+6. 模型按技能中的工作方法分析任务，并选择可用的 DSH 工具。
+7. DSH 校验工具参数、权限和调用范围，再执行工具。
+8. 工具结果返回模型；模型继续下一步、加载其他技能或形成最终答复。
+9. 验收阶段通过独立工具/测试检查结果，向用户报告证据与未完成项。
 
-1. DSH Agent Loop 认领排队的用户请求，并在 Session Log 中开启轮次。
-2. DSH System Prompt 服务组装全局和当前作用域的系统提示词段落。
-3. 模型接收组装后的提示词、对话历史和可用工具 Schema。
-4. 模型判断是否需要工具，并生成符合参数 Schema 的调用参数。
-5. DSH 校验并通过受保护的 Tool Registry 执行工具调用。
-6. 工具的 `execute` 函数执行具体逻辑。
-7. `output.render` 将规范化结果转换为模型可读内容。
-8. DSH 将模型可见事实写入 Session Log；模型可继续下一步工具调用，也可生成最终回复。
+## Bundled Skill Provider
 
-以上描述基于 DSH 公开架构与插件契约，不代表复刻 ChatGPT 的私有内部调度流程。
+src/skills-provider.js 实现官方 SkillProvider 契约：
 
-## 系统提示词与配置
+- Provider 在插件 apply() 阶段同步注册到 ctx.skills。
+- list() 只返回 SkillCandidate 元数据，不读取技能正文。
+- get() 根据 Registry 选中的 candidate 读取对应 SKILL.md。
+- 技能使用 kebab-case 名称，来源标记为 bundled，优先级使用 DSH 的 BUNDLED_SKILL_RANK。
+- 读取遵循调用方 AbortSignal；Provider 的注册生命周期由 Cordis 管理。
+- 正文中的相对资源以技能目录作为 resourceBase。
 
-- `promptProfile` 是用户拥有和维护的插件行为指令。
-- 插件将它与语言、回答详细度、执行策略提示组合成 `dsh-gpt:persona` 段落。
-- 通过 `ctx.systemPrompt.section()` 注册，顺序位于 DSH 的 `DEPLOYMENT_PERSONA_PREFIX` 之后。
-- 插件不注册 `complete` 段落，不会替换宿主或其他插件的提示词。
-- 提示词查看工具只返回本插件自己的配置内容。
-- 执行策略字段只作为模型行为提示，实际权限仍由 DSH 宿主控制。
+## Skills 目录规范
 
-## 可观测性
+DSH 本地 Skill Provider 接受 <name>/SKILL.md 或顶层 <name>.md，要求 YAML frontmatter 中有 name 和 description。本仓库使用目录 Bundle 形式，每个技能只承担一个相对独立的工作方法。
 
-当前只记录：
-- 插件工具调用次数；
-- 插件工具失败次数；
-- 最近调用的工具名称；
-- 最近调用时间；
-- 插件实例启动时间。
+## 提示词与职责边界
 
-明确不记录：
-- 隐藏推理过程；
-- 模型供应商私有请求/响应负载；
-- 凭据、Cookie、会话标识；
-- 用户未明确提供给本插件的其他提示词内容。
+- dsh-gpt:persona 是本插件自己的附加提示词段落，不覆盖 DSH 或其他插件段落。
+- 技能正文按需加载，不把全部技能全文塞入常驻系统提示词。
+- Skill 是指令，不是工具，也不是授权。
+- Plugin 不覆盖 DSH Agent Loop、不绕过权限，也不直接执行外部副作用。
+- executionPolicy 只是模型行为指导；宿主权限、审批和工具策略始终有效。
 
-## 安全原则
+## 可观测性边界
 
-- DSH 宿主权限和策略始终具有最终控制权。
-- 不隐式增加 Shell、网络或文件系统访问能力。
-- 不记录密钥和完整对话内容。
-- 用户配置的提示词视为普通输入，不能覆盖宿主安全策略。
-- 不可逆或敏感操作必须经过明确授权。
+当前插件计数仅覆盖本插件注册的工具调用。它不是完整的模型请求追踪、宿主 Agent Loop 事件流或其他插件调用记录。后续若扩展 tracing，应优先消费 DSH 公开事件和日志接口，并避免采集凭据、完整私有负载或隐藏推理。
 
 ## 后续路线
 
-- [ ] 在目标 DSH 版本验证 Bundle Manifest 和 Patch 组合。
-- [ ] 增加真实宿主的加载/卸载集成测试。
-- [ ] 在确认上下文数据契约与作用域要求后，增加可选动态上下文提供方。
-- [ ] 仅在目标 DSH 版本提供稳定事件名称和载荷 Schema 时，增加结构化生命周期事件。
-- [ ] 增加不收集私有对话数据的运维诊断能力。
+- [ ] 真实 DSH Profile 集成测试与发布包验收。
+- [ ] 增加 Skill 加载与命中统计（仅记录名称、时间和状态，不记录完整内容）。
+- [ ] 接入 DSH 公开 Agent 生命周期事件，构建可观测执行 Trace。
+- [ ] 基于 DSH 已有 Context/Session 能力完善上下文管理，不另建冲突状态源。
+- [ ] 如需长期记忆，先评估 DSH 原生 Memory/World State 能力，再决定是否扩展。

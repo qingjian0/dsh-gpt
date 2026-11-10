@@ -40,7 +40,7 @@ export function apply(ctx, config) {
     lastTool: null,
     lastCallAt: null,
   }
-  const workflowStore = createTaskStateStore()
+  const taskStateStore = createTaskStateStore()
 
   function recordCall(toolName, failed = false) {
     counters.calls += 1
@@ -73,7 +73,7 @@ export function apply(ctx, config) {
     '【执行边界】',
     '操作策略字段是行为提示，不代替 DSH 宿主的权限、审批和安全策略；宿主策略始终具有最终控制权。',
     '不得将未执行的操作描述为已完成；验证失败时必须明确报告。',
-    '工作流状态仅保存在当前插件进程内，重启后不会自动恢复；外部副作用和任务执行仍由 DSH 宿主工具负责。',
+    '任务状态记录仅保存在当前插件进程内，重启后不会自动恢复；外部副作用和任务执行仍由 DSH 宿主工具负责。',
   ].join('\n')
 
   ctx.systemPrompt.section({
@@ -118,7 +118,7 @@ export function apply(ctx, config) {
         skillsEnabled: Boolean(config.skillsEnabled),
         bundledSkills: config.skillsEnabled ? bundledSkillNames : [],
         modes: MODES.map(({ id, label }) => ({ id, label })),
-        activeWorkflows: workflowStore.list(),
+        activeTasks: taskStateStore.list(),
         promptSectionOrder: 100,
         uptimeSeconds: Math.floor((Date.now() - counters.startedAt) / 1000),
         calls: counters.calls,
@@ -191,7 +191,7 @@ export function apply(ctx, config) {
 
   register({
     name: 'gpt_task_state_start',
-    description: '为复杂任务建立可追踪工作流，自动路由或按用户指定模式启动。',
+    description: '为复杂任务建立可追踪任务阶段记录，自动路由或按用户指定模式启动。',
     parameters: {
       id: { type: 'string', required: true, description: '当前任务唯一 ID。' },
       objective: { type: 'string', required: true, description: '任务目标。' },
@@ -201,18 +201,18 @@ export function apply(ctx, config) {
     },
     output,
     async execute({ id, objective, constraints = '', mode = config.defaultMode, complexity = 'auto' }) {
-      return asText(workflowStore.create({ id: String(id).trim(), objective, constraints, mode, complexity }))
+      return asText(taskStateStore.create({ id: String(id).trim(), objective, constraints, mode, complexity }))
     },
   })
 
   register({
     name: 'gpt_task_state_status',
-    description: '读取一个工作流或列出当前进程中的工作流状态。',
+    description: '读取一个任务状态记录或列出当前插件上下文中的任务。',
     parameters: { id: { type: 'string', description: '工作流 ID；不填则列出全部。' } },
     output,
     async execute({ id } = {}) {
-      if (!id) return asText(workflowStore.list())
-      const workflow = workflowStore.get(id)
+      if (!id) return asText(taskStateStore.list())
+      const workflow = taskStateStore.get(id)
       if (!workflow) throw new Error('未找到该工作流')
       return asText(workflow)
     },
@@ -220,7 +220,7 @@ export function apply(ctx, config) {
 
   register({
     name: 'gpt_task_state_advance',
-    description: '推进工作流阶段；只允许合法阶段转换，verify 阶段可返回 execute 修正。',
+    description: '推进任务阶段；只允许合法阶段转换，verify 阶段可返回 execute 修正。',
     parameters: {
       id: { type: 'string', required: true, description: '工作流 ID。' },
       phase: { type: 'string', required: true, enum: ['inspect', 'plan', 'execute', 'verify', 'deliver'], description: '下一阶段。' },
@@ -228,13 +228,13 @@ export function apply(ctx, config) {
     },
     output,
     async execute({ id, phase, note = '' }) {
-      return asText(workflowStore.transition(id, phase, note))
+      return asText(taskStateStore.transition(id, phase, note))
     },
   })
 
   register({
     name: 'gpt_task_state_update',
-    description: '向工作流追加可审查的决策摘要、证据、阻塞项或验收标准；不收集隐藏思维链。',
+    description: '向任务记录追加可审查的决策摘要、证据、阻塞项或验收标准；不收集隐藏思维链。',
     parameters: {
       id: { type: 'string', required: true, description: '工作流 ID。' },
       decisionSummary: { type: 'array', items: { type: 'string' }, description: '简短决策摘要，不是逐字思维链。' },
@@ -244,13 +244,13 @@ export function apply(ctx, config) {
     },
     output,
     async execute({ id, ...patch }) {
-      return asText(workflowStore.update(id, patch))
+      return asText(taskStateStore.update(id, patch))
     },
   })
 
   register({
     name: 'gpt_task_state_finish',
-    description: '结束工作流。completed 仅允许在 deliver 阶段；其他状态用于明确记录阻塞、失败或取消。',
+    description: '结束任务记录。completed 仅允许在 deliver 阶段；其他状态用于明确记录阻塞、失败或取消。',
     parameters: {
       id: { type: 'string', required: true, description: '工作流 ID。' },
       outcome: { type: 'string', required: true, enum: ['completed', 'blocked', 'failed', 'cancelled'], description: '工作流结束状态。' },
@@ -258,7 +258,7 @@ export function apply(ctx, config) {
     },
     output,
     async execute({ id, outcome, summary = '' }) {
-      return asText(workflowStore.finish(id, { outcome, summary }))
+      return asText(taskStateStore.finish(id, { outcome, summary }))
     },
   })
 }

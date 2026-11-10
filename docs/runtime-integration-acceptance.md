@@ -3,16 +3,19 @@
 本清单区分静态代码测试与真实 DSH 宿主验收。完成静态测试不得自动勾选宿主集成项目。
 
 ## A. 包与插件生命周期
-- [ ] 使用 Node.js 24 安装/解析插件包。
+- [ ] 使用 Node.js >=24.9.0 安装/解析插件包。
+- [ ] 检查 DSH >=0.2.2-rc.1 且 <0.3.0 的兼容范围。
 - [ ] DSH Profile 能解析 manifest 与 cordis.patch.yml。
 - [ ] Plugin 正常加载，所有 inject 服务均可用。
-- [ ] Plugin 卸载时 Provider、工具和提示词段落被正确清理。
+- [ ] Plugin 卸载时 Provider、工具和提示词段落被正确清理（注册 disposer 由 Cordis Context 生命周期管理）。
+- [ ] 两个不同 Cordis Context 分别加载插件时，工作流与计数器状态完全隔离。
 - [ ] 重复加载/卸载不会产生重复工具或重复 Provider。
 
 ## B. Skills
 - [ ] Skill Registry 中发现全部 7 个 bundled skills。
 - [ ] list() 只返回候选元数据，不提前读取正文。
-- [ ] 模型可通过官方 skill 工具按需加载完整正文。
+- [ ] 模型可通过官方 skill 工具按需加载完整正文（不包含 YAML frontmatter）。
+- [ ] SkillCandidate 的 URL locator、rank、invocation、provider、source、resourceBase 均符合官方契约；SkillDefinition 不包含 rank/locator。
 - [ ] AbortSignal 取消加载时能及时停止。
 - [ ] 本地 filesystem Provider 与 bundled Provider 共存，优先级符合 DSH 规则。
 

@@ -2,12 +2,12 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   MODES,
-  createWorkflow,
-  transitionWorkflow,
-  updateWorkflow,
-  finishWorkflow,
+  createTaskState,
+  transitionTaskState,
+  updateTaskState,
+  finishTaskState,
   routeMode,
-  createWorkflowStore,
+  createTaskStateStore,
 } from '../src/runtime-core.js'
 
 test('registers a complete set of user-facing execution modes', () => {
@@ -25,22 +25,22 @@ test('adaptive routing selects specialist modes from task intent', () => {
 })
 
 test('workflow enforces ordered execution and independent verification', () => {
-  let flow = createWorkflow({ id: 't1', objective: '实现功能' })
-  assert.throws(() => transitionWorkflow(flow, 'execute'), /非法阶段转换/)
-  flow = transitionWorkflow(flow, 'inspect')
-  flow = transitionWorkflow(flow, 'plan')
-  flow = updateWorkflow(flow, { acceptanceCriteria: ['测试通过'] })
-  flow = transitionWorkflow(flow, 'execute')
-  flow = transitionWorkflow(flow, 'verify')
-  assert.throws(() => finishWorkflow(flow, { outcome: 'completed' }), /deliver/)
-  flow = transitionWorkflow(flow, 'deliver')
-  flow = finishWorkflow(flow, { outcome: 'completed', summary: '已验收' })
+  let flow = createTaskState({ id: 't1', objective: '实现功能' })
+  assert.throws(() => transitionTaskState(flow, 'execute'), /非法阶段转换/)
+  flow = transitionTaskState(flow, 'inspect')
+  flow = transitionTaskState(flow, 'plan')
+  flow = updateTaskState(flow, { acceptanceCriteria: ['测试通过'] })
+  flow = transitionTaskState(flow, 'execute')
+  flow = transitionTaskState(flow, 'verify')
+  assert.throws(() => finishTaskState(flow, { outcome: 'completed' }), /deliver/)
+  flow = transitionTaskState(flow, 'deliver')
+  flow = finishTaskState(flow, { outcome: 'completed', summary: '已验收' })
   assert.equal(flow.status, 'completed')
   assert.equal(flow.acceptanceCriteria.length, 1)
 })
 
 test('workflow store isolates task state and rejects duplicate IDs', () => {
-  const store = createWorkflowStore()
+  const store = createTaskStateStore()
   store.create({ id: 'a', objective: '任务 A' })
   assert.throws(() => store.create({ id: 'a', objective: '重复' }), /已存在/)
   assert.throws(() => store.create({ id: ' a ', objective: '空白绕过重复检查' }), /已存在/)

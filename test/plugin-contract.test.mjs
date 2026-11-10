@@ -13,6 +13,20 @@ test('plugin declares DSH tools, system prompt, and skills services', async () =
   assert.match(source, /interpolate: false/)
 })
 
+test('plugin exposes mode and stateful workflow tools', async () => {
+  const source = await readFile(new URL('src/index.js', root), 'utf8')
+  for (const tool of [
+    'gpt_mode_list',
+    'gpt_workflow_start',
+    'gpt_workflow_status',
+    'gpt_workflow_advance',
+    'gpt_workflow_update',
+    'gpt_workflow_finish',
+  ]) assert.match(source, new RegExp(`name: '${tool}'`))
+  assert.match(source, /createWorkflowStore\(\)/)
+  assert.match(source, /defaultMode:/)
+})
+
 test('bundled provider follows the DSH SkillProvider contract', async () => {
   const source = await readFile(new URL('src/skills-provider.js', root), 'utf8')
   assert.match(source, /BUNDLED_SKILL_RANK/)
@@ -42,8 +56,9 @@ test('all bundled skills have valid frontmatter and matching kebab-case names', 
   }
 })
 
-test('package includes skill assets and DSH skill peer dependencies', async () => {
+test('package includes runtime, skill assets, and DSH skill peer dependencies', async () => {
   const pkg = JSON.parse(await readFile(new URL('package.json', root), 'utf8'))
+  assert.ok(pkg.files.includes('src'))
   assert.ok(pkg.files.includes('skills'))
   assert.ok(pkg.peerDependencies['@deepseek-ai/dsh-skill'])
   assert.ok(pkg.peerDependencies['@deepseek-ai/dsh-tool-skill'])

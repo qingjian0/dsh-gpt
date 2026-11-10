@@ -6,7 +6,7 @@ export const inject = ['tools', 'systemPrompt']
 
 export const Config = Schema.object({
   enabled: Schema.boolean().default(true),
-  profileName: Schema.string().default('DSH-GPT Default'),
+  profileName: Schema.string().default('DSH-GPT 默认配置'),
   language: Schema.string().default('zh-CN'),
   verbosity: Schema.union(['concise', 'balanced', 'detailed']).default('balanced'),
   executionPolicy: Schema.union(['assist', 'confirm-sensitive-actions']).default('confirm-sensitive-actions'),
@@ -37,12 +37,27 @@ function asText(value) {
 export function apply(ctx, config) {
   if (!config.enabled) return
 
+  const promptText = [
+    '【DSH-GPT 运行配置】',
+    `配置档：${config.profileName}`,
+    `输出语言：${config.language}`,
+    `回答详细度：${config.verbosity}`,
+    `操作策略提示：${config.executionPolicy}`,
+    '',
+    '【用户配置的行为指令】',
+    config.promptProfile,
+    '',
+    '【执行边界】',
+    '操作策略字段是行为提示，不代替 DSH 宿主的权限、审批和安全策略；宿主策略始终具有最终控制权。',
+    '不得将未执行的操作描述为已完成；验证失败时必须明确报告。',
+  ].join('\n')
+
   // Register an additive persona section in DSH's real system-prompt assembly.
   // Keep it after the deployment persona prefix and before first-party policy sections.
   ctx.systemPrompt.section({
     name: 'dsh-gpt:persona',
     order: ctx.systemPrompt.getSectionOrder('DEPLOYMENT_PERSONA_PREFIX') + 1,
-    text: config.promptProfile,
+    text: promptText,
   })
 
   const register = (definition) => {
@@ -64,7 +79,7 @@ export function apply(ctx, config) {
 
   register({
     name: 'gpt_runtime_status',
-    description: 'Show the DSH-GPT plugin configuration and plugin-local execution counters. Does not expose hidden host prompts or private runtime state.',
+    description: '显示 DSH-GPT 插件配置和本插件工具调用计数；不读取宿主隐藏提示词或私有运行时数据。',
     parameters: {},
     output: {
       schema: { type: 'string' },
@@ -84,14 +99,14 @@ export function apply(ctx, config) {
         failures: counters.failures,
         lastTool: counters.lastTool,
         lastCallAt: counters.lastCallAt,
-        scope: 'This report covers calls handled by this plugin instance only.',
+        scope: '仅统计本插件实例注册的工具调用。',
       })
     },
   })
 
   register({
     name: 'gpt_prompt_profile',
-    description: 'Return the DSH-GPT prompt profile registered as an additive system-prompt section. Does not read or reveal other plugins’ or the host’s private prompt sections.',
+    description: '读取本插件实际注册到 DSH 系统提示词组装中的配置段落；不读取其他插件或宿主的提示词。',
     parameters: {},
     output: {
       schema: { type: 'string' },
@@ -104,24 +119,24 @@ export function apply(ctx, config) {
         verbosity: config.verbosity,
         executionPolicy: config.executionPolicy,
         promptSection: 'dsh-gpt:persona',
-        promptProfile: config.promptProfile,
-        injection: 'Registered through ctx.systemPrompt.section() and included in DSH prompt assembly.',
+        effectivePluginPrompt: promptText,
+        injection: '通过 ctx.systemPrompt.section() 注册，并参与 DSH 系统提示词组装。',
       })
     },
   })
 
   register({
     name: 'gpt_task_plan',
-    description: 'Create a transparent, reviewable task execution outline from an objective and constraints. Planning only; it does not execute external actions.',
+    description: '根据目标和约束生成透明、可审查的任务执行大纲；只做规划，不执行外部操作。',
     parameters: {
       objective: {
         type: 'string',
         required: true,
-        description: 'The outcome the user wants to achieve.',
+        description: '用户希望达成的结果。',
       },
       constraints: {
         type: 'string',
-        description: 'Known limits, preferences, deadlines, and safety requirements.',
+        description: '已知限制、偏好、期限和安全要求。',
       },
     },
     output: {
@@ -130,10 +145,10 @@ export function apply(ctx, config) {
     },
     async execute({ objective, constraints = '' }) {
       const safeObjective = String(objective).trim()
-      if (!safeObjective) throw new Error('objective must not be empty')
+      if (!safeObjective) throw new Error('objective 不能为空')
       return asText({
         objective: safeObjective,
-        constraints: String(constraints).trim() || 'No additional constraints supplied.',
+        constraints: String(constraints).trim() || '未提供额外约束。',
         stages: [
           { id: 1, name: '理解与拆解', action: '明确目标、边界、输入和验收标准。' },
           { id: 2, name: '信息与能力检查', action: '确认可用上下文、工具、权限和依赖；标记未知项。' },
@@ -143,7 +158,7 @@ export function apply(ctx, config) {
           { id: 6, name: '交付', action: '报告完成项、未完成项、风险和可复现证据。' },
         ],
         executionPolicy: config.executionPolicy,
-        note: 'This tool produces a plan only. Actual actions must use separately authorized DSH tools.',
+        note: '此工具只生成计划；实际操作必须通过单独授权的 DSH 工具执行。',
       })
     },
   })

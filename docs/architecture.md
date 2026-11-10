@@ -65,7 +65,7 @@ understand -> inspect -> plan -> execute -> verify -> deliver
 ## 请求执行流程
 
 1. DSH 接收用户消息并进入 Agent Loop。
-2. DSH 组装全局与当前作用域的 System Prompt；本插件通过 ctx.systemPrompt.section() 贡献 dsh-gpt:persona。
+2. DSH 组装全局与当前作用域的 System Prompt；本插件通过 `ctx.systemPrompt.section()` 以外部扩展顺序 100 贡献 dsh-gpt:persona（persona prefix 为 0，first-party plan policy 为 500）。
 3. 对复杂任务，模型使用 gpt_mode_list 选择工作模式，并调用 gpt_workflow_start 建立状态。
 4. 模型按 understand → inspect → plan → execute → verify → deliver 推进；必要时从 verify 回到 execute。
 5. DSH Skill Consumer 暴露技能目录；模型按需调用官方 skill 工具加载完整正文。
@@ -78,11 +78,11 @@ understand -> inspect -> plan -> execute -> verify -> deliver
 ## Bundled Skill Provider
 
 src/skills-provider.js 实现官方 SkillProvider 契约：
-- Provider 在插件 apply() 阶段同步注册到 ctx.skills。
-- list() 只返回 SkillCandidate 元数据，不读取技能正文。
-- get() 根据 Registry 选中的 candidate 读取对应 SKILL.md。
-- 技能使用 kebab-case 名称，来源标记为 bundled，优先级使用 DSH 的 BUNDLED_SKILL_RANK。
-- 读取遵循调用方 AbortSignal；Provider 的注册生命周期由 Cordis 管理。
+- Provider 在插件 apply() 阶段通过 `ctx.skills.registerProvider(() => provider)` 同步注册；注册生命周期归当前 Cordis Context 管理。
+- list() 返回完整 SkillCandidate：kebab-case name、description、whenToUse、invocation、provider、source、rank、URL locator 和目录 resourceBase；不读取正文。
+- get() 校验候选项归属，按需读取 URL locator，遵循调用方 AbortSignal。
+- get() 必须返回 SkillDefinition 的纯正文 content；本项目使用 stripSkillFrontmatter() 移除 YAML frontmatter。
+- 不把 candidate 的 rank/locator 泄漏到 SkillDefinition；返回 invocation、provider、source 和 resourceBase。
 - 正文中的相对资源以技能目录作为 resourceBase。
 
 ## 提示词与职责边界
@@ -96,7 +96,7 @@ src/skills-provider.js 实现官方 SkillProvider 契约：
 
 ## 状态与可观测性边界
 
-- 当前工作流存储在插件进程内存；插件或 DSH 重启后不持久化。
+- 工作流存储与工具计数器均在每个 apply(ctx, config) 调用内部创建，避免不同 Cordis scope 共享状态；仍只保存在插件进程内存，插件或 DSH 重启后不持久化。
 - 插件计数仅覆盖本插件注册的工具调用，不是完整模型请求或宿主 Agent Loop Trace。
 - 后续持久化应优先接入 DSH Session/Memory/State 公开接口，避免创建冲突状态源。
 - 追踪应只记录工具名、时间、状态、阶段和证据引用，不记录凭据、完整私有负载或隐藏推理。
@@ -104,7 +104,9 @@ src/skills-provider.js 实现官方 SkillProvider 契约：
 ## 后续集成验收
 
 - [ ] 真实 DSH Profile 插件加载/卸载。
-- [ ] 七个 bundled Skills 被发现且正文按需读取。
+- [ ] 七个 bundled Skills 被发现且正文按需读取，返回内容不含 YAML frontmatter。
+- [ ] Provider candidate 使用有效 URL locator 和 directory resourceBase，get() 返回完整 SkillDefinition。
+- [ ] 两个独立 Cordis Context 的工作流与工具计数器互相隔离。
 - [ ] gpt_mode_list 和全部工作流工具在模型侧可见。
 - [ ] 模式选择与状态机在真实任务中按预期工作。
 - [ ] 宿主工具权限、审批和失败处理不被绕过。

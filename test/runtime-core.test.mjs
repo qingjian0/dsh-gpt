@@ -24,7 +24,7 @@ test('adaptive routing selects specialist modes from task intent', () => {
   assert.equal(routeMode({ objective: '简单问候', complexity: 'low' }).id, 'fast')
 })
 
-test('workflow enforces ordered execution and independent verification', () => {
+test('task state enforces ordered execution and independent verification', () => {
   let flow = createTaskState({ id: 't1', objective: '实现功能' })
   assert.throws(() => transitionTaskState(flow, 'execute'), /非法阶段转换/)
   flow = transitionTaskState(flow, 'inspect')
@@ -39,7 +39,7 @@ test('workflow enforces ordered execution and independent verification', () => {
   assert.equal(flow.acceptanceCriteria.length, 1)
 })
 
-test('workflow store isolates task state and rejects duplicate IDs', () => {
+test('task state store isolates task state and rejects duplicate IDs', () => {
   const store = createTaskStateStore()
   store.create({ id: 'a', objective: '任务 A' })
   assert.throws(() => store.create({ id: 'a', objective: '重复' }), /已存在/)

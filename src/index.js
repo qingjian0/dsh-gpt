@@ -23,7 +23,6 @@ function asText(value) {
   return typeof value === 'string' ? value : JSON.stringify(value, null, 2)
 }
 
-const workflowStore = createWorkflowStore()
 const output = {
   schema: { type: 'string' },
   render: (_args, value) => [{ type: 'text', text: value }],

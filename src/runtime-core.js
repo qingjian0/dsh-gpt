@@ -1,4 +1,4 @@
-export const WORKFLOW_PHASES = [
+export const TASK_PHASES = [
   'understand', 'inspect', 'plan', 'execute', 'verify', 'deliver',
 ]
 
@@ -45,7 +45,7 @@ export function routeMode({ objective = '', requestedMode = 'adaptive', complexi
   return getMode('adaptive')
 }
 
-export function createWorkflow({ id, objective, constraints = '', mode = 'adaptive', complexity = 'auto' }) {
+export function createTaskState({ id, objective, constraints = '', mode = 'adaptive', complexity = 'auto' }) {
   if (!String(id ?? '').trim()) throw new Error('workflow id 不能为空')
   if (!String(objective ?? '').trim()) throw new Error('objective 不能为空')
   if (mode !== 'adaptive' && !getMode(mode)) throw new Error(`未知工作模式：${mode}`)
@@ -70,7 +70,7 @@ export function createWorkflow({ id, objective, constraints = '', mode = 'adapti
   }
 }
 
-export function transitionWorkflow(workflow, nextPhase, note = '') {
+export function transitionTaskState(workflow, nextPhase, note = '') {
   if (!workflow || workflow.status !== 'active') throw new Error('工作流不存在或已结束')
   if (!TRANSITIONS[workflow.phase]?.includes(nextPhase)) {
     throw new Error(`非法阶段转换：${workflow.phase} -> ${nextPhase}`)
@@ -84,7 +84,7 @@ export function transitionWorkflow(workflow, nextPhase, note = '') {
   }
 }
 
-export function updateWorkflow(workflow, patch = {}) {
+export function updateTaskState(workflow, patch = {}) {
   if (!workflow || workflow.status !== 'active') throw new Error('工作流不存在或已结束')
   const allowed = ['decisionSummary', 'evidence', 'blockers', 'acceptanceCriteria']
   const next = { ...workflow }
@@ -98,7 +98,7 @@ export function updateWorkflow(workflow, patch = {}) {
   return next
 }
 
-export function finishWorkflow(workflow, { outcome = 'completed', summary = '' } = {}) {
+export function finishTaskState(workflow, { outcome = 'completed', summary = '' } = {}) {
   if (!workflow || workflow.status !== 'active') throw new Error('工作流不存在或已结束')
   if (outcome === 'completed' && workflow.phase !== 'deliver') {
     throw new Error('只有进入 deliver 阶段后才能标记完成；请先完成独立验证和交付')
@@ -114,14 +114,14 @@ export function finishWorkflow(workflow, { outcome = 'completed', summary = '' }
   }
 }
 
-export function createWorkflowStore() {
+export function createTaskStateStore() {
   const workflows = new Map()
   return {
     create(input) {
       const id = String(input.id ?? '').trim()
       if (!id) throw new Error('workflow id 不能为空')
       if (workflows.has(id)) throw new Error('工作流 ID 已存在')
-      const workflow = createWorkflow({ ...input, id })
+      const workflow = createTaskState({ ...input, id })
       workflows.set(workflow.id, workflow)
       return workflow
     },
@@ -129,17 +129,17 @@ export function createWorkflowStore() {
       return workflows.get(id) ?? null
     },
     transition(id, phase, note) {
-      const updated = transitionWorkflow(workflows.get(id), phase, note)
+      const updated = transitionTaskState(workflows.get(id), phase, note)
       workflows.set(id, updated)
       return updated
     },
     update(id, patch) {
-      const updated = updateWorkflow(workflows.get(id), patch)
+      const updated = updateTaskState(workflows.get(id), patch)
       workflows.set(id, updated)
       return updated
     },
     finish(id, options) {
-      const updated = finishWorkflow(workflows.get(id), options)
+      const updated = finishTaskState(workflows.get(id), options)
       workflows.set(id, updated)
       return updated
     },

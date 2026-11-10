@@ -1,11 +1,13 @@
 import Schema from '@deepseek-ai/schemastery'
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import { registerBundledSkills, bundledSkillNames } from './skills-provider.js'
 
 export const name = 'dsh-gpt-runtime'
-export const inject = ['tools', 'systemPrompt']
+export const inject = ['tools', 'systemPrompt', 'skills']
 
 export const Config = Schema.object({
   enabled: Schema.boolean().default(true),
+  skillsEnabled: Schema.boolean().default(true),
   profileName: Schema.string().default('DSH-GPT 默认配置'),
   language: Schema.string().default('zh-CN'),
   verbosity: Schema.union(['concise', 'balanced', 'detailed']).default('balanced'),
@@ -37,6 +39,8 @@ function asText(value) {
 export function apply(ctx, config) {
   if (!config.enabled) return
 
+  if (config.skillsEnabled) registerBundledSkills(ctx)
+
   const promptText = [
     '【DSH-GPT 运行配置】',
     `配置档：${config.profileName}`,
@@ -47,6 +51,8 @@ export function apply(ctx, config) {
     '【用户配置的行为指令】',
     config.promptProfile,
     '',
+    '【技能使用规则】',
+    '遇到复杂任务时先查看可用 Skills；选择匹配技能后，必须先通过 DSH 的 skill 工具加载完整指令，再按其流程工作。技能是方法指导，不是权限授权；实际操作仍须使用宿主提供并授权的工具。',
     '【执行边界】',
     '操作策略字段是行为提示，不代替 DSH 宿主的权限、审批和安全策略；宿主策略始终具有最终控制权。',
     '不得将未执行的操作描述为已完成；验证失败时必须明确报告。',
@@ -94,6 +100,8 @@ export function apply(ctx, config) {
         verbosity: config.verbosity,
         executionPolicy: config.executionPolicy,
         promptSection: 'dsh-gpt:persona',
+        skillsEnabled: Boolean(config.skillsEnabled),
+        bundledSkills: config.skillsEnabled ? bundledSkillNames : [],
         promptSectionOrder: ctx.systemPrompt.getSectionOrder('DEPLOYMENT_PERSONA_PREFIX') + 1,
         uptimeSeconds: Math.floor((Date.now() - counters.startedAt) / 1000),
         calls: counters.calls,
@@ -120,6 +128,8 @@ export function apply(ctx, config) {
         verbosity: config.verbosity,
         executionPolicy: config.executionPolicy,
         promptSection: 'dsh-gpt:persona',
+        skillsEnabled: Boolean(config.skillsEnabled),
+        bundledSkills: config.skillsEnabled ? bundledSkillNames : [],
         effectivePluginPrompt: promptText,
         injection: '通过 ctx.systemPrompt.section() 注册，并参与 DSH 系统提示词组装。',
       })

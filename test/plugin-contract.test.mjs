@@ -13,11 +13,11 @@ test('plugin declares DSH tools, system prompt, and skills services', async () =
   assert.match(source, /registerBundledSkills\(ctx\)/)
   assert.match(source, /interpolate: false/)
   assert.match(source, /order: 100/)
-  assert.ok(source.indexOf('const workflowStore = createTaskStateStore()') > source.indexOf('export function apply'))
+  assert.ok(source.indexOf('const taskStateStore = createTaskStateStore()') > source.indexOf('export function apply'))
   assert.ok(source.indexOf('const counters = {') > source.indexOf('export function apply'))
 })
 
-test('plugin exposes mode and stateful workflow tools with constrained parameters', async () => {
+test('plugin exposes mode and stateful task state tools with constrained parameters', async () => {
   const source = await readFile(new URL('src/index.js', root), 'utf8')
   for (const tool of ['gpt_mode_list', 'gpt_task_state_start', 'gpt_task_state_status', 'gpt_task_state_advance', 'gpt_task_state_update', 'gpt_task_state_finish']) {
     assert.match(source, new RegExp("name: '" + tool + "'"))

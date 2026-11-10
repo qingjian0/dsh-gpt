@@ -62,7 +62,7 @@ export function apply(ctx, config) {
     '【用户配置的行为指令】',
     config.promptProfile,
     '',
-    '【模式与工作流】',
+    '【模式与任务状态】',
     '开始复杂任务前，先使用 gpt_mode_list 确认模式，按用户指定模式执行；用户未指定时使用自适应路由。用 gpt_task_state_start 建立轻量任务阶段记录，并按 understand → inspect → plan → execute → verify → deliver 推进；允许 verify → execute 回退修正。',
     '简单问答不必强行启动任务状态记录。极速模式减少非必要步骤，但不得省略必要核验；严格验证模式必须以独立证据验收。批量/并行模式只并行无依赖且互不冲突的任务。',
     '需要多个 subagent 的大型并行编排时，使用 DSH 原生 workflow 工具（dsh-tool-workflow / ctx.workflowEngine）；一两项委派优先使用 DSH subagent 工具。本插件的 gpt_task_state_* 只追踪任务阶段与证据，不执行 subagent，也不替代 DSH workflow engine。',
@@ -125,7 +125,7 @@ export function apply(ctx, config) {
         failures: counters.failures,
         lastTool: counters.lastTool,
         lastCallAt: counters.lastCallAt,
-        scope: '仅统计本插件实例注册的工具调用；工作流状态仅驻留内存。',
+        scope: '仅统计本插件实例注册的工具调用；任务状态状态仅驻留内存。',
       })
     },
   })
@@ -208,13 +208,13 @@ export function apply(ctx, config) {
   register({
     name: 'gpt_task_state_status',
     description: '读取一个任务状态记录或列出当前插件上下文中的任务。',
-    parameters: { id: { type: 'string', description: '工作流 ID；不填则列出全部。' } },
+    parameters: { id: { type: 'string', description: '任务 ID；不填则列出全部。' } },
     output,
     async execute({ id } = {}) {
       if (!id) return asText(taskStateStore.list())
-      const workflow = taskStateStore.get(id)
-      if (!workflow) throw new Error('未找到该工作流')
-      return asText(workflow)
+      const taskState = taskStateStore.get(id)
+      if (!taskState) throw new Error('未找到该任务状态')
+      return asText(taskState)
     },
   })
 
@@ -222,7 +222,7 @@ export function apply(ctx, config) {
     name: 'gpt_task_state_advance',
     description: '推进任务阶段；只允许合法阶段转换，verify 阶段可返回 execute 修正。',
     parameters: {
-      id: { type: 'string', required: true, description: '工作流 ID。' },
+      id: { type: 'string', required: true, description: '任务 ID。' },
       phase: { type: 'string', required: true, enum: ['inspect', 'plan', 'execute', 'verify', 'deliver'], description: '下一阶段。' },
       note: { type: 'string', description: '阶段切换依据或简短记录。' },
     },
@@ -236,7 +236,7 @@ export function apply(ctx, config) {
     name: 'gpt_task_state_update',
     description: '向任务记录追加可审查的决策摘要、证据、阻塞项或验收标准；不收集隐藏思维链。',
     parameters: {
-      id: { type: 'string', required: true, description: '工作流 ID。' },
+      id: { type: 'string', required: true, description: '任务状态 ID。' },
       decisionSummary: { type: 'array', items: { type: 'string' }, description: '简短决策摘要，不是逐字思维链。' },
       evidence: { type: 'array', items: { type: 'string' }, description: '可核验的证据或来源。' },
       blockers: { type: 'array', items: { type: 'string' }, description: '当前阻塞和未解决问题。' },
@@ -252,8 +252,8 @@ export function apply(ctx, config) {
     name: 'gpt_task_state_finish',
     description: '结束任务记录。completed 仅允许在 deliver 阶段；其他状态用于明确记录阻塞、失败或取消。',
     parameters: {
-      id: { type: 'string', required: true, description: '工作流 ID。' },
-      outcome: { type: 'string', required: true, enum: ['completed', 'blocked', 'failed', 'cancelled'], description: '工作流结束状态。' },
+      id: { type: 'string', required: true, description: '任务状态 ID。' },
+      outcome: { type: 'string', required: true, enum: ['completed', 'blocked', 'failed', 'cancelled'], description: '任务结束状态。' },
       summary: { type: 'string', description: '交付摘要或结束原因。' },
     },
     output,

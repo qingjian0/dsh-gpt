@@ -62,9 +62,9 @@ test('all bundled skills have valid frontmatter and matching kebab-case names', 
 test('bundle reuses dsh-base services instead of inserting duplicate providers', async () => {
   const patch = await readFile(new URL('cordis.patch.yml', root), 'utf8')
   assert.match(patch, /id: dsh-gpt-runtime/)
-  assert.doesNotMatch(patch, /name: '@deepseek-ai\\/dsh-skill'/)
-  assert.doesNotMatch(patch, /name: '@deepseek-ai\\/dsh-tool-skill'/)
-  assert.doesNotMatch(patch, /name: '@deepseek-ai\\/dsh-skill-filesystem'/)
+  assert.equal(patch.includes("name: '@deepseek-ai/dsh-skill'"), false)
+  assert.equal(patch.includes("name: '@deepseek-ai/dsh-tool-skill'"), false)
+  assert.equal(patch.includes("name: '@deepseek-ai/dsh-skill-filesystem'"), false)
   assert.match(patch, /dsh-base already mounts/)
 })
 

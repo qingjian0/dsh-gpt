@@ -47,4 +47,7 @@ test('package includes skill assets and DSH skill peer dependencies', async () =
   assert.ok(pkg.files.includes('skills'))
   assert.ok(pkg.peerDependencies['@deepseek-ai/dsh-skill'])
   assert.ok(pkg.peerDependencies['@deepseek-ai/dsh-tool-skill'])
+  assert.ok(pkg.peerDependencies['@deepseek-ai/dsh-skill-filesystem'])
+  assert.equal(pkg.engines.node, '>=24')
+  assert.equal(pkg.dsh.manifestVersion, 1)
 })

@@ -119,7 +119,7 @@ export function createTaskStateStore() {
   return {
     create(input) {
       const id = String(input.id ?? '').trim()
-      if (!id) throw new Error('taskState id 不能为空')
+      if (!id) throw new Error('任务 ID 不能为空')
       if (taskStates.has(id)) throw new Error('任务 ID 已存在')
       const taskState = createTaskState({ ...input, id })
       taskStates.set(taskState.id, taskState)

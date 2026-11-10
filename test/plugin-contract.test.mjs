@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
+import { stripSkillFrontmatter } from '../src/skill-content.js'
 
 const root = new URL('../', import.meta.url)
 
@@ -12,23 +13,19 @@ test('plugin declares DSH tools, system prompt, and skills services', async () =
   assert.match(source, /registerBundledSkills\(ctx\)/)
   assert.match(source, /interpolate: false/)
   assert.match(source, /order: 100/)
-  assert.match(source, /const workflowStore = createWorkflowStore\\(\\)/)
-  assert.doesNotMatch(source, /^const workflowStore = createWorkflowStore\\(\\)/m)
-  assert.doesNotMatch(source, /^const counters =/m)
+  assert.ok(source.indexOf('const workflowStore = createWorkflowStore()') > source.indexOf('export function apply'))
+  assert.ok(source.indexOf('const counters = {') > source.indexOf('export function apply'))
 })
 
-test('plugin exposes mode and stateful workflow tools', async () => {
+test('plugin exposes mode and stateful workflow tools with constrained parameters', async () => {
   const source = await readFile(new URL('src/index.js', root), 'utf8')
-  for (const tool of [
-    'gpt_mode_list',
-    'gpt_workflow_start',
-    'gpt_workflow_status',
-    'gpt_workflow_advance',
-    'gpt_workflow_update',
-    'gpt_workflow_finish',
-  ]) assert.match(source, new RegExp(`name: '${tool}'`))
+  for (const tool of ['gpt_mode_list', 'gpt_workflow_start', 'gpt_workflow_status', 'gpt_workflow_advance', 'gpt_workflow_update', 'gpt_workflow_finish']) {
+    assert.match(source, new RegExp("name: '" + tool + "'"))
+  }
   assert.match(source, /createWorkflowStore\(\)/)
   assert.match(source, /defaultMode:/)
+  assert.match(source, /enum: MODES\.map/)
+  assert.match(source, /enum: \['completed', 'blocked', 'failed', 'cancelled'\]/)
 })
 
 test('bundled provider follows the DSH SkillProvider contract', async () => {
@@ -37,28 +34,28 @@ test('bundled provider follows the DSH SkillProvider contract', async () => {
   assert.match(source, /ctx\.skills\.registerProvider\(/)
   assert.match(source, /async list\(/)
   assert.match(source, /async get\(/)
-  assert.match(source, /modelInvocable: true, userInvocable: true/)
+  assert.match(source, /invocation: \{ modelInvocable: true, userInvocable: true \}/)
   assert.match(source, /source: 'bundled'/)
-  assert.match(source, /locator = new URL\\(/)
-  assert.match(source, /stripSkillFrontmatter\\(raw, selected.name\\)/)
+  assert.match(source, /const locator = new URL\(/)
+  assert.match(source, /stripSkillFrontmatter\(raw, selected\.name\)/)
+})
+
+test('skill provider strips YAML frontmatter and preserves instruction body', () => {
+  const raw = '---\nname: demo\ndescription: Demo skill\n---\n\n# Body\n\nKeep this.'
+  assert.equal(stripSkillFrontmatter(raw), '# Body\n\nKeep this.')
+  assert.throws(() => stripSkillFrontmatter('# no frontmatter'), /frontmatter/)
+  assert.throws(() => stripSkillFrontmatter('---\nname: empty\n---\n'), /empty instruction body/)
 })
 
 test('all bundled skills have valid frontmatter and matching kebab-case names', async () => {
-  const names = [
-    'task-planning',
-    'tool-orchestration',
-    'code-engineering',
-    'research',
-    'verification',
-    'error-recovery',
-    'agent-execution',
-  ]
+  const names = ['task-planning', 'tool-orchestration', 'code-engineering', 'research', 'verification', 'error-recovery', 'agent-execution']
   for (const name of names) {
-    const body = await readFile(new URL(`skills/${name}/SKILL.md`, root), 'utf8')
+    const body = await readFile(new URL('skills/' + name + '/SKILL.md', root), 'utf8')
     assert.match(body, /^---\n/)
-    assert.match(body, new RegExp(`^name: ${name}$`, 'm'))
+    assert.match(body, new RegExp('^name: ' + name + '$', 'm'))
     assert.match(body, /^description: .+$/m)
     assert.match(body, /\n# /)
+    assert.ok(stripSkillFrontmatter(body).startsWith('# '))
   }
 })
 

@@ -13,16 +13,16 @@ test('plugin declares DSH tools, system prompt, and skills services', async () =
   assert.match(source, /registerBundledSkills\(ctx\)/)
   assert.match(source, /interpolate: false/)
   assert.match(source, /order: 100/)
-  assert.ok(source.indexOf('const workflowStore = createWorkflowStore()') > source.indexOf('export function apply'))
+  assert.ok(source.indexOf('const workflowStore = createTaskStateStore()') > source.indexOf('export function apply'))
   assert.ok(source.indexOf('const counters = {') > source.indexOf('export function apply'))
 })
 
 test('plugin exposes mode and stateful workflow tools with constrained parameters', async () => {
   const source = await readFile(new URL('src/index.js', root), 'utf8')
-  for (const tool of ['gpt_mode_list', 'gpt_workflow_start', 'gpt_workflow_status', 'gpt_workflow_advance', 'gpt_workflow_update', 'gpt_workflow_finish']) {
+  for (const tool of ['gpt_mode_list', 'gpt_task_state_start', 'gpt_task_state_status', 'gpt_task_state_advance', 'gpt_task_state_update', 'gpt_task_state_finish']) {
     assert.match(source, new RegExp("name: '" + tool + "'"))
   }
-  assert.match(source, /createWorkflowStore\(\)/)
+  assert.match(source, /createTaskStateStore\(\)/)
   assert.match(source, /defaultMode:/)
   assert.match(source, /enum: MODES\.map/)
   assert.match(source, /enum: \['completed', 'blocked', 'failed', 'cancelled'\]/)

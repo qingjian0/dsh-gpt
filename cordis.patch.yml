@@ -1,13 +1,11 @@
 # Example DSH Profile composition.
 # dsh-skill supplies ctx.skills; dsh-tool-skill exposes the catalog and model-facing skill loader.
-# dsh-skill-filesystem is optional but recommended for project/user-authored local skills.
+# dsh-skill-filesystem is intentionally not inserted here; add it separately when local skill discovery is needed.
 - insert:
     - id: dsh-skill
       name: '@deepseek-ai/dsh-skill'
     - id: dsh-tool-skill
       name: '@deepseek-ai/dsh-tool-skill'
-    - id: dsh-skill-filesystem
-      name: '@deepseek-ai/dsh-skill-filesystem'
     - id: dsh-gpt-runtime
       name: '@dsh-external/dsh-gpt-runtime'
       config:

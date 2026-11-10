@@ -10,7 +10,7 @@ DSH-GPT 是一个以 Plugin 为运行骨架、Skills 为按需加载工作方法
 - **DSH = Host**：Agent Loop、模型调用、会话、工具调度、权限和审批。
 - **Tools = Actions**：实际读写文件、访问网络、操作 GitHub 等能力由 DSH 原生工具或其他插件提供。
 
-不复制或替换 DSH Agent Loop，不绕过宿主权限。工作流状态机管理任务阶段，但实际工具执行仍由 DSH Host 完成。
+不复制或替换 DSH Agent Loop，不绕过宿主权限。任务状态机只管理任务阶段；大型多 Agent 编排使用 DSH 原生 workflow 工具和 workflowEngine，实际工具执行仍由 DSH Host 完成。
 
 ## 当前功能
 
@@ -60,11 +60,11 @@ DSH-GPT 是一个以 Plugin 为运行骨架、Skills 为按需加载工作方法
 ## 工作流工具
 
 - `gpt_mode_list`：列出模式和适用策略。
-- `gpt_workflow_start`：创建任务并选择模式。
-- `gpt_workflow_status`：读取单个或全部任务状态。
-- `gpt_workflow_advance`：推进合法阶段。
-- `gpt_workflow_update`：追加决策摘要、证据、阻塞项和验收标准。
-- `gpt_workflow_finish`：完成、阻塞、失败或取消任务；completed 必须先进入 deliver。
+- `gpt_task_state_start`：创建任务并选择模式。
+- `gpt_task_state_status`：读取单个或全部任务状态。
+- `gpt_task_state_advance`：推进合法阶段。
+- `gpt_task_state_update`：追加决策摘要、证据、阻塞项和验收标准。
+- `gpt_task_state_finish`：完成、阻塞、失败或取消任务；completed 必须先进入 deliver。
 - `gpt_task_plan`：生成独立任务大纲，不执行外部操作。
 
 ## DSH 原生 Skills 集成

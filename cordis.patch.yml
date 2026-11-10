@@ -1,5 +1,5 @@
 # Example bundle patch for a local DSH-GPT development checkout.
-# Adapt the target layer/row to the DSH version and profile being used.
+# Adapt the insertion target to the selected DSH release/profile.
 - insert:
     - id: dsh-gpt-runtime
       name: '@dsh-external/dsh-gpt-runtime'

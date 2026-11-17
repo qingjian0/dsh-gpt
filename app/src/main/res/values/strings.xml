@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">DSH GPT Diagnostics</string>
+    <string name="app_description">Runtime diagnostics module for the selected application scope.</string>
+</resources>

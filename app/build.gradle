@@ -1,31 +1,47 @@
 plugins {
-    id 'com.android.application'
+    alias(libs.plugins.android.application)
 }
 
 android {
     namespace 'com.gpt.hook'
-    compileSdk 34
+    compileSdk 37
+
+    buildFeatures {
+        buildConfig true
+    }
 
     defaultConfig {
-        applicationId "com.gpt.hook"
-        minSdk 26
-        targetSdk 34
-        versionCode 1
-        versionName "1.0"
+        applicationId 'com.gpt.hook'
+        minSdk 27
+        targetSdk 37
+        versionCode 4
+        versionName '2.2.0'
     }
 
     buildTypes {
         release {
-            minifyEnabled false
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            vcsInfo.include = false
             signingConfig signingConfigs.debug
         }
     }
+
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_1_8
-        targetCompatibility JavaVersion.VERSION_1_8
+        sourceCompatibility JavaVersion.VERSION_21
+        targetCompatibility JavaVersion.VERSION_21
+    }
+
+    packaging {
+        resources {
+            merges += 'META-INF/xposed/*'
+            excludes += ['META-INF/DEPENDENCIES', 'META-INF/LICENSE*', 'META-INF/NOTICE*']
+        }
     }
 }
 
 dependencies {
-    compileOnly files('libs/api-82.jar')
+    compileOnly libs.libxposed
+    implementation libs.libxposed.service
 }

@@ -5,7 +5,10 @@ import org.json.JSONObject
 import java.util.concurrent.atomic.AtomicLong
 
 /** Bounded, metadata-only event buffer. Never stores arguments, return values, headers or bodies. */
-class EventBuffer(private val capacity: Int = 500) {
+class EventBuffer(
+    private val capacity: Int = 100,
+    private val onChanged: (() -> Unit)? = null
+) {
     data class Event(
         val sequence: Long,
         val ruleId: String,
@@ -20,15 +23,16 @@ class EventBuffer(private val capacity: Int = 500) {
     private val lock = Any()
     private val events = ArrayDeque<Event>()
 
-    init { require(capacity in 10..10_000) }
+    init { require(capacity in 10..1_000) }
 
     fun record(rule: HookRule, signature: String, elapsedNanos: Long, error: Throwable?) {
         val event = Event(sequence.incrementAndGet(), rule.id, rule.className, rule.methodName,
-            signature.take(512), elapsedNanos.coerceAtLeast(0), error?.javaClass?.name?.take(200))
+            signature.take(256), elapsedNanos.coerceAtLeast(0), error?.javaClass?.name?.take(120))
         synchronized(lock) {
             if (events.size >= capacity) events.removeFirst()
             events.addLast(event)
         }
+        runCatching { onChanged?.invoke() }
     }
 
     fun snapshot(): List<Event> = synchronized(lock) { events.toList() }

@@ -98,16 +98,23 @@ class MainModule : XposedModule() {
     }
 
     private fun publishReport() {
+        val json = eventBuffer.toJson()
+
+        // Primary channel: logcat. Always available even when MIUI blocks cross-app IPC.
+        // The observation report is metadata-only and bounded, so it is safe to log.
+        ModuleLogger.i("observation-report: $json")
+
+        // Secondary channel: ContentProvider to the module app (best effort).
         val ctx = targetContextForIpc ?: return
         try {
             val uri = Uri.parse("content://${ObservationProvider.AUTHORITY}")
-            val extras = Bundle().apply { putString(ObservationProvider.KEY_REPORT, eventBuffer.toJson()) }
+            val extras = Bundle().apply { putString(ObservationProvider.KEY_REPORT, json) }
             val result = ctx.contentResolver.call(uri, ObservationProvider.METHOD_PUBLISH, null, extras)
             if (result?.getBoolean(ObservationProvider.KEY_ACCEPTED) != true) {
-                ModuleLogger.w("observation report was not accepted by module app")
+                ModuleLogger.w("observation report relay not accepted; logcat channel in use")
             }
         } catch (t: Throwable) {
-            ModuleLogger.w("observation report publish failed: ${t.javaClass.simpleName}")
+            ModuleLogger.w("observation report relay unavailable (${t.javaClass.simpleName}); logcat channel in use")
         }
     }
 

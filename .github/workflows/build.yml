@@ -19,6 +19,13 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Download Xposed API jar
+        run: |
+          mkdir -p app/libs
+          curl -sL -o app/libs/api-82.jar https://api.xposed.info/de/robv/android/xposed/api/82/api-82.jar
+          ls -la app/libs/
+          unzip -l app/libs/api-82.jar | grep -c "de/robv/android/xposed" || true
+
       - name: Build release APK
         run: gradle assembleRelease --no-daemon
 

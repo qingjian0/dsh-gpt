@@ -1,5 +1,6 @@
 package com.gpt.hook
 
+import android.app.Application
 import android.content.Context
 import android.content.SharedPreferences
 import android.net.Uri
@@ -27,7 +28,7 @@ class MainModule : XposedModule() {
     private val reportQueued = AtomicBoolean(false)
     private val eventBuffer = EventBuffer(onChanged = ::scheduleReportPublish)
     private var configListener: SharedPreferences.OnSharedPreferenceChangeListener? = null
-    private var moduleContext: Context? = null
+    @Volatile private var moduleContext: Context? = null
 
     override fun onModuleLoaded(param: ModuleLoadedParam) {
         super.onModuleLoaded(param)
@@ -39,12 +40,7 @@ class MainModule : XposedModule() {
         super.onPackageReady(param)
         if (param.packageName != TARGET_PACKAGE) return
         ModuleLogger.i("target package ready; package=${param.packageName}; classLoader=${param.classLoader.javaClass.name}")
-
-        moduleContext = runCatching {
-            createPackageContext(getModuleApplicationInfo().packageName, Context.CONTEXT_IGNORE_SECURITY)
-        }.onFailure {
-            ModuleLogger.w("module context unavailable; observation IPC disabled: ${it.javaClass.simpleName}")
-        }.getOrNull()
+        installContextBootstrap()
 
         val hookRuntime = HookRuntime(this, param.classLoader, eventBuffer)
         val prefs = getRemotePreferences("dsh")
@@ -68,6 +64,35 @@ class MainModule : XposedModule() {
         configListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
             if (key == "hook_config") applyCurrentConfig()
         }.also { prefs.registerOnSharedPreferenceChangeListener(it) }
+    }
+
+    /**
+     * onPackageReady runs before Application.attach. Capture only the Context object supplied
+     * by Android so this process can address the module app's exported, UID-checked provider.
+     */
+    private fun installContextBootstrap() {
+        try {
+            val attach = Application::class.java.getDeclaredMethod("attach", Context::class.java)
+            hook(attach).setId("dsh.context.bootstrap").intercept { chain ->
+                val result = chain.proceed()
+                if (moduleContext == null) {
+                    val targetContext = chain.getArg(0) as? Context
+                    if (targetContext != null) {
+                        moduleContext = runCatching {
+                            targetContext.createPackageContext(
+                                getModuleApplicationInfo().packageName,
+                                Context.CONTEXT_IGNORE_SECURITY
+                            )
+                        }.onFailure {
+                            ModuleLogger.w("module context bootstrap failed: ${it.javaClass.simpleName}")
+                        }.getOrNull()
+                    }
+                }
+                result
+            }
+        } catch (t: Throwable) {
+            ModuleLogger.w("context bootstrap hook failed: ${t.javaClass.simpleName}")
+        }
     }
 
     private fun scheduleReportPublish() {

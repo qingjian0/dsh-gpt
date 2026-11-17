@@ -37,12 +37,14 @@ class HookRuntime(
                     .take(8)
             } catch (t: Throwable) {
                 failed++
+                installed.keys.filter { it.startsWith("${rule.id}:") }.forEach(activeKeys::add)
                 ModuleLogger.w("rule lookup failed: id=${rule.id}; reason=${t.javaClass.simpleName}")
                 continue
             }
 
             if (candidates.isEmpty()) {
                 failed++
+                installed.keys.filter { it.startsWith("${rule.id}:") }.forEach(activeKeys::add)
                 ModuleLogger.w("rule has no matching methods: id=${rule.id}")
                 continue
             }

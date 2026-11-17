@@ -17,7 +17,6 @@ import io.github.libxposed.api.XposedModuleInterface;
 
 /**
  * 迭代式动态 hook 模块（libxposed API 102）。
- *
  * 闭环：固定锚点 hook → 后台线程读 hook_config.json → 动态 hook 指定类/方法 → dump → 分析 → 改配置循环。
  */
 public class MainHook extends XposedModule {
@@ -26,12 +25,11 @@ public class MainHook extends XposedModule {
     private static final String TARGET = "com.openai.chatgpt";
     private static final String CONFIG_PATH = "/data/local/tmp/gpt/hook_config.json";
 
-    public MainHook(XposedInterface base, XposedModuleInterface.ModuleLoadedParam param) {
-        super(base, param);
+    public MainHook() {
     }
 
     @Override
-    public void onPackageLoaded(XposedModuleInterface.PackageLoadedParam param) {
+    public void onPackageReady(XposedModuleInterface.PackageReadyParam param) {
         if (!TARGET.equals(param.getPackageName())) return;
         log(Log.WARN, TAG, "===== loaded into " + param.getPackageName() + " =====");
 

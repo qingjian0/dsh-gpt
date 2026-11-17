@@ -18,7 +18,7 @@
 - The provider accepts only the expected report schema and at most 128 KiB per report.
 - The in-process buffer holds at most 100 events. Publication is debounced to avoid Binder calls on every hooked invocation.
 - The provider exposes no query/insert/update/delete data surface.
-- The target process captures its own application Context during `Application.attach(Context)` and calls the exported provider directly; Binder therefore carries the target app UID. This bootstrap and caller-UID behavior must still be verified on-device.
+- The target process captures its own application Context during `Instrumentation.callApplicationOnCreate(Application)` and calls the exported provider directly; Binder therefore carries the target app UID. This bootstrap and caller-UID behavior must still be verified on-device.
 
 ## Configuration schema
 

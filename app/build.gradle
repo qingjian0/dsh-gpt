@@ -1,50 +1,53 @@
+import com.android.build.gradle.tasks.PackageAndroidArtifact
+
 plugins {
     alias(libs.plugins.android.application)
 }
 
 android {
-    namespace = "com.gpt.hook"
+    namespace 'com.gpt.hook'
 
-    buildFeatures { buildConfig = true }
+    buildFeatures {
+        buildConfig true
+    }
 
     defaultConfig {
-        applicationId = "com.gpt.hook"
-        minSdk = 27
-        targetSdk = 37
-        versionCode = 2
-        versionName = "2.0.0"
+        applicationId 'com.gpt.hook'
+        minSdk 27
+        targetSdk 37
+        versionCode 2
+        versionName '2.0.0'
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = true
-            isShrinkResources = true
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             vcsInfo.include = false
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig signingConfigs.debug
         }
     }
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_21
-        targetCompatibility = JavaVersion.VERSION_21
+        sourceCompatibility JavaVersion.VERSION_21
+        targetCompatibility JavaVersion.VERSION_21
     }
 
     packaging {
         resources {
-            merges += "META-INF/xposed/*"
-            excludes += "**"
+            merges += 'META-INF/xposed/*'
+            excludes += '**'
         }
     }
 }
 
-tasks.withType<com.android.build.gradle.tasks.PackageAndroidArtifact> {
-    doFirst { appMetadata.asFile.orNull?.writeText("") }
+tasks.withType(PackageAndroidArtifact).configureEach {
+    doFirst {
+        appMetadata.asFile.orNull?.writeText('')
+    }
 }
 
 dependencies {
-    compileOnly(libs.libxposed)
+    compileOnly libs.libxposed
 }

@@ -5,7 +5,7 @@ import io.github.libxposed.api.XposedInterface
 import java.io.BufferedReader
 import java.io.InputStreamReader
 
-/** Reads a config placed in the module's framework-managed shared files directory. */
+/** Reads a config placed in the framework-managed module shared-files directory. */
 object RemoteConfigLoader {
     const val FILE_NAME = "dsh-hook-rules.json"
 
@@ -18,8 +18,10 @@ object RemoteConfigLoader {
                     text
                 }
             }
+        } catch (_: java.io.FileNotFoundException) {
+            null
         } catch (t: Throwable) {
-            ModuleLogger.i("no remote config available: ${t.javaClass.simpleName}")
+            ModuleLogger.w("remote config read failed; reason=${t.javaClass.simpleName}")
             null
         }
     }

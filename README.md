@@ -1,17 +1,17 @@
 # DSH GPT Diagnostics
 
-An LSPosed module and on-device configuration console based on Prslc/LSPosed_Template and libxposed API 102.
+An LSPosed module and on-device dynamic Hook configuration and observation console based on libxposed API 102.
 
-## What is included
+## Features
 
-- Modern libxposed module entry point (`com.gpt.hook.MainModule`)
-- On-device DSH configuration console connected through `libxposed/service`
-- JSON declarative Hook rules stored in LSPosed remote preferences
-- Live preference-change listener: rules can be changed without rebuilding or restarting the target app
-- Dynamic method resolution and libxposed interceptor installation with stable Hook IDs
-- Atomic hook replacement and removal of obsolete rules
-- Bounded metadata-only observation buffer and AI-oriented JSON schema bridge
-- CI debug APK build plus verification of packaged LSPosed metadata
+- Modern libxposed module entry point and LSPosed metadata.
+- Declarative JSON Hook rules with local validation and live remote-preference updates.
+- Deterministic method matching and stable Hook IDs; per-method failures are isolated.
+- Bounded metadata-only observation buffer with debounced target-to-module IPC.
+- Exported ContentProvider validates the publishing Binder UID against the configured target package; only the module app UID may read reports.
+- On-device report refresh, JSON copy and Android share sheet for an explicitly selected AI assistant.
+- User-mediated AI iteration: share sanitized report → analyze externally → paste suggested JSON → validate → apply.
+- CI debug APK build and metadata verification.
 
 ## Build
 
@@ -23,21 +23,22 @@ gradle assembleDebug --no-daemon
 
 ## Install and operate
 
-1. Install the generated APK.
-2. Enable DSH GPT Diagnostics in LSPosed and include `com.openai.chatgpt` in scope.
-3. Open the DSH app and confirm the LSPosed service connection.
-4. Paste or edit declarative JSON rules and tap **Validate and apply configuration**.
-5. The target process receives the remote-preference change and updates Hook rules in-process.
-6. Inspect Logcat using tag `GPTHook`.
+1. Install the debug APK and enable the module in LSPosed.
+2. Ensure `com.openai.chatgpt` is in module scope.
+3. Open DSH and confirm LSPosed service connection.
+4. Paste/edit declarative JSON and tap **Validate and apply configuration**.
+5. Trigger a configured method in the target app.
+6. Return to DSH and tap **Refresh** to view the bounded observation report.
+7. Use **Copy JSON** or **Share to AI**. Paste AI-generated rules back into the editor and validate/apply them.
 
-See [AI_DYNAMIC_HOOK.md](docs/AI_DYNAMIC_HOOK.md) for the rule schema and operational details.
+See [AI_DYNAMIC_HOOK.md](docs/AI_DYNAMIC_HOOK.md) for schema, IPC design and privacy constraints.
 
-## Data handling boundary
+## Privacy and security
 
-The runtime records method signatures, timing, invocation sequence and exception classes only. It does not read or export authorization headers, access tokens, cookies, device credentials, request/response bodies or anti-abuse challenge/proof material. It does not implement challenge solving or bypass.
+Only method signature, timing, sequence, rule ID and exception class are recorded. No method arguments, return values, headers, cookies, tokens, request/response bodies, device identifiers or anti-abuse challenge/proof material are collected. No silent network upload or challenge bypass is implemented.
 
-The current AI bridge is a local JSON contract. A hosted AI provider/report transport is not bundled; any future provider must be explicitly configured and must not receive secrets or raw request content.
+The observation ContentProvider is exported because the target app and module app have separate UIDs. It accepts writes only from the configured target package UID and restricts reads to the module app UID. IPC behavior still requires real-device verification.
 
 ## Validation status
 
-A successful CI build verifies compilation, APK packaging and LSPosed metadata. It does not replace installation and runtime verification on the user's LSPosed device.
+A successful CI build verifies compilation, APK packaging and LSPosed metadata. It does not establish runtime hook behavior or IPC compatibility on a physical device.

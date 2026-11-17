@@ -19,8 +19,10 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.6.1'
       - name: Build debug APK
-        run: ./gradlew assembleDebug --no-daemon
+        run: gradle assembleDebug --no-daemon
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:

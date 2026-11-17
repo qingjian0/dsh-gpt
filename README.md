@@ -1,15 +1,17 @@
 # DSH GPT Diagnostics
 
-An LSPosed module scaffold based on [Prslc/LSPosed_Template](https://github.com/Prslc/LSPosed_Template) and libxposed API 102.
+An LSPosed module and on-device configuration console based on Prslc/LSPosed_Template and libxposed API 102.
 
-## Current baseline
+## What is included
 
-- Kotlin entry point: `com.gpt.hook.MainModule`
-- Modern module metadata under `app/src/main/resources/META-INF/xposed/`
-- Target scope: `com.openai.chatgpt`
-- Centralized Logcat / LSPosed logger with tag `GPTHook`
-- Java 21, Gradle 9.6.1, Android Gradle Plugin 9.3.0
-- GitHub Actions builds a debug APK and uploads it as an artifact
+- Modern libxposed module entry point (`com.gpt.hook.MainModule`)
+- On-device DSH configuration console connected through `libxposed/service`
+- JSON declarative Hook rules stored in LSPosed remote preferences
+- Live preference-change listener: rules can be changed without rebuilding or restarting the target app
+- Dynamic method resolution and libxposed interceptor installation with stable Hook IDs
+- Atomic hook replacement and removal of obsolete rules
+- Bounded metadata-only observation buffer and AI-oriented JSON schema bridge
+- CI debug APK build plus verification of packaged LSPosed metadata
 
 ## Build
 
@@ -19,18 +21,23 @@ Use JDK 21 and Gradle 9.6.1:
 gradle assembleDebug --no-daemon
 ```
 
-## Install and verify
+## Install and operate
 
 1. Install the generated APK.
-2. Enable DSH GPT Diagnostics in LSPosed.
-3. Confirm `com.openai.chatgpt` is in the module scope.
-4. Restart the target app.
-5. Check Logcat for tag `GPTHook` and the module-loaded / package-ready messages.
+2. Enable DSH GPT Diagnostics in LSPosed and include `com.openai.chatgpt` in scope.
+3. Open the DSH app and confirm the LSPosed service connection.
+4. Paste or edit declarative JSON rules and tap **Validate and apply configuration**.
+5. The target process receives the remote-preference change and updates Hook rules in-process.
+6. Inspect Logcat using tag `GPTHook`.
 
-## Safety and data handling
+See [AI_DYNAMIC_HOOK.md](docs/AI_DYNAMIC_HOOK.md) for the rule schema and operational details.
 
-This baseline logs module lifecycle and non-sensitive runtime metadata only. It does not collect authorization headers, access tokens, device credentials, challenge tokens, request bodies, or anti-abuse proof material.
+## Data handling boundary
 
-## API metadata
+The runtime records method signatures, timing, invocation sequence and exception classes only. It does not read or export authorization headers, access tokens, cookies, device credentials, request/response bodies or anti-abuse challenge/proof material. It does not implement challenge solving or bypass.
 
-The template declares `minApiVersion=101` and `targetApiVersion=101`, while the compile-time dependency is `io.github.libxposed:api:102.0.0`. Keep these values aligned with the runtime framework compatibility requirements when changing the supported LSPosed release.
+The current AI bridge is a local JSON contract. A hosted AI provider/report transport is not bundled; any future provider must be explicitly configured and must not receive secrets or raw request content.
+
+## Validation status
+
+A successful CI build verifies compilation, APK packaging and LSPosed metadata. It does not replace installation and runtime verification on the user's LSPosed device.

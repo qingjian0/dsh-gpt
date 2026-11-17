@@ -2,6 +2,7 @@ package com.gpt.hook.diagnostics
 
 import io.github.libxposed.api.XposedInterface
 import java.lang.reflect.Method
+import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
@@ -15,21 +16,43 @@ class HookRuntime(
     private val installed = ConcurrentHashMap<String, Installed>()
     private val counters = ConcurrentHashMap<String, AtomicLong>()
 
+    /**
+     * Applies a validated snapshot. Method ordering and hook IDs are deterministic, so
+     * adding/removing an overload cannot accidentally replace a different overload's hook.
+     * A failed individual method does not prevent other overloads/rules from being applied.
+     */
     @Synchronized
     fun apply(config: HookConfig): Pair<Int, Int> {
         val activeKeys = HashSet<String>()
         var applied = 0
         var failed = 0
+
         for (rule in config.rules) {
             if (!rule.enabled) continue
-            try {
+            val candidates = try {
                 val type = Class.forName(rule.className, false, classLoader)
-                val candidates = type.declaredMethods.filter { methodMatches(it, rule) }.take(8)
-                require(candidates.isNotEmpty()) { "No matching method found" }
-                candidates.forEachIndexed { index, method ->
-                    val key = "${rule.id}:${method.toGenericString()}"
-                    activeKeys += key
-                    val hookId = "dsh.${rule.id}.$index"
+                type.declaredMethods
+                    .filter { methodMatches(it, rule) }
+                    .sortedBy { it.toGenericString() }
+                    .take(8)
+            } catch (t: Throwable) {
+                failed++
+                ModuleLogger.w("rule lookup failed: id=${rule.id}; reason=${t.javaClass.simpleName}")
+                continue
+            }
+
+            if (candidates.isEmpty()) {
+                failed++
+                ModuleLogger.w("rule has no matching methods: id=${rule.id}")
+                continue
+            }
+
+            for (method in candidates) {
+                val signature = method.toGenericString()
+                val key = "${rule.id}:$signature"
+                activeKeys += key
+                try {
+                    val hookId = stableHookId(rule.id, signature)
                     val handle = framework.hook(method)
                         .setId(hookId)
                         .intercept { chain ->
@@ -45,19 +68,24 @@ class HookRuntime(
                                     failure = t
                                     throw t
                                 } finally {
-                                    events.record(rule, method.toGenericString(), System.nanoTime() - started, failure)
+                                    events.record(rule, signature, System.nanoTime() - started, failure)
                                 }
                             }
                         }
-                    // setId atomically replaces the previous hook on this executable.
+                    // libxposed setId atomically replaces an existing hook with this ID.
                     installed[key] = Installed(handle)
                     applied++
+                } catch (t: Throwable) {
+                    failed++
+                    ModuleLogger.w(
+                        "method hook failed: id=${rule.id}; signature=${signature.take(180)}; " +
+                            "reason=${t.javaClass.simpleName}"
+                    )
                 }
-            } catch (t: Throwable) {
-                failed++
-                ModuleLogger.w("rule rejected: id=${rule.id}; reason=${t.javaClass.simpleName}")
             }
         }
+
+        // Retain hooks for failed replacements when their stable key is still requested.
         installed.entries.toList().forEach { (key, value) ->
             if (key !in activeKeys) {
                 runCatching { value.handle.unhook() }
@@ -79,5 +107,13 @@ class HookRuntime(
         if (method.name != rule.methodName) return false
         if (rule.parameterTypes.isEmpty()) return true
         return method.parameterTypes.map { it.name } == rule.parameterTypes
+    }
+
+    private fun stableHookId(ruleId: String, signature: String): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest(signature.toByteArray(Charsets.UTF_8))
+            .take(12)
+            .joinToString("") { "%02x".format(it) }
+        return "dsh.$ruleId.$digest"
     }
 }

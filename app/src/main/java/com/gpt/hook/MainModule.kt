@@ -29,7 +29,7 @@ class MainModule : XposedModule() {
     private val reportQueued = AtomicBoolean(false)
     private val eventBuffer = EventBuffer(onChanged = ::scheduleReportPublish)
     private var configListener: SharedPreferences.OnSharedPreferenceChangeListener? = null
-    @Volatile private var moduleContext: Context? = null
+    @Volatile private var targetContextForIpc: Context? = null
 
     override fun onModuleLoaded(param: ModuleLoadedParam) {
         super.onModuleLoaded(param)
@@ -74,15 +74,10 @@ class MainModule : XposedModule() {
             this.hook(attach).setId("dsh.context.bootstrap").intercept { chain: XposedInterface.Chain ->
                 val targetContext = chain.getArg(0) as? Context
                 val result = chain.proceed()
-                if (moduleContext == null && targetContext != null) {
-                    moduleContext = runCatching {
-                        targetContext.createPackageContext(
-                            getModuleApplicationInfo().packageName,
-                            Context.CONTEXT_IGNORE_SECURITY
-                        )
-                    }.onFailure {
-                        ModuleLogger.w("module context bootstrap failed: ${it.javaClass.simpleName}")
-                    }.getOrNull()
+                if (targetContextForIpc == null && targetContext != null) {
+                    // Keep the target app's own Context: ContentResolver.call() therefore
+                    // crosses Binder with the target UID that the provider authenticates.
+                    targetContextForIpc = targetContext.applicationContext ?: targetContext
                 }
                 result
             }
@@ -100,7 +95,7 @@ class MainModule : XposedModule() {
     }
 
     private fun publishReport() {
-        val ctx = moduleContext ?: return
+        val ctx = targetContextForIpc ?: return
         try {
             val uri = Uri.parse("content://${ObservationProvider.AUTHORITY}")
             val extras = Bundle().apply { putString(ObservationProvider.KEY_REPORT, eventBuffer.toJson()) }

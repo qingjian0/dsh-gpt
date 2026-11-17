@@ -10,6 +10,7 @@ import com.gpt.hook.diagnostics.HookConfigParser
 import com.gpt.hook.diagnostics.HookRuntime
 import com.gpt.hook.diagnostics.ModuleLogger
 import com.gpt.hook.diagnostics.RemoteConfigLoader
+import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface.ModuleLoadedParam
 import io.github.libxposed.api.XposedModuleInterface.PackageReadyParam
@@ -66,27 +67,22 @@ class MainModule : XposedModule() {
         }.also { prefs.registerOnSharedPreferenceChangeListener(it) }
     }
 
-    /**
-     * onPackageReady runs before Application.attach. Capture only the Context object supplied
-     * by Android so this process can address the module app's exported, UID-checked provider.
-     */
+    /** onPackageReady precedes Application.attach; capture its Context for the module IPC. */
     private fun installContextBootstrap() {
         try {
             val attach = Application::class.java.getDeclaredMethod("attach", Context::class.java)
-            hook(attach).setId("dsh.context.bootstrap").intercept { chain ->
+            this.hook(attach).setId("dsh.context.bootstrap").intercept { chain: XposedInterface.Chain ->
+                val targetContext = chain.getArg(0) as? Context
                 val result = chain.proceed()
-                if (moduleContext == null) {
-                    val targetContext = chain.getArg(0) as? Context
-                    if (targetContext != null) {
-                        moduleContext = runCatching {
-                            targetContext.createPackageContext(
-                                getModuleApplicationInfo().packageName,
-                                Context.CONTEXT_IGNORE_SECURITY
-                            )
-                        }.onFailure {
-                            ModuleLogger.w("module context bootstrap failed: ${it.javaClass.simpleName}")
-                        }.getOrNull()
-                    }
+                if (moduleContext == null && targetContext != null) {
+                    moduleContext = runCatching {
+                        targetContext.createPackageContext(
+                            getModuleApplicationInfo().packageName,
+                            Context.CONTEXT_IGNORE_SECURITY
+                        )
+                    }.onFailure {
+                        ModuleLogger.w("module context bootstrap failed: ${it.javaClass.simpleName}")
+                    }.getOrNull()
                 }
                 result
             }

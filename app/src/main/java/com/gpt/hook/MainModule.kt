@@ -1,6 +1,7 @@
 package com.gpt.hook
 
 import android.app.Application
+import android.app.Instrumentation
 import android.content.Context
 import android.content.SharedPreferences
 import android.net.Uri
@@ -67,17 +68,19 @@ class MainModule : XposedModule() {
         }.also { prefs.registerOnSharedPreferenceChangeListener(it) }
     }
 
-    /** onPackageReady precedes Application.attach; capture its Context for the module IPC. */
+    /** Capture the app's base Context at the public Application-onCreate instrumentation boundary. */
     private fun installContextBootstrap() {
         try {
-            val attach = Application::class.java.getDeclaredMethod("attach", Context::class.java)
-            this.hook(attach).setId("dsh.context.bootstrap").intercept { chain: XposedInterface.Chain ->
-                val targetContext = chain.getArg(0) as? Context
+            val callback = Instrumentation::class.java.getDeclaredMethod(
+                "callApplicationOnCreate", Application::class.java
+            )
+            this.hook(callback).setId("dsh.context.bootstrap").intercept { chain: XposedInterface.Chain ->
+                val application = chain.getArg(0) as? Application
                 val result = chain.proceed()
-                if (targetContextForIpc == null && targetContext != null) {
-                    // Keep the target app's own Context: ContentResolver.call() therefore
-                    // crosses Binder with the target UID that the provider authenticates.
-                    targetContextForIpc = targetContext.applicationContext ?: targetContext
+                if (targetContextForIpc == null && application != null) {
+                    // Use the target app's own Context so Binder calls carry the target UID.
+                    targetContextForIpc = application.baseContext?.applicationContext
+                        ?: application.baseContext
                 }
                 result
             }

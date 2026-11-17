@@ -6,9 +6,11 @@ pluginManagement {
     }
 }
 dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
     repositories {
         google()
         mavenCentral()
+        maven { url 'https://api.xposed.info/' }
     }
 }
 rootProject.name = "gpt-hook"

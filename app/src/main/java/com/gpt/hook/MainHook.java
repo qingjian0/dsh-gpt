@@ -2,134 +2,226 @@ package com.gpt.hook;
 
 import android.util.Log;
 
-import de.robv.android.xposed.IXposedHookLoadPackage;
-import de.robv.android.xposed.XposedBridge;
-import de.robv.android.xposed.XposedHelpers;
-import de.robv.android.xposed.callbacks.XC_LoadPackage;
-import de.robv.android.xposed.callbacks.XC_MethodHook;
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.io.File;
+import java.io.FileInputStream;
+import java.lang.reflect.Method;
+import java.util.HashSet;
+import java.util.Set;
+
+import io.github.libxposed.api.XposedInterface;
+import io.github.libxposed.api.XposedModule;
+import io.github.libxposed.api.XposedModuleInterface;
 
 /**
- * 研究型 hook 模块：通过 LSPosed 动态 hook ChatGPT，
- * 把反代所需的一切 dump 到 logcat。
+ * 迭代式动态 hook 模块（libxposed API 102）。
  *
- * 动态 hook 三层：
- *  1. 网络层（OkHttp + HttpURLConnection）—— 捕获 token / device-id / sentinel header
- *  2. 底层汇聚点（MessageDigest）—— PoW 求解器必算 hash，hook 这里反推求解器类
- *  3. 调用栈分析 —— 过滤系统类，暴露 R8 混淆后的目标 App 类
- *
- * 目标搞清：access_token / oai-device-id / sentinel / PoW / arkose 从哪来、怎么算。
+ * 闭环：固定锚点 hook → 后台线程读 hook_config.json → 动态 hook 指定类/方法 → dump → 分析 → 改配置循环。
  */
-public class MainHook implements IXposedHookLoadPackage {
+public class MainHook extends XposedModule {
 
     private static final String TAG = "GPTHook";
     private static final String TARGET = "com.openai.chatgpt";
+    private static final String CONFIG_PATH = "/data/local/tmp/gpt/hook_config.json";
 
-    // 只 dump 调用栈含这些特征时才打印，避免 MessageDigest 刷屏
-    private static final String[] STACK_HINTS = {
-            "sentinel", "proof", "pow", "arkose", "turnstile", "challenge",
-            "device", "requirements", "captcha", "nonce", "difficulty", "hashcash"
-    };
+    public MainHook(XposedInterface base, XposedModuleInterface.ModuleLoadedParam param) {
+        super(base, param);
+    }
 
     @Override
-    public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
-        if (!TARGET.equals(lp.packageName)) return;
-        Log.w(TAG, "===== [loaded] " + lp.packageName + " =====");
-        hookOkHttpBuilder(lp.classLoader);
-        hookMessageDigest(lp.classLoader);
-        hookHttpURLConnection(lp.classLoader);
+    public void onPackageLoaded(XposedModuleInterface.PackageLoadedParam param) {
+        if (!TARGET.equals(param.getPackageName())) return;
+        log(Log.WARN, TAG, "===== loaded into " + param.getPackageName() + " =====");
+
+        ClassLoader cl = param.getClassLoader();
+        hookOkHttp(cl);
+        hookMessageDigest(cl);
+        hookHttpURLConnection(cl);
+
+        new Thread(new ConfigWatcher(cl), "gpt-hook-watcher").start();
     }
 
-    // ---------- 1. OkHttp Request$Builder ----------
-    private void hookOkHttpBuilder(ClassLoader cl) {
+    // ---------- 固定锚点 ----------
+
+    private void hookOkHttp(ClassLoader cl) {
         try {
-            Class<?> rb = XposedHelpers.findClass("okhttp3.Request$Builder", cl);
-
-            try {
-                XposedHelpers.findAndHookMethod(rb, "url", String.class, new XC_MethodHook() {
-                    @Override protected void beforeHookedMethod(MethodHookParam p) {
-                        Log.w(TAG, "[url] " + p.args[0]);
-                    }
-                });
-            } catch (Throwable ignored) {}
-
-            XC_MethodHook hh = new XC_MethodHook() {
-                @Override protected void beforeHookedMethod(MethodHookParam p) {
-                    String n = (String) p.args[0];
-                    String v = (String) p.args[1];
-                    boolean interesting = isInterestingHeader(n);
-                    Log.w(TAG, (interesting ? "[HDR*] " : "[hdr] ") + n + " = " + short_(v));
-                    if (interesting) dumpStack();
+            Class<?> c = cl.loadClass("okhttp3.Request$Builder");
+            for (Method m : c.getDeclaredMethods()) {
+                String n = m.getName();
+                if (n.equals("url") && m.getParameterTypes().length == 1
+                        && m.getParameterTypes()[0] == String.class) {
+                    hook(m).intercept(chain -> {
+                        log(Log.WARN, TAG, "[url] " + chain.getArgs().get(0));
+                        return chain.proceed();
+                    });
                 }
-            };
-            try { XposedHelpers.findAndHookMethod(rb, "addHeader", String.class, String.class, hh); } catch (Throwable ignored) {}
-            try { XposedHelpers.findAndHookMethod(rb, "header", String.class, String.class, hh); } catch (Throwable ignored) {}
-
-            Log.w(TAG, "[ok] hooked Request$Builder.url + headers");
+                if (n.equals("addHeader") || n.equals("header")) {
+                    hook(m).intercept(chain -> {
+                        String hn = (String) chain.getArgs().get(0);
+                        String hv = (String) chain.getArgs().get(1);
+                        boolean interesting = isInterestingHeader(hn);
+                        log(Log.WARN, TAG, (interesting ? "[HDR*] " : "[hdr] ") + hn + " = " + short_(hv));
+                        if (interesting) dumpStack();
+                        return chain.proceed();
+                    });
+                }
+            }
+            log(Log.WARN, TAG, "[ok] Request$Builder");
         } catch (Throwable t) {
-            Log.w(TAG, "[fail] Request$Builder: " + t);
+            log(Log.WARN, TAG, "[fail] Request$Builder: " + t);
         }
     }
 
-    // ---------- 2. MessageDigest（PoW 必算 hash） ----------
     private void hookMessageDigest(ClassLoader cl) {
         try {
-            Class<?> md = XposedHelpers.findClass("java.security.MessageDigest", cl);
-
-            // getInstance —— 记录算法
-            try {
-                XposedHelpers.findAndHookMethod(md, "getInstance", String.class, new XC_MethodHook() {
-                    @Override protected void beforeHookedMethod(MethodHookParam p) {
-                        String algo = (String) p.args[0];
-                        StackTraceElement[] st = Thread.currentThread().getStackTrace();
-                        if (stackHasHint(st)) {
-                            Log.w(TAG, "[md.getInstance] " + algo);
-                            dumpStack(st);
+            Class<?> c = cl.loadClass("java.security.MessageDigest");
+            for (Method m : c.getDeclaredMethods()) {
+                if (m.getName().equals("digest")) {
+                    hook(m).intercept(chain -> {
+                        if (stackHasHint(Thread.currentThread().getStackTrace())) {
+                            log(Log.WARN, TAG, "[md.digest] algo=" + ((java.security.MessageDigest) chain.getThisObject()).getAlgorithm());
+                            dumpStack();
                         }
-                    }
-                });
-            } catch (Throwable ignored) {}
-
-            // digest —— PoW 计算核心，dump 调用栈反推求解器
-            XC_MethodHook digestHook = new XC_MethodHook() {
-                @Override protected void beforeHookedMethod(MethodHookParam p) {
-                    StackTraceElement[] st = Thread.currentThread().getStackTrace();
-                    if (stackHasHint(st)) {
-                        Log.w(TAG, "[md.digest] algo=" + ((java.security.MessageDigest) p.thisObject).getAlgorithm());
-                        dumpStack(st);
-                    }
+                        return chain.proceed();
+                    });
                 }
-            };
-            try { XposedHelpers.findAndHookMethod(md, "digest", digestHook); } catch (Throwable ignored) {}
-            try { XposedHelpers.findAndHookMethod(md, "digest", byte[].class, digestHook); } catch (Throwable ignored) {}
-
-            Log.w(TAG, "[ok] hooked MessageDigest.getInstance + digest");
+            }
+            log(Log.WARN, TAG, "[ok] MessageDigest.digest");
         } catch (Throwable t) {
-            Log.w(TAG, "[fail] MessageDigest: " + t);
+            log(Log.WARN, TAG, "[fail] MessageDigest: " + t);
         }
     }
 
-    // ---------- 3. HttpURLConnection 兜底 ----------
     private void hookHttpURLConnection(ClassLoader cl) {
         try {
-            Class<?> huc = XposedHelpers.findClass("java.net.HttpURLConnection", cl);
-            XC_MethodHook hh = new XC_MethodHook() {
-                @Override protected void beforeHookedMethod(MethodHookParam p) {
-                    String n = (String) p.args[0];
-                    String v = (String) p.args[1];
-                    if (isInterestingHeader(n)) {
-                        Log.w(TAG, "[HUC*] " + n + " = " + short_(v));
-                        dumpStack();
+            Class<?> c = cl.loadClass("java.net.HttpURLConnection");
+            for (Method m : c.getDeclaredMethods()) {
+                if (m.getName().equals("setRequestProperty")) {
+                    hook(m).intercept(chain -> {
+                        String n = (String) chain.getArgs().get(0);
+                        String v = (String) chain.getArgs().get(1);
+                        if (isInterestingHeader(n)) {
+                            log(Log.WARN, TAG, "[HUC*] " + n + " = " + short_(v));
+                            dumpStack();
+                        }
+                        return chain.proceed();
+                    });
+                }
+            }
+            log(Log.WARN, TAG, "[ok] HttpURLConnection");
+        } catch (Throwable t) {
+            log(Log.WARN, TAG, "[fail] HttpURLConnection: " + t);
+        }
+    }
+
+    // ---------- 动态配置监听 ----------
+
+    class ConfigWatcher implements Runnable {
+        private final ClassLoader cl;
+        private String last = "";
+        private final Set<String> applied = new HashSet<>();
+
+        ConfigWatcher(ClassLoader cl) { this.cl = cl; }
+
+        @Override
+        public void run() {
+            log(Log.WARN, TAG, "[watcher] watching " + CONFIG_PATH);
+            while (true) {
+                try {
+                    String s = readFile(CONFIG_PATH);
+                    if (s != null && !s.equals(last)) {
+                        last = s;
+                        apply(s);
+                    }
+                    Thread.sleep(2000);
+                } catch (Throwable t) {
+                    log(Log.WARN, TAG, "[watcher] err " + t);
+                }
+            }
+        }
+
+        private void apply(String json) {
+            try {
+                JSONArray hooks = new JSONObject(json).optJSONArray("hooks");
+                if (hooks == null) return;
+                for (int i = 0; i < hooks.length(); i++) {
+                    JSONObject h = hooks.optJSONObject(i);
+                    if (h == null) continue;
+                    String cls = h.optString("class");
+                    JSONArray methods = h.optJSONArray("methods");
+                    final boolean da = h.optBoolean("dumpArgs", true);
+                    final boolean dr = h.optBoolean("dumpResult", true);
+                    final boolean ds = h.optBoolean("dumpStack", false);
+                    if (cls.isEmpty() || methods == null) continue;
+                    for (int j = 0; j < methods.length(); j++) {
+                        String mn = methods.optString(j);
+                        String key = cls + "#" + mn;
+                        if (applied.contains(key)) continue;
+                        if (hookByName(cls, mn, da, dr, ds)) applied.add(key);
                     }
                 }
-            };
-            try { XposedHelpers.findAndHookMethod(huc, "setRequestProperty", String.class, String.class, hh); } catch (Throwable ignored) {}
-            Log.w(TAG, "[ok] hooked HttpURLConnection.setRequestProperty");
-        } catch (Throwable t) {
-            Log.w(TAG, "[fail] HttpURLConnection: " + t);
+            } catch (Throwable t) {
+                log(Log.WARN, TAG, "[config] parse fail: " + t);
+            }
+        }
+
+        private boolean hookByName(String cls, String mn, boolean da, boolean dr, boolean ds) {
+            try {
+                Class<?> c = cl.loadClass(cls);
+                int count = 0;
+                for (Method m : c.getDeclaredMethods()) {
+                    if (!m.getName().equals(mn)) continue;
+                    hook(m).intercept(chain -> {
+                        StringBuilder sb = new StringBuilder("[dyn] " + cls + "." + mn + "(");
+                        if (da) {
+                            java.util.List<Object> args = chain.getArgs();
+                            for (int k = 0; k < args.size(); k++) {
+                                if (k > 0) sb.append(", ");
+                                sb.append(fmt(args.get(k)));
+                            }
+                        }
+                        sb.append(")");
+                        log(Log.WARN, TAG, sb.toString());
+                        if (ds) dumpStack();
+                        Object r = chain.proceed();
+                        if (dr) log(Log.WARN, TAG, "[dyn] " + cls + "." + mn + " => " + fmt(r));
+                        return r;
+                    });
+                    count++;
+                }
+                log(Log.WARN, TAG, "[dyn-hook ok] " + cls + "." + mn + " (" + count + " 重载)");
+                return count > 0;
+            } catch (Throwable t) {
+                log(Log.WARN, TAG, "[dyn-hook fail] " + cls + "." + mn + " : " + t);
+                return false;
+            }
         }
     }
 
     // ---------- 工具 ----------
+
+    private static String readFile(String path) {
+        try {
+            File f = new File(path);
+            if (!f.exists()) return null;
+            FileInputStream in = new FileInputStream(f);
+            byte[] b = new byte[(int) f.length()];
+            int n = in.read(b);
+            in.close();
+            return new String(b, 0, n, "UTF-8");
+        } catch (Throwable t) { return null; }
+    }
+
+    private static String fmt(Object o) {
+        if (o == null) return "null";
+        try {
+            String s = String.valueOf(o);
+            return s.length() > 200 ? s.substring(0, 200) + "…(" + s.length() + ")" : s;
+        } catch (Throwable t) { return "<" + o.getClass().getName() + ">"; }
+    }
+
     private boolean isInterestingHeader(String n) {
         if (n == null) return false;
         String s = n.toLowerCase();
@@ -139,21 +231,18 @@ public class MainHook implements IXposedHookLoadPackage {
                 || s.equals("authorization") || s.contains("captcha") || s.contains("token");
     }
 
-    private boolean stackHasHint(StackTraceElement[] st) {
+    private static boolean stackHasHint(StackTraceElement[] st) {
         for (StackTraceElement e : st) {
             String cn = e.getClassName().toLowerCase();
-            for (String h : STACK_HINTS) {
-                if (cn.contains(h)) return true;
-            }
+            if (cn.contains("sentinel") || cn.contains("proof") || cn.contains("pow")
+                    || cn.contains("arkose") || cn.contains("turnstile")
+                    || cn.contains("challenge") || cn.contains("device")) return true;
         }
         return false;
     }
 
     private void dumpStack() {
-        dumpStack(Thread.currentThread().getStackTrace());
-    }
-
-    private void dumpStack(StackTraceElement[] st) {
+        StackTraceElement[] st = Thread.currentThread().getStackTrace();
         StringBuilder sb = new StringBuilder("[stack]\n");
         int c = 0;
         for (StackTraceElement e : st) {
@@ -170,14 +259,14 @@ public class MainHook implements IXposedHookLoadPackage {
                         .append("(").append(e.getLineNumber()).append(")\n");
             }
         }
-        Log.w(TAG, sb.toString());
+        log(Log.WARN, TAG, sb.toString());
     }
 
     private boolean interestingClass(String cn) {
         String[] sys = {"java.", "javax.", "android.", "dalvik.", "libcore.",
                 "com.android.", "kotlin.", "kotlinx.", "okhttp3.", "okio.",
                 "retrofit2.", "com.squareup.", "org.json.", "com.google.",
-                "fi.iki.", "com.gpt.hook.", "de.robv.", "androidx.",
+                "fi.iki.", "com.gpt.hook.", "io.github.", "androidx.",
                 "com.facebook.", "com.bumptech.", "sun.", "jdk."};
         for (String s : sys) if (cn.startsWith(s)) return false;
         return true;

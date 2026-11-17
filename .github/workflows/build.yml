@@ -23,6 +23,15 @@ jobs:
           gradle-version: '9.6.1'
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon
+      - name: Verify LSPosed module metadata
+        shell: bash
+        run: |
+          APK="$(find app/build/outputs/apk/debug -name '*.apk' -print -quit)"
+          test -n "$APK"
+          unzip -l "$APK" | grep -F 'META-INF/xposed/java_init.list'
+          unzip -l "$APK" | grep -F 'META-INF/xposed/module.prop'
+          unzip -l "$APK" | grep -F 'META-INF/xposed/scope.list'
+          unzip -p "$APK" 'META-INF/xposed/java_init.list' | grep -Fx 'com.gpt.hook.MainModule'
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:

@@ -5,21 +5,21 @@ import java.lang.reflect.Method
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
-/** Applies declarative observation rules using libxposed's interceptor API. */
+/** Applies declarative metadata-only observation rules using libxposed interceptors. */
 class HookRuntime(
     private val framework: XposedInterface,
     private val classLoader: ClassLoader,
     private val events: EventBuffer
 ) {
-    private data class Installed(val key: String, val handle: XposedInterface.HookHandle)
+    private data class Installed(val handle: XposedInterface.HookHandle)
     private val installed = ConcurrentHashMap<String, Installed>()
     private val counters = ConcurrentHashMap<String, AtomicLong>()
 
     @Synchronized
     fun apply(config: HookConfig): Pair<Int, Int> {
+        val activeKeys = HashSet<String>()
         var applied = 0
         var failed = 0
-        val desired = config.rules.filter { it.enabled }.associateBy { it.id }
         for (rule in config.rules) {
             if (!rule.enabled) continue
             try {
@@ -28,6 +28,7 @@ class HookRuntime(
                 require(candidates.isNotEmpty()) { "No matching method found" }
                 candidates.forEachIndexed { index, method ->
                     val key = "${rule.id}:${method.toGenericString()}"
+                    activeKeys += key
                     val hookId = "dsh.${rule.id}.$index"
                     val handle = framework.hook(method)
                         .setId(hookId)
@@ -48,9 +49,8 @@ class HookRuntime(
                                 }
                             }
                         }
-                    installed.put(key, Installed(key, handle))?.let { old ->
-                        if (old.handle !== handle) old.handle.unhook()
-                    }
+                    // setId atomically replaces the previous hook on this executable.
+                    installed[key] = Installed(handle)
                     applied++
                 }
             } catch (t: Throwable) {
@@ -58,12 +58,11 @@ class HookRuntime(
                 ModuleLogger.w("rule rejected: id=${rule.id}; reason=${t.javaClass.simpleName}")
             }
         }
-        val keepIds = desired.keys
         installed.entries.toList().forEach { (key, value) ->
-            val ruleId = key.substringBefore(':')
-            if (ruleId !in keepIds) {
-                value.handle.unhook()
+            if (key !in activeKeys) {
+                runCatching { value.handle.unhook() }
                 installed.remove(key)
+                counters.remove(key)
             }
         }
         return applied to failed

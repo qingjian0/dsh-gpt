@@ -1,6 +1,5 @@
 package com.gpt.hook
 
-import android.content.pm.ApplicationInfo
 import com.gpt.hook.diagnostics.ModuleLogger
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface.ModuleLoadedParam
@@ -17,7 +16,10 @@ class MainModule : XposedModule() {
     override fun onPackageReady(param: PackageReadyParam) {
         super.onPackageReady(param)
         if (param.packageName != TARGET_PACKAGE) return
-        ModuleLogger.i("target package ready; package=${param.packageName}; process=${param.processName}; classLoader=${param.defaultClassLoader.javaClass.name}")
+        ModuleLogger.i(
+            "target package ready; package=${param.packageName}; " +
+                "classLoader=${param.classLoader.javaClass.name}"
+        )
     }
 
     private companion object {

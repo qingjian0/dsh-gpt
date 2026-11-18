@@ -1,7 +1,6 @@
 {
   "name": "@dsh-external/dsh-gpt-hook-agent",
   "version": "0.1.0",
-  "private": false,
   "description": "DSH Agent tools for live control and iterative research of the dsh-gpt LSPosed module.",
   "type": "module",
   "main": "index.mjs",
@@ -10,22 +9,13 @@
   },
   "files": [
     "index.mjs",
-    "README.md",
     "cordis.patch.yml"
   ],
-  "peerDependencies": {
-    "@deepseek-ai/cordis": "*",
-    "@deepseek-ai/dsh-tools": "*"
-  },
   "dsh": {
     "manifestVersion": 1,
     "bundle": {
       "patch": "./cordis.patch.yml"
     }
   },
-  "license": "GPL-3.0-only",
-  "engines": {
-    "node": ">=24.9.0",
-    "dsh": ">=0.2.2-rc.1 <0.3.0"
-  }
+  "license": "GPL-3.0-only"
 }

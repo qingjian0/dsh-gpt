@@ -5,6 +5,7 @@
          and vice versa, otherwise MIUI/AOSP AppsFilter blocks cross-app calls. -->
     <queries>
         <package android:name="com.openai.chatgpt" />
+        <package android:name="app.dsh.mobile" />
         <package android:name="org.lsposed.manager" />
         <provider android:authorities="com.openai.chatgpt.observations" />
     </queries>

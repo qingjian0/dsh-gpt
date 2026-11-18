@@ -1,0 +1,61 @@
+# DSH Hook Agent Extension
+
+This directory contains the DSH-side Agent tools for the `dsh-gpt` LSPosed module.
+It is intentionally separate from the Android module APK: the DSH host loads this
+as a Cordis plugin, while the host-side bridge talks to the module's ContentProvider.
+
+## Tools exposed to the Agent
+
+- `dsh_hook_status`: module connection, target process and applied-rule status.
+- `dsh_hook_events`: bounded metadata-only events, optionally incremental by sequence.
+- `dsh_hook_rules_get`: current declarative rules.
+- `dsh_hook_rules_update`: validate and apply a complete declarative rules snapshot.
+- `dsh_hook_discover`: inspect available target classes/method signatures for a package prefix.
+- `dsh_hook_enable`: enable or disable the Hook runtime without uninstalling the module.
+
+The Agent can call these tools repeatedly; there is no clipboard/paste step. The plugin
+does not contain an AI API key and does not send data to a third-party service.
+
+## Transport
+
+The plugin calls the authenticated DSH loopback bridge at `127.0.0.1:3083` using
+`DSH_BRIDGE_TOKEN` from the DSH engine environment. That token stays inside the DSH
+host/engine and is never copied into the ChatGPT target process.
+
+The following host bridge routes are the contract to be implemented in
+`Deepseek-Harness-Local-Android`:
+
+| Method | Route | Purpose |
+|---|---|---|
+| GET | `/hook/status` | Module/target connection and runtime state |
+| GET | `/hook/events?since=N&limit=N` | Incremental event retrieval |
+| GET | `/hook/rules` | Read current rules |
+| POST | `/hook/rules` | Validate and atomically apply rules |
+| POST | `/hook/discover` | Discover class/method metadata |
+| POST | `/hook/control` | Enable/disable runtime |
+
+The bridge adapter must call `contentResolver.call()` on
+`content://com.gpt.hook.observations`; it must not expose the provider directly to
+the engine or pass `DSH_BRIDGE_TOKEN` through to the target process. The provider
+must authenticate the DSH host independently (package/signature or an explicit
+pairing credential) before granting host operations. Module-app-only read access
+must not be weakened to arbitrary callers.
+
+## Rule and observation contract
+
+Rules remain declarative JSON validated by `HookConfigParser`. No arbitrary code,
+method arguments, return values, HTTP headers, cookies, request/response bodies,
+credentials, or anti-abuse challenge material are accepted or recorded. Events
+remain bounded metadata (rule ID, class, method, signature, elapsed time and
+exception type). Discovery returns class/method/signature metadata only.
+
+The current runtime's rule limits and package scope are enforced by the module,
+not by this Agent plugin. The Agent is free to iterate over valid rules and invoke
+discovery repeatedly; invalid or unsupported requests return explicit errors.
+
+## Integration status
+
+- [x] Agent tool definitions and authenticated loopback client.
+- [ ] DSH host bridge routes and provider adapter.
+- [ ] Provider host-caller authentication / pairing.
+- [ ] Device validation with the configured LSPosed target process.

@@ -1,6 +1,10 @@
 package com.gpt.hook.diagnostics
 
 import io.github.libxposed.api.XposedInterface
+import dalvik.system.BaseDexClassLoader
+import dalvik.system.DexFile
+import org.json.JSONArray
+import org.json.JSONObject
 import java.lang.reflect.Method
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
@@ -96,6 +100,90 @@ class HookRuntime(
             }
         }
         return applied to failed
+    }
+
+
+    /**
+     * Inspect class and method metadata in the target process. No method is invoked and
+     * no arguments, return values, fields, or application data are read.
+     */
+    fun discover(prefix: String, exactClassName: String?, limit: Int): JSONObject {
+        require(prefix.startsWith("com.openai.") && prefix.length <= 180) {
+            "Discovery prefix must be within com.openai.*"
+        }
+        require(limit in 1..500) { "limit must be between 1 and 500" }
+        if (exactClassName != null) {
+            require(exactClassName.startsWith("com.openai.") && exactClassName.length <= 240) {
+                "Discovery class must be within com.openai.*"
+            }
+        }
+
+        val names = if (exactClassName != null) {
+            sequenceOf(exactClassName)
+        } else {
+            dexClassNames()
+                .filter { it.startsWith(prefix) && !it.contains("$") }
+                .distinct()
+                .sorted()
+        }
+        val classes = JSONArray()
+        var records = 0
+        var inspected = 0
+        for (name in names) {
+            if (records >= limit) break
+            inspected++
+            val type = try {
+                Class.forName(name, false, classLoader)
+            } catch (_: Throwable) {
+                continue
+            }
+            val methods = JSONArray()
+            val candidates = runCatching {
+                type.declaredMethods.sortedBy { it.toGenericString() }
+            }.getOrDefault(emptyList())
+            for (method in candidates) {
+                if (records >= limit) break
+                methods.put(method.toGenericString().take(1000))
+                records++
+            }
+            if (methods.length() > 0 || exactClassName != null) {
+                classes.put(JSONObject()
+                    .put("className", type.name)
+                    .put("methodCount", methods.length())
+                    .put("methods", methods))
+            }
+        }
+        return JSONObject()
+            .put("ok", true)
+            .put("prefix", prefix)
+            .put("exactClassName", exactClassName ?: JSONObject.NULL)
+            .put("classCount", classes.length())
+            .put("recordCount", records)
+            .put("classesInspected", inspected)
+            .put("classes", classes)
+    }
+
+    private fun dexClassNames(): Sequence<String> = sequence {
+        val base = classLoader as? BaseDexClassLoader
+            ?: throw IllegalStateException("Target class loader is not a BaseDexClassLoader")
+        val pathListField = BaseDexClassLoader::class.java.getDeclaredField("pathList").apply {
+            isAccessible = true
+        }
+        val pathList = pathListField.get(base)
+        val elementsField = pathList.javaClass.getDeclaredField("dexElements").apply {
+            isAccessible = true
+        }
+        val elements = elementsField.get(pathList) as? Array<*>
+            ?: throw IllegalStateException("Dex elements are unavailable")
+        for (element in elements) {
+            if (element == null) continue
+            val dexField = runCatching {
+                element.javaClass.getDeclaredField("dexFile").apply { isAccessible = true }
+            }.getOrNull() ?: continue
+            val dex = runCatching { dexField.get(element) as? DexFile }.getOrNull() ?: continue
+            val entries = runCatching { dex.entries() }.getOrNull() ?: continue
+            while (entries.hasMoreElements()) yield(entries.nextElement())
+        }
     }
 
     @Synchronized

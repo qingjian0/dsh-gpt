@@ -27,10 +27,16 @@ class MainModule : XposedModule() {
     private val reportExecutor = Executors.newSingleThreadScheduledExecutor { runnable ->
         Thread(runnable, "dsh-report-publish").apply { isDaemon = true }
     }
+    private val providerConfigExecutor = Executors.newSingleThreadScheduledExecutor { runnable ->
+        Thread(runnable, "dsh-provider-config").apply { isDaemon = true }
+    }
     private val reportQueued = AtomicBoolean(false)
+    private val providerPollStarted = AtomicBoolean(false)
     private val eventBuffer = EventBuffer(onChanged = ::scheduleReportPublish)
     private var configListener: SharedPreferences.OnSharedPreferenceChangeListener? = null
     @Volatile private var targetContextForIpc: Context? = null
+    @Volatile private var activeRuntime: HookRuntime? = null
+    @Volatile private var lastProviderConfigVersion: Long = -1L
 
     override fun onModuleLoaded(param: ModuleLoadedParam) {
         super.onModuleLoaded(param)
@@ -45,6 +51,7 @@ class MainModule : XposedModule() {
         installContextBootstrap()
 
         val hookRuntime = HookRuntime(this, param.classLoader, eventBuffer)
+        activeRuntime = hookRuntime
         val prefs = getRemotePreferences("dsh")
         fun applyCurrentConfig() {
             val source = prefs.getString("hook_config", null)
@@ -68,7 +75,7 @@ class MainModule : XposedModule() {
         }.also { prefs.registerOnSharedPreferenceChangeListener(it) }
     }
 
-    /** Capture the app's base Context at the public Application-onCreate instrumentation boundary. */
+    /** Capture the target app Context and start polling DSH-authored configuration. */
     private fun installContextBootstrap() {
         try {
             val callback = Instrumentation::class.java.getDeclaredMethod(
@@ -81,12 +88,52 @@ class MainModule : XposedModule() {
                     // Use the target app's own Context so Binder calls carry the target UID.
                     targetContextForIpc = application.baseContext?.applicationContext
                         ?: application.baseContext
+                    startProviderConfigPolling()
                 }
                 result
             }
         } catch (t: Throwable) {
             ModuleLogger.w("context bootstrap hook failed: ${t.javaClass.simpleName}")
         }
+    }
+
+    /**
+     * DSH writes a validated config snapshot through the module provider. The target
+     * process polls with its own UID and applies changes on the config executor.
+     */
+    private fun startProviderConfigPolling() {
+        if (!providerPollStarted.compareAndSet(false, true)) return
+        providerConfigExecutor.scheduleWithFixedDelay({
+            val ctx = targetContextForIpc ?: return@scheduleWithFixedDelay
+            try {
+                val uri = Uri.parse("content://${ObservationProvider.AUTHORITY}")
+                val state = ctx.contentResolver.call(
+                    uri, ObservationProvider.METHOD_TARGET_CONFIG, null, null
+                ) ?: return@scheduleWithFixedDelay
+                val version = state.getLong(ObservationProvider.KEY_CONFIG_UPDATED, 0L)
+                if (version <= 0L || version == lastProviderConfigVersion) return@scheduleWithFixedDelay
+                lastProviderConfigVersion = version
+                val enabled = state.getBoolean(ObservationProvider.KEY_ENABLED, true)
+                val source = state.getString(ObservationProvider.KEY_CONFIG) ?: return@scheduleWithFixedDelay
+                configExecutor.execute {
+                    val runtime = activeRuntime ?: return@execute
+                    if (!enabled) {
+                        runtime.clear()
+                        ModuleLogger.i("DSH disabled Hook runtime")
+                        return@execute
+                    }
+                    try {
+                        val config = HookConfigParser.parse(source)
+                        val (applied, failed) = runtime.apply(config)
+                        ModuleLogger.i("DSH config applied; revision=$version; rules=${config.rules.size}; hooks=$applied; failed=$failed")
+                    } catch (t: Throwable) {
+                        ModuleLogger.w("DSH config rejected; revision=$version; reason=${t.javaClass.simpleName}")
+                    }
+                }
+            } catch (t: Throwable) {
+                ModuleLogger.w("DSH config poll failed; reason=${t.javaClass.simpleName}")
+            }
+        }, 0, 3, TimeUnit.SECONDS)
     }
 
     private fun scheduleReportPublish() {

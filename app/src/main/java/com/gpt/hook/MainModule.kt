@@ -165,8 +165,15 @@ class MainModule : XposedModule() {
             val className = if (request.isNull("className")) null
                 else request.optString("className").takeIf { it.isNotBlank() }
             val limit = request.optInt("limit", 100).coerceIn(1, 500)
-            val result = activeRuntime?.discover(prefix, className, limit)
-                ?: org.json.JSONObject().put("ok", false).put("error", "hook_runtime_unavailable")
+            val result = runCatching {
+                activeRuntime?.discover(prefix, className, limit)
+                    ?: org.json.JSONObject().put("ok", false).put("error", "hook_runtime_unavailable")
+            }.getOrElse { t ->
+                org.json.JSONObject()
+                    .put("ok", false)
+                    .put("error", "discovery_failed")
+                    .put("reason", t.javaClass.simpleName)
+            }
             val extras = Bundle().apply {
                 putString(ObservationProvider.KEY_DISCOVERY_ID, requestId)
                 putString(ObservationProvider.KEY_DISCOVERY_RESULT, result.toString())

@@ -112,11 +112,11 @@ class ObservationProvider : ContentProvider() {
                 require(parsed.optString("requestId").matches(Regex("[A-Fa-f0-9-]{16,64}"))) {
                     "Invalid discovery request ID"
                 }
-                prefs.edit()
+                val saved = prefs.edit()
                     .putString(KEY_DISCOVERY_REQUEST, request)
                     .remove(KEY_DISCOVERY_RESULT)
                     .commit()
-                Bundle().apply { putBoolean(KEY_ACCEPTED, true) }
+                Bundle().apply { putBoolean(KEY_ACCEPTED, saved) }
             }
             METHOD_TARGET_DISCOVERY_POLL -> {
                 enforceTargetCaller(uid)

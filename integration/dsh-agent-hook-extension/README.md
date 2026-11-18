@@ -65,11 +65,11 @@ requests must return explicit errors.
 
 - [x] Agent tool definitions and authenticated loopback client, aligned with DSH's
       native plugin loader and structured output convention.
+- [x] DSH host packages the plugin as a managed profile bundle and enables it on first install; users can later manage it in the plugin center.
 - [x] DSH host bridge routes and provider adapter for status, events, rules and enable/disable.
 - [x] Provider checks the exact DSH host package UID for host operations.
 - [x] Target-process class discovery queue and metadata-only class/method inspection.
 - [ ] Stronger explicit pairing/signature pin.
 - [ ] Device build and validation with the configured LSPosed target process.
 
-The status/events/rules/control routes are now wired in both repositories. Class discovery now runs inside the target process and returns class/method signatures only. The integration
-is not device-verified and must not be treated as end-to-end complete yet.
+The status/events/rules/control routes are wired in both repositories. The DSH APK build now packages the Agent tools as a managed profile bundle; first install enables it, and later changes remain user-managed. Class discovery runs inside the target process and returns class/method signatures only. The integration is not device-verified and must not be treated as end-to-end complete yet.

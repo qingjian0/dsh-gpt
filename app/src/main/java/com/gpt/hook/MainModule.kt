@@ -30,13 +30,18 @@ class MainModule : XposedModule() {
     private val providerConfigExecutor = Executors.newSingleThreadScheduledExecutor { runnable ->
         Thread(runnable, "dsh-provider-config").apply { isDaemon = true }
     }
+    private val discoveryPoller = Executors.newSingleThreadScheduledExecutor { runnable ->
+        Thread(runnable, "dsh-discovery-poll").apply { isDaemon = true }
+    }
     private val reportQueued = AtomicBoolean(false)
     private val providerPollStarted = AtomicBoolean(false)
+    private val discoveryPollStarted = AtomicBoolean(false)
     private val eventBuffer = EventBuffer(onChanged = ::scheduleReportPublish)
     private var configListener: SharedPreferences.OnSharedPreferenceChangeListener? = null
     @Volatile private var targetContextForIpc: Context? = null
     @Volatile private var activeRuntime: HookRuntime? = null
     @Volatile private var lastProviderConfigVersion: Long = -1L
+    @Volatile private var lastDiscoveryRequestId: String? = null
 
     override fun onModuleLoaded(param: ModuleLoadedParam) {
         super.onModuleLoaded(param)
@@ -134,6 +139,45 @@ class MainModule : XposedModule() {
                 ModuleLogger.w("DSH config poll failed; reason=${t.javaClass.simpleName}")
             }
         }, 0, 3, TimeUnit.SECONDS)
+
+        if (discoveryPollStarted.compareAndSet(false, true)) {
+            discoveryPoller.scheduleWithFixedDelay({
+                pollDiscoveryRequest()
+            }, 0, 1, TimeUnit.SECONDS)
+        }
+    }
+
+    /** Runs metadata-only discovery in the target classloader and returns the result to DSH. */
+    private fun pollDiscoveryRequest() {
+        val ctx = targetContextForIpc ?: return
+        try {
+            val uri = Uri.parse("content://${ObservationProvider.AUTHORITY}")
+            val pending = ctx.contentResolver.call(
+                uri, ObservationProvider.METHOD_TARGET_DISCOVERY_POLL, null, null
+            ) ?: return
+            val raw = pending.getString(ObservationProvider.KEY_DISCOVERY_REQUEST) ?: return
+            val request = org.json.JSONObject(raw)
+            val requestId = request.optString("requestId")
+            if (requestId.isBlank() || requestId == lastDiscoveryRequestId) return
+            lastDiscoveryRequestId = requestId
+
+            val prefix = request.optString("prefix", "com.openai.")
+            val className = if (request.isNull("className")) null
+                else request.optString("className").takeIf { it.isNotBlank() }
+            val limit = request.optInt("limit", 100).coerceIn(1, 500)
+            val result = activeRuntime?.discover(prefix, className, limit)
+                ?: org.json.JSONObject().put("ok", false).put("error", "hook_runtime_unavailable")
+            val extras = Bundle().apply {
+                putString(ObservationProvider.KEY_DISCOVERY_ID, requestId)
+                putString(ObservationProvider.KEY_DISCOVERY_RESULT, result.toString())
+            }
+            val accepted = ctx.contentResolver.call(
+                uri, ObservationProvider.METHOD_TARGET_DISCOVERY_RESULT, null, extras
+            )?.getBoolean(ObservationProvider.KEY_ACCEPTED) == true
+            if (!accepted) ModuleLogger.w("discovery result was not accepted by provider")
+        } catch (t: Throwable) {
+            ModuleLogger.w("target class discovery failed; reason=${t.javaClass.simpleName}")
+        }
     }
 
     private fun scheduleReportPublish() {

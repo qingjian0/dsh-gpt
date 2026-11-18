@@ -118,13 +118,24 @@ class HookRuntime(
             }
         }
 
-        val names = if (exactClassName != null) {
+        val names: Sequence<String> = if (exactClassName != null) {
             sequenceOf(exactClassName)
         } else {
-            dexClassNames()
-                .filter { it.startsWith(prefix) && !it.contains("$") }
-                .distinct()
-                .sorted()
+            val indexed = try {
+                dexClassNames()
+                    .filter { it.startsWith(prefix) && !it.contains("$") }
+                    .distinct()
+                    .take(20_000)
+                    .sorted()
+                    .toList()
+            } catch (t: Throwable) {
+                return JSONObject()
+                    .put("ok", false)
+                    .put("error", "class_index_unavailable")
+                    .put("reason", t.javaClass.simpleName)
+                    .put("hint", "Retry with className to inspect a known class directly")
+            }
+            indexed.asSequence()
         }
         val classes = JSONArray()
         var records = 0

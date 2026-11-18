@@ -123,7 +123,196 @@ class HookRuntime(
         } else {
             val indexed = try {
                 dexClassNames()
-                    .filter { it.startsWith(prefix) && !it.contains(' }
+                    .filter { it.startsWith(prefix) && !it.contains('                    .distinct()
+                    .take(20_000)
+                    .sorted()
+                    .toList()
+            } catch (t: Throwable) {
+                return JSONObject()
+                    .put("ok", false)
+                    .put("error", "class_index_unavailable")
+                    .put("reason", t.javaClass.simpleName)
+                    .put("hint", "Retry with className to inspect a known class directly")
+            }
+            indexed.asSequence()
+        }
+        val classes = JSONArray()
+        var records = 0
+        var inspected = 0
+        for (name in names) {
+            if (records >= limit) break
+            inspected++
+            val type = try {
+                Class.forName(name, false, classLoader)
+            } catch (_: Throwable) {
+                continue
+            }
+            val methods = JSONArray()
+            val candidates = runCatching {
+                type.declaredMethods.sortedBy { it.toGenericString() }
+            }.getOrDefault(emptyList())
+            for (method in candidates) {
+                if (records >= limit) break
+                methods.put(method.toGenericString().take(1000))
+                records++
+            }
+            if (methods.length() > 0 || exactClassName != null) {
+                classes.put(JSONObject()
+                    .put("className", type.name)
+                    .put("methodCount", methods.length())
+                    .put("methods", methods))
+            }
+        }
+        return JSONObject()
+            .put("ok", true)
+            .put("prefix", prefix)
+            .put("exactClassName", exactClassName ?: JSONObject.NULL)
+            .put("classCount", classes.length())
+            .put("recordCount", records)
+            .put("classesInspected", inspected)
+            .put("classes", classes)
+    }
+
+    private fun dexClassNames(): Sequence<String> = sequence {
+        val base = classLoader as? BaseDexClassLoader
+            ?: throw IllegalStateException("Target class loader is not a BaseDexClassLoader")
+        val pathListField = BaseDexClassLoader::class.java.getDeclaredField("pathList").apply {
+            isAccessible = true
+        }
+        val pathList = pathListField.get(base)
+        val elementsField = pathList.javaClass.getDeclaredField("dexElements").apply {
+            isAccessible = true
+        }
+        val elements = elementsField.get(pathList) as? Array<*>
+            ?: throw IllegalStateException("Dex elements are unavailable")
+        for (element in elements) {
+            if (element == null) continue
+            val dexField = runCatching {
+                element.javaClass.getDeclaredField("dexFile").apply { isAccessible = true }
+            }.getOrNull() ?: continue
+            val dex = runCatching { dexField.get(element) as? DexFile }.getOrNull() ?: continue
+            val entries = runCatching { dex.entries() }.getOrNull() ?: continue
+            while (entries.hasMoreElements()) yield(entries.nextElement())
+        }
+    }
+
+    @Synchronized
+    fun clear() {
+        installed.values.forEach { runCatching { it.handle.unhook() } }
+        installed.clear()
+        counters.clear()
+    }
+
+    private fun methodMatches(method: Method, rule: HookRule): Boolean {
+        if (method.name != rule.methodName) return false
+        if (rule.parameterTypes.isEmpty()) return true
+        return method.parameterTypes.map { it.name } == rule.parameterTypes
+    }
+
+    private fun stableHookId(ruleId: String, signature: String): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest(signature.toByteArray(Charsets.UTF_8))
+            .take(12)
+            .joinToString("") { "%02x".format(it) }
+        return "dsh.$ruleId.$digest"
+    }
+}
+) }
+                    .distinct()
+                    .take(20_000)
+                    .sorted()
+                    .toList()
+            } catch (t: Throwable) {
+                return JSONObject()
+                    .put("ok", false)
+                    .put("error", "class_index_unavailable")
+                    .put("reason", t.javaClass.simpleName)
+                    .put("hint", "Retry with className to inspect a known class directly")
+            }
+            indexed.asSequence()
+        }
+        val classes = JSONArray()
+        var records = 0
+        var inspected = 0
+        for (name in names) {
+            if (records >= limit) break
+            inspected++
+            val type = try {
+                Class.forName(name, false, classLoader)
+            } catch (_: Throwable) {
+                continue
+            }
+            val methods = JSONArray()
+            val candidates = runCatching {
+                type.declaredMethods.sortedBy { it.toGenericString() }
+            }.getOrDefault(emptyList())
+            for (method in candidates) {
+                if (records >= limit) break
+                methods.put(method.toGenericString().take(1000))
+                records++
+            }
+            if (methods.length() > 0 || exactClassName != null) {
+                classes.put(JSONObject()
+                    .put("className", type.name)
+                    .put("methodCount", methods.length())
+                    .put("methods", methods))
+            }
+        }
+        return JSONObject()
+            .put("ok", true)
+            .put("prefix", prefix)
+            .put("exactClassName", exactClassName ?: JSONObject.NULL)
+            .put("classCount", classes.length())
+            .put("recordCount", records)
+            .put("classesInspected", inspected)
+            .put("classes", classes)
+    }
+
+    private fun dexClassNames(): Sequence<String> = sequence {
+        val base = classLoader as? BaseDexClassLoader
+            ?: throw IllegalStateException("Target class loader is not a BaseDexClassLoader")
+        val pathListField = BaseDexClassLoader::class.java.getDeclaredField("pathList").apply {
+            isAccessible = true
+        }
+        val pathList = pathListField.get(base)
+        val elementsField = pathList.javaClass.getDeclaredField("dexElements").apply {
+            isAccessible = true
+        }
+        val elements = elementsField.get(pathList) as? Array<*>
+            ?: throw IllegalStateException("Dex elements are unavailable")
+        for (element in elements) {
+            if (element == null) continue
+            val dexField = runCatching {
+                element.javaClass.getDeclaredField("dexFile").apply { isAccessible = true }
+            }.getOrNull() ?: continue
+            val dex = runCatching { dexField.get(element) as? DexFile }.getOrNull() ?: continue
+            val entries = runCatching { dex.entries() }.getOrNull() ?: continue
+            while (entries.hasMoreElements()) yield(entries.nextElement())
+        }
+    }
+
+    @Synchronized
+    fun clear() {
+        installed.values.forEach { runCatching { it.handle.unhook() } }
+        installed.clear()
+        counters.clear()
+    }
+
+    private fun methodMatches(method: Method, rule: HookRule): Boolean {
+        if (method.name != rule.methodName) return false
+        if (rule.parameterTypes.isEmpty()) return true
+        return method.parameterTypes.map { it.name } == rule.parameterTypes
+    }
+
+    private fun stableHookId(ruleId: String, signature: String): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest(signature.toByteArray(Charsets.UTF_8))
+            .take(12)
+            .joinToString("") { "%02x".format(it) }
+        return "dsh.$ruleId.$digest"
+    }
+}
+) }
                     .distinct()
                     .take(20_000)
                     .sorted()

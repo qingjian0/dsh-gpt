@@ -67,10 +67,9 @@ requests must return explicit errors.
       native plugin loader and structured output convention.
 - [x] DSH host bridge routes and provider adapter for status, events, rules and enable/disable.
 - [x] Provider checks the exact DSH host package UID for host operations.
-- [ ] Target-process class discovery queue (the current discovery route returns an explicit 501).
+- [x] Target-process class discovery queue and metadata-only class/method inspection.
 - [ ] Stronger explicit pairing/signature pin.
 - [ ] Device build and validation with the configured LSPosed target process.
 
-The status/events/rules/control routes are now wired in both repositories. Class discovery
-remains an explicit 501 until the target-process request queue is implemented. The integration
+The status/events/rules/control routes are now wired in both repositories. Class discovery now runs inside the target process and returns class/method signatures only. The integration
 is not device-verified and must not be treated as end-to-end complete yet.

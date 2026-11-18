@@ -44,10 +44,10 @@ The following host bridge routes are the intended contract for
 
 The bridge adapter must call `contentResolver.call()` on
 `content://com.gpt.hook.observations`; it must not expose the provider directly to
-the engine or pass `DSH_BRIDGE_TOKEN` through to the target process. The provider
-must authenticate the DSH host independently (exact package UID plus an explicit
-pairing credential, or a verified signing identity) before granting host operations.
-Module-app-only read access must not be weakened to arbitrary callers.
+the engine or pass `DSH_BRIDGE_TOKEN` through to the target process. The provider authenticates host operations by checking the Binder caller UID maps to
+the exact DSH package (`app.dsh.mobile`). This is separate from the loopback bridge
+token. Stronger explicit pairing/signature pinning remains follow-up work. Module-app-only
+read access remains restricted, and target-process config reads are limited to the target UID.
 
 ## Rules and observations
 
@@ -65,10 +65,12 @@ requests must return explicit errors.
 
 - [x] Agent tool definitions and authenticated loopback client, aligned with DSH's
       native plugin loader and structured output convention.
-- [ ] DSH host bridge routes and provider adapter.
-- [ ] Provider host-caller authentication / pairing.
-- [ ] Device validation with the configured LSPosed target process.
+- [x] DSH host bridge routes and provider adapter for status, events, rules and enable/disable.
+- [x] Provider checks the exact DSH host package UID for host operations.
+- [ ] Target-process class discovery queue (the current discovery route returns an explicit 501).
+- [ ] Stronger explicit pairing/signature pin.
+- [ ] Device build and validation with the configured LSPosed target process.
 
-The HTTP routes above are a contract, not a claim that the host-side endpoints are
-already implemented. The plugin is not end-to-end functional until those items are
-completed and device-tested.
+The status/events/rules/control routes are now wired in both repositories. Class discovery
+remains an explicit 501 until the target-process request queue is implemented. The integration
+is not device-verified and must not be treated as end-to-end complete yet.

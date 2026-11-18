@@ -123,7 +123,7 @@ class HookRuntime(
         } else {
             val indexed = try {
                 dexClassNames()
-                    .filter { it.startsWith(prefix) && !it.contains('                    .distinct()
+                    .filter { it.startsWith(prefix) && it.indexOf(36.toChar()) < 0 }
                     .take(20_000)
                     .sorted()
                     .toList()

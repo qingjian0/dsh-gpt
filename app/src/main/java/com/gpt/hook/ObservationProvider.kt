@@ -102,6 +102,58 @@ class ObservationProvider : ContentProvider() {
                     putLong(KEY_CONFIG_UPDATED, prefs.getLong(KEY_CONFIG_UPDATED, 0L))
                 }
             }
+            METHOD_HOST_DISCOVER -> {
+                enforceDshHostCaller(uid)
+                val request = extras?.getString(KEY_DISCOVERY_REQUEST).orEmpty()
+                require(request.toByteArray(Charsets.UTF_8).size <= 16 * 1024) {
+                    "Discovery request exceeds size limit"
+                }
+                val parsed = JSONObject(request)
+                require(parsed.optString("requestId").matches(Regex("[A-Fa-f0-9-]{16,64}"))) {
+                    "Invalid discovery request ID"
+                }
+                prefs.edit()
+                    .putString(KEY_DISCOVERY_REQUEST, request)
+                    .remove(KEY_DISCOVERY_RESULT)
+                    .commit()
+                Bundle().apply { putBoolean(KEY_ACCEPTED, true) }
+            }
+            METHOD_TARGET_DISCOVERY_POLL -> {
+                enforceTargetCaller(uid)
+                Bundle().apply {
+                    putString(KEY_DISCOVERY_REQUEST, prefs.getString(KEY_DISCOVERY_REQUEST, null))
+                }
+            }
+            METHOD_TARGET_DISCOVERY_RESULT -> {
+                enforceTargetCaller(uid)
+                val requestId = extras?.getString(KEY_DISCOVERY_ID).orEmpty()
+                val result = extras?.getString(KEY_DISCOVERY_RESULT).orEmpty()
+                require(requestId.matches(Regex("[A-Fa-f0-9-]{16,64}"))) { "Invalid discovery request ID" }
+                require(result.toByteArray(Charsets.UTF_8).size <= MAX_REPORT_BYTES) { "Discovery result exceeds size limit" }
+                val request = prefs.getString(KEY_DISCOVERY_REQUEST, null)?.let(::JSONObject)
+                if (request?.optString("requestId") != requestId) {
+                    throw IllegalStateException("Discovery request is no longer current")
+                }
+                prefs.edit()
+                    .putString(KEY_DISCOVERY_RESULT, JSONObject()
+                        .put("requestId", requestId)
+                        .put("result", result)
+                        .put("completedAt", System.currentTimeMillis())
+                        .toString())
+                    .commit()
+                Bundle().apply { putBoolean(KEY_ACCEPTED, true) }
+            }
+            METHOD_HOST_DISCOVERY_RESULT -> {
+                enforceDshHostCaller(uid)
+                val requestId = extras?.getString(KEY_DISCOVERY_ID).orEmpty()
+                val stored = prefs.getString(KEY_DISCOVERY_RESULT, null)?.let(::JSONObject)
+                Bundle().apply {
+                    if (stored?.optString("requestId") == requestId) {
+                        putString(KEY_DISCOVERY_RESULT, stored.optString("result"))
+                        putLong(KEY_UPDATED, stored.optLong("completedAt", 0L))
+                    }
+                }
+            }
             else -> throw IllegalArgumentException("Unknown provider method")
         }
     }
@@ -154,12 +206,19 @@ class ObservationProvider : ContentProvider() {
         const val METHOD_HOST_SET_CONFIG = "host_set_config"
         const val METHOD_HOST_SET_ENABLED = "host_set_enabled"
         const val METHOD_TARGET_CONFIG = "target_config"
+        const val METHOD_HOST_DISCOVER = "host_discover"
+        const val METHOD_TARGET_DISCOVERY_POLL = "target_discovery_poll"
+        const val METHOD_TARGET_DISCOVERY_RESULT = "target_discovery_result"
+        const val METHOD_HOST_DISCOVERY_RESULT = "host_discovery_result"
         const val KEY_REPORT = "report"
         const val KEY_ACCEPTED = "accepted"
         const val KEY_UPDATED = "updatedAt"
         const val KEY_CONFIG = "config"
         const val KEY_ENABLED = "enabled"
         const val KEY_CONFIG_UPDATED = "configUpdatedAt"
+        const val KEY_DISCOVERY_REQUEST = "discoveryRequest"
+        const val KEY_DISCOVERY_RESULT = "discoveryResult"
+        const val KEY_DISCOVERY_ID = "discoveryId"
         private const val PREFS = "dsh-observations"
         private const val MAX_REPORT_BYTES = 128 * 1024
         private const val TARGET_PACKAGE = "com.openai.chatgpt"

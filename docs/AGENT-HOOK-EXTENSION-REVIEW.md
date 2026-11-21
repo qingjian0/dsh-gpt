@@ -138,3 +138,13 @@ README 已将显式 pairing / signature pin 标为 follow-up。进入正式发�
 - [ ] 完成设备验收后才合并 Runtime 子集。
 
 **最终原则：Agent 可以持续研究和提出规则，但执行权始终由目标进程中的受限 Runtime 管理；发现过程有资源上限，规则有 schema 和权限边界，任何失败都能明确报告并恢复。**
+
+
+### P0 — DSH 宿主桥接实现定位未闭环
+
+本轮对 `qingjian0/Deepseek-Harness-Local-Android` 当前 `main` 做了只读核对：
+- `AgentBridge.kt` 和 `ShizukuHttpBridge.kt` 中未检索到 `/hook/status`、`/hook/events`、`ObservationProvider` 等对应路由/Provider 适配符号。
+- 对仓库代码搜索 `/hook/status`、`dsh_hook_discover` 和 `ObservationProvider.METHOD_HOST_DISCOVER` 均未找到匹配。
+- 因此，Agent 插件 README 中“status/events/rules/control routes are wired in both repositories”的描述，**目前无法由宿主仓库 main 的可检索代码证实**。
+
+这不等于断言实现不存在：它可能位于其他分支、未跟踪的运行时补丁、生成代码或尚未推送的提交。正式接入前必须定位具体文件和 commit，并做端到端测试；在此之前，Agent 插件只能标记为“模块侧 Provider + 插件工具代码存在，宿主路由待核实”，不能标记为双仓库已贯通。

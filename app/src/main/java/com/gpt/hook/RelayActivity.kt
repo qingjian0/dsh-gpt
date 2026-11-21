@@ -234,7 +234,7 @@ class RelayActivity : Activity() {
 
         logScroll.addView(
             logView,
-            ScrollView.LayoutParams(
+            ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
             )

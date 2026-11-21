@@ -1,0 +1,20 @@
+{
+  "access_token": "eyJhbGciOiJS…<redacted len=2060>",
+  "refresh_token": "rt.1.AABubk0…<redacted len=196>",
+  "id_token": "eyJhbGciOiJS…<redacted len=1684>",
+  "token_type": "DPoP",
+  "scope": "email model.read model.request offline_access openid organization.read organization.write profile",
+  "expires_at": "2026-11-27T07:56:33.180Z",
+  "key_pair_alias": "openai.login.dpop.842d54a8-a753-4f8e-8c89-555d2a2a8ab6",
+  "client_id": "app_xwBKzt04752TTSfXnki17hmB",
+  "issuer": "https://auth.openai.com",
+  "audience": [
+    "https://api.openai.com/v1"
+  ],
+  "dpop_cnf_jkt": "8QimZV51n51x-JSKFHQeChd6T5GV2eX3KOrb9nANTjE",
+  "user_id": "user-qZIk58qGss72HGh2CY0NI9N6",
+  "account_id": "ec6cb46c-ba2d-4a9b-a295-1c624c0f51a3",
+  "plan_type": "free",
+  "session_id": "authsess_vHOl6m6Ebj2zTTXZwVPgRTE6",
+  "oai_did": "711f4d8c21cc498cac150984836fc1e4"
+}

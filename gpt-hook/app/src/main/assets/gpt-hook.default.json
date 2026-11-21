@@ -1,0 +1,30 @@
+{
+  "scope": [
+    "com.openai.chatgpt"
+  ],
+  "device_spoof": true,
+  "root_cloak": true,
+  "net_watch": true,
+  "telemetry_block": true,
+  "feature_unlock": true,
+  "dump_requests": true,
+  "dump_headers": true,
+  "scan_on_start": false,
+  "spoof": {
+    "MANUFACTURER": "Google",
+    "BRAND": "google",
+    "MODEL": "Pixel 9 Pro",
+    "DEVICE": "caiman",
+    "PRODUCT": "caiman",
+    "HARDWARE": "caiman",
+    "FINGERPRINT": "google/caiman/caiman:15/AP4A.250105.002/1234567:user/release-keys",
+    "BOOTLOADER": "caiman-1.0",
+    "TAGS": "release-keys",
+    "TYPE": "user",
+    "HOST": "abfarm"
+  },
+  "android_id": "a1b2c3d4e5f60718",
+  "fields": [],
+  "noop": [],
+  "scan_filter": "plus|subscri|entitle|paywall|premium|feature|flag|integrity|attest|statsig|guard|abuse|bot"
+}

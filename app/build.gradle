@@ -41,6 +41,12 @@ android {
     }
 }
 
+// Kotlin 2.x: keep jvmTarget aligned with compileOptions (Java 21), otherwise
+// the AGP JVM-target validation fails the build.
+kotlin {
+    compilerOptions.jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21)
+}
+
 dependencies {
     compileOnly libs.libxposed
     implementation libs.libxposed.service

@@ -1,0 +1,5 @@
+{
+  "access_token": "<从 ChatGPT 应用 shared_prefs/com.auth0.authentication.storage.xml 的 com.auth0.access_token 取>",
+  "oai_did": "<files/INSTALLATION 的内容>",
+  "session_id": "<access_token JWT 的 session_id claim，可留空>"
+}

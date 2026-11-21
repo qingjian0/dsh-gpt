@@ -1,0 +1,48 @@
+你是资深 Android 开发者。请为一个 LSPosed 模块的控制 app 编写「本地 API 网关」的设置界面。
+
+平台约束：Kotlin，纯代码构建 View（不用 XML 布局、不用 Compose、不用 ViewBinding），minSdk 27 / targetSdk 37。
+
+可直接调用的已有 API（不要修改它们，只调用）：
+```kotlin
+package com.gpt.hook.api
+
+data class RelayConfig(
+    val enabled: Boolean = false,
+    val port: Int = 8766,
+    val lan: Boolean = false,
+    val apiKey: String = "",
+    val upstreamBase: String = "https://android.chat.openai.com",
+    val accessToken: String = "",
+    val oaiDid: String = "",
+    val sessionId: String = "",
+    val userAgent: String = "ChatGPT/1.2026.321 (Android 15; 22081212C)",
+) {
+    val ready: Boolean
+    companion object {
+        fun load(ctx: Context): RelayConfig
+        fun save(ctx: Context, cfg: RelayConfig)
+        fun importKit(ctx: Context, json: String): RelayConfig   // json 形如 {"access_token":"…","oai_did":"…"}
+    }
+}
+
+class ApiService : Service() {
+    companion object {
+        fun start(ctx: Context)
+        fun stop(ctx: Context)
+    }
+}
+```
+
+界面要求（一个 Activity，根布局 ScrollView + 垂直 LinearLayout）：
+1. 标题「DSH GPT · 本地 API 网关」，标题下状态行：`运行中/已停止 · 端口 N · 127.0.0.1|0.0.0.0 · 已就绪/未就绪`。
+2. 两个 Switch：「启用」「局域网监听 0.0.0.0」。切换即保存并 start/stop 服务。
+3. 四个输入框：端口（数字）、客户端 API Key（可留空）、oai-did、access_token（多行、等宽字体、等宽、不自动纠正）。
+4. 一行按钮：保存并重启 / 导入 kit.json / 复制客户端配置 / 测试 /health。
+   - 导入 kit.json：从剪贴板取 JSON，调用 RelayConfig.importKit，成功后回填控件。
+   - 复制客户端配置：复制 `base_url=http://127.0.0.1:<port>/v1\napi_key=<key>`。
+   - 测试 /health：新线程 + HttpURLConnection 请求 `http://127.0.0.1:<port>/health`，3 秒超时，结果回主线程写日志区；失败显示异常类名。
+5. 底部日志区：等宽 TextView 包在 ScrollView 里（maxLines 不限，保留最近 200 条），每次操作追加一行带时间戳的记录。
+6. 进入时用 RelayConfig.load 回填所有控件；onResume 只刷新状态行，不覆盖用户正在编辑的内容。
+7. 全程中文文案，不用第三方库，不申请运行时权限（POST_NOTIFICATIONS 由后续处理）。
+
+只输出 MainActivity.kt 的完整代码，用 ```kotlin 代码块包裹，不要任何解释文字。

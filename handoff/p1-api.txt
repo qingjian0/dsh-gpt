@@ -1,0 +1,58 @@
+你是资深 Android/Kotlin 工程师。为 LSPosed 模块 app（包 com.gpt.hook）实现「ChatGPT 账号反代」的 API 层，共 3 个文件。
+
+## 背景事实（已实测，不要质疑、不要加别的东西）
+- 上游只有 `https://android.chat.openai.com`，ChatGPT 安卓客户端用的就是它。
+- 鉴权只要两个头，**不需要 DPoP proof、不需要 cookie、不需要 play-integrity**：
+  `Authorization: DPoP <access_token>` 和 `oai-did: <install_id>`。
+- 可选头 `oai-session-id`。
+- 对话接口 `POST /backend-api/conversation`，body 见下，响应是 `text/event-stream`，每条 `data: {...}`，最后 `data: [DONE]`。
+- 响应里 assistant 的文本在 `message.content.parts[0]`，而且**每条 data 都携带完整文本（全量重复）**，必须按前缀差量得出 delta。
+- `-wm` 结尾的模型是 Work 模型，免费号 403，所以模型白名单固定为：auto / gpt-6 / gpt-6-mini / gpt-5-6-mini / research。
+
+## 平台约束
+- Kotlin 2.2，minSdk 27，targetSdk 37。
+- 只用 `android.*`、`java.*`、`org.json.*`，**禁止任何第三方库**（不许 OkHttp、不许 NanoHTTPD、不许 kotlinx）。
+- 不要协程，用普通 Thread / ExecutorService。
+- 不用 Compose、不用 XML。
+
+## 文件 1：`api/RelayConfig.kt`
+`data class RelayConfig`，字段与默认值：
+enabled:Boolean=false, port:Int=8766, lan:Boolean=false, apiKey:String="",
+upstreamBase:String="https://android.chat.openai.com", accessToken:String="", oaiDid:String="",
+sessionId:String="", userAgent:String="ChatGPT/1.2026.321 (Android 15; 22081212C)"
+- 计算属性 `ready` = accessToken 与 oaiDid 都非空。
+- companion：`load(ctx): RelayConfig`、`save(ctx, cfg)`（SharedPreferences 名 "relay"）、
+  `importKit(ctx, json): RelayConfig`（json 形如 {"access_token":"…","oai_did":"…","session_id":"…"}，用 org.json.JSONObject 解析，缺字段保留原值，保存后返回新配置）。
+
+## 文件 2：`api/ChatGptClient.kt`
+`class ChatGptClient(private val cfg: RelayConfig)`
+- `fun open(method:String, path:String, body:ByteArray?, accept:String): HttpURLConnection`
+  - base = cfg.upstreamBase 去掉尾部 `/`；path 以 `/backend` 开头就原样拼，否则拼 `/backend-api` + path。
+  - 设置 Authorization / oai-did / oai-session-id(非空时) / User-Agent / Accept / Accept-Language。
+  - connectTimeout 15000，readTimeout 120000。
+  - body 非空时 doOutput=true、Content-Type application/json、setFixedLengthStreamingMode 后写出。
+- 不要自己读响应体，交给调用方。
+
+## 文件 3：`api/OpenAiCompat.kt`
+`object OpenAiCompat`，纯函数，无状态：
+- `val DEFAULT_MODELS: List<String> = listOf("auto","gpt-6","gpt-6-mini","gpt-5-6-mini","research")`
+- `fun toConversation(openAi: JSONObject): JSONObject`
+  把 OpenAI messages 拼成一条 user 文本：system 消息加前缀 `System: `，assistant 加 `Assistant: `，各自一行；然后空行；再拼最后一条 user 的文本。
+  输出：
+  ```json
+  {"action":"next",
+   "messages":[{"id":"<uuid>","author":{"role":"user"},"content":{"content_type":"text","parts":["<拼接文本>"]}}],
+   "parent_message_id":"<uuid>","model":"<openAi.model，空则 auto>",
+   "conversation_mode":{"kind":"primary_assistant"},
+   "timezone_offset_min":-480,"history_and_training_disabled":false}
+  ```
+  content 字段可能是 String、JSONArray（元素是字符串或 {"text":...}）、或 {"parts":[...]}，三种都要兼容。
+- `fun modelsJson(): String` → `{"object":"list","data":[{"id":..,"object":"model","created":0,"owned_by":"openai-session"}]}`
+- `fun chunk(id:String, model:String, delta:String, finish:String?): String`
+  → `{"id":..,"object":"chat.completion.chunk","created":<秒>,"model":..,"choices":[{"index":0,"delta":{"content":..} 或 {},"finish_reason":null|"stop"}]}`
+  delta 为空字符串时 delta 用 `{}`。
+- `fun completion(id:String, model:String, text:String): String`
+  → `{"id":..,"object":"chat.completion","created":<秒>,"model":..,"choices":[{"index":0,"message":{"role":"assistant","content":..},"finish_reason":"stop"}]}`
+
+## 输出格式
+三个文件依次输出，每个用 ```` ```kotlin file=api/RelayConfig.kt ```` 这样的围栏标注路径，不要任何解释文字，不要省略代码。

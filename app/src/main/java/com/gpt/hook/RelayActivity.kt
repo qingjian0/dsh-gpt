@@ -14,6 +14,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Switch
@@ -66,7 +67,7 @@ class RelayActivity : Activity() {
 
     private fun buildLayout() {
         val outerScroll = ScrollView(this).apply {
-            fillViewport = true
+            isFillViewport = true
         }
 
         root = LinearLayout(this).apply {
@@ -76,7 +77,7 @@ class RelayActivity : Activity() {
 
         outerScroll.addView(
             root,
-            ScrollView.LayoutParams(
+            FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
             )
@@ -292,10 +293,11 @@ class RelayActivity : Activity() {
             this.hint = hint
             this.inputType = inputType
             textSize = 14f
-            singleLine = inputType == InputType.TYPE_CLASS_NUMBER ||
-                inputType == InputType.TYPE_CLASS_TEXT ||
-                inputType == InputType.TYPE_CLASS_TEXT or
-                InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setSingleLine(
+                inputType == InputType.TYPE_CLASS_NUMBER ||
+                    inputType == InputType.TYPE_CLASS_TEXT ||
+                    inputType == (InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD)
+            )
             setPadding(dp(12), dp(10), dp(12), dp(10))
         }
 

@@ -222,16 +222,28 @@ class LocalApiServer(@Volatile var cfg: RelayConfig) {
     private fun extractDelta(payload: String, sent: String, key: String): String? {
         if (payload.isEmpty() || payload == "[DONE]") return null
         val obj = try { JSONObject(payload) } catch (t: Throwable) { return null }
-        val msg = obj.optJSONObject("message") ?: return null
-        val role = msg.optJSONObject("author")?.optString("role")
-        if (role != "assistant") return null
+        val current = sessions[key]
         val conversationId = obj.optString("conversation_id")
             .takeIf { it.isNotBlank() && it != "null" }
-            ?: sessions[key]?.conversationId.orEmpty()
-        val messageId = msg.optString("id").takeIf { it.isNotBlank() && it != "null" }
-        if (conversationId.isNotBlank() && messageId != null) {
-            sessions[key] = RelaySession(conversationId, messageId, System.currentTimeMillis())
+            ?: current?.conversationId
+        val msg = obj.optJSONObject("message")
+        if (msg == null) {
+            if (conversationId != null && current != null) {
+                sessions[key] = current.copy(conversationId = conversationId, updatedAt = System.currentTimeMillis())
+            }
+            return null
         }
+        val role = msg.optJSONObject("author")?.optString("role")
+        val messageId = msg.optString("id").takeIf { it.isNotBlank() && it != "null" }
+        val parentMessageId = when {
+            role == "assistant" -> messageId ?: current?.parentMessageId
+            role == "user" && current?.parentMessageId.isNullOrBlank() -> messageId
+            else -> current?.parentMessageId
+        }
+        if (conversationId != null && parentMessageId != null) {
+            sessions[key] = RelaySession(conversationId, parentMessageId, System.currentTimeMillis())
+        }
+        if (role != "assistant") return null
         val parts = msg.optJSONObject("content")?.optJSONArray("parts") ?: return null
         val full = parts.optString(0, "")
         if (full.isEmpty() || full.length <= sent.length) return null
@@ -249,6 +261,7 @@ class LocalApiServer(@Volatile var cfg: RelayConfig) {
     }
 
     private fun sessionsJson(): String {
+        pruneSessions()
         val rows = JSONArray()
         sessions.forEach { (key, value) ->
             rows.put(JSONObject()

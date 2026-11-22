@@ -56,7 +56,6 @@ class LocalApiServer(@Volatile var cfg: RelayConfig) {
         running = false
         try { server?.close() } catch (_: Throwable) { }
         server = null
-        pool.shutdownNow()
     }
 
     private fun handle(socket: Socket) {

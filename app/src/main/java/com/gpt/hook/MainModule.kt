@@ -7,6 +7,7 @@ import android.content.SharedPreferences
 import android.net.Uri
 import android.os.Bundle
 import com.gpt.hook.diagnostics.EventBuffer
+import com.gpt.hook.diagnostics.ClassLoadWatcher
 import com.gpt.hook.diagnostics.HookConfigParser
 import com.gpt.hook.diagnostics.HookRuntime
 import com.gpt.hook.diagnostics.ModuleLogger
@@ -42,6 +43,7 @@ class MainModule : XposedModule() {
     private val discoveryPollStarted = AtomicBoolean(false)
     private val discoveryWorkQueued = AtomicBoolean(false)
     private val eventBuffer = EventBuffer(onChanged = ::scheduleReportPublish)
+    private val classLoadWatcher = ClassLoadWatcher(this, eventBuffer)
     private var configListener: SharedPreferences.OnSharedPreferenceChangeListener? = null
     @Volatile private var targetContextForIpc: Context? = null
     @Volatile private var activeRuntime: HookRuntime? = null
@@ -69,6 +71,7 @@ class MainModule : XposedModule() {
             configExecutor.execute {
                 try {
                     val config = HookConfigParser.parse(source)
+                    updateClassLoadWatcher(config.observeClassLoads)
                     val report = hookRuntime.applyWithReport(config)
                     logApplyReport(config.rules.size, report.added, report.replaced, report.retained, report.removed, report.failed)
                 } catch (t: Throwable) {
@@ -132,12 +135,14 @@ class MainModule : XposedModule() {
             configExecutor.execute {
                 val runtime = activeRuntime ?: return@execute
                 if (!enabled) {
+                    updateClassLoadWatcher(false)
                     val removed = runtime.clear()
                     ModuleLogger.i("DSH disabled Hook runtime; removed=$removed; revision=$version")
                     return@execute
                 }
                 try {
                     val config = HookConfigParser.parse(source)
+                    updateClassLoadWatcher(config.observeClassLoads)
                     val report = runtime.applyWithReport(config)
                     logApplyReport(config.rules.size, report.added, report.replaced, report.retained, report.removed, report.failed, version)
                 } catch (t: Throwable) {
@@ -218,6 +223,18 @@ class MainModule : XposedModule() {
         } catch (t: Throwable) {
             discoveryWorkQueued.set(false)
             ModuleLogger.w("Discovery request poll failed; reason=${t.javaClass.simpleName}")
+        }
+    }
+
+    private fun updateClassLoadWatcher(enabled: Boolean) {
+        try {
+            if (enabled) {
+                if (classLoadWatcher.enable()) ModuleLogger.i("ClassLoader metadata watcher enabled")
+            } else {
+                if (classLoadWatcher.disable()) ModuleLogger.i("ClassLoader metadata watcher disabled")
+            }
+        } catch (t: Throwable) {
+            ModuleLogger.w("ClassLoader metadata watcher update failed; reason=${t.javaClass.simpleName}")
         }
     }
 

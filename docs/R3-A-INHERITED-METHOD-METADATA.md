@@ -9,6 +9,7 @@ Base: `refactor/r2-classload-observer`
 - Include public methods inherited from superclasses and interfaces.
 - Keep methods declared directly on the target class in the existing `methods` array.
 - Reuse the existing per-request member-record budget; inherited signatures consume the same budget.
+- Stop declared method, constructor and field enumeration as soon as the record or wall-clock budget is exhausted; mark the class metadata as truncated.
 - Mark `metadataTruncated` when inherited metadata exceeds the remaining budget or is conservatively skipped.
 - Report `inheritedMetadataUnavailable` when runtime reflection refuses access to inherited metadata.
 - Never invoke a discovered method, initialize a class, or read a field value.

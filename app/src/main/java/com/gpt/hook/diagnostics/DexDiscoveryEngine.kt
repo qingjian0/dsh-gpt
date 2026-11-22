@@ -77,6 +77,8 @@ class DexDiscoveryEngine(
         }
 
         val classes = JSONArray()
+        val candidateProposals = JSONArray()
+        var candidateCount = 0
         var records = 0
         var inspected = 0
         var timedOut = false
@@ -113,6 +115,16 @@ class DexDiscoveryEngine(
                         break
                     }
                     methods.put(method.toGenericString())
+                    if (candidateCount < MAX_CANDIDATES_PER_RESPONSE) {
+                        runCatching {
+                            RuntimeCandidateProposal.fromMethod(
+                                TARGET_PACKAGE, type.name, method, listOf("dex-discovery:${type.name}")
+                            ).toJson()
+                        }.onSuccess { candidate ->
+                            candidateProposals.put(candidate)
+                            candidateCount++
+                        }
+                    }
                     records++
                 }
                 if (System.nanoTime() >= deadline) classWasTruncated = true
@@ -121,6 +133,17 @@ class DexDiscoveryEngine(
                     inherited.signatures.forEach { signature ->
                         inheritedMethods.put(signature)
                         records++
+                    }
+                    inherited.methods.forEach { method ->
+                        if (candidateCount >= MAX_CANDIDATES_PER_RESPONSE) return@forEach
+                        runCatching {
+                            RuntimeCandidateProposal.fromMethod(
+                                TARGET_PACKAGE, type.name, method, listOf("dex-discovery:${type.name}")
+                            ).toJson()
+                        }.onSuccess { candidate ->
+                            candidateProposals.put(candidate)
+                            candidateCount++
+                        }
                     }
                     classWasTruncated = classWasTruncated || inherited.truncated
                     inheritedMetadataUnavailable = inherited.unavailable
@@ -198,6 +221,8 @@ class DexDiscoveryEngine(
             .put("recordCount", records)
             .put("elapsedMs", elapsedMs)
             .put("classes", classes)
+            .put("candidateProposals", candidateProposals)
+            .put("candidateCount", candidateCount)
 
         // Defensive final cap; omit records rather than returning an oversized Binder payload.
         if (output.toString().toByteArray(Charsets.UTF_8).size > limits.maxResponseBytes) {
@@ -209,6 +234,11 @@ class DexDiscoveryEngine(
                 .put("elapsedMs", elapsedMs)
         }
         return output
+    }
+
+    private companion object {
+        const val TARGET_PACKAGE = "com.openai.chatgpt"
+        const val MAX_CANDIDATES_PER_RESPONSE = 32
     }
 
     private data class IndexResult(

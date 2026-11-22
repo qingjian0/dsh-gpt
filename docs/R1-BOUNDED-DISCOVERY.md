@@ -50,10 +50,16 @@ commits.
 
 ## Validation status
 
-- Earlier bounded-discovery compile passed on the branch before Provider queue integration.
-- Earlier JVM budget tests passed.
-- The Provider queue, MainModule polling, Hook lifecycle report and task retry changes
-  require the current CI run to finish before they can be marked build-verified.
+- Android Debug build, JVM unit tests, and LSPosed metadata verification passed on
+  commit `53843a3c1dabe9df4b2ff0e9bd4572f9e3e60fe2`:
+  https://github.com/qingjian0/dsh-gpt/actions/runs/45001709372
+- The verified build includes the bounded discovery engine, Provider queue, MainModule
+  polling, Hook lifecycle report, task leases and retry model.
+- Actual Debug APK measured from the Actions artifact: 988,410 bytes. Baseline Debug APK
+  from run `44917392015`: 964,118 bytes. Delta: +24,292 bytes (+2.52%).
+- Uncompressed DEX total: 2,835,277 bytes versus baseline 2,783,213 bytes (+52,064 bytes).
+- APK inspection found no Node runtime, model payload, native libraries, or Agent plugin
+  bundle in the LSPosed module APK.
 - The DSH plugin syntax/package workflow passed after the package files were ported.
 - The separate DSH host bridge branch contains the expected Provider adapter and
   HTTP routes; a non-merging hardening branch now aligns discovery task status,

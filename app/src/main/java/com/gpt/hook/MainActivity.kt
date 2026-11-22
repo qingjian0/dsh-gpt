@@ -249,7 +249,7 @@ class MainActivity : Activity() {
             textSize = 14f
             setTextColor(white)
             thumbTintList = ColorStateList.valueOf(primary)
-            trackTintList = ColorStateList.valueOf(0xFF42616B.toInt())
+            trackTintList = ColorStateList.valueOf(palette.switchTrack)
             setOnCheckedChangeListener { _, checked ->
                 if (relayRefreshing) return@setOnCheckedChangeListener
                 val cfg = RelayConfig.load(this@MainActivity)

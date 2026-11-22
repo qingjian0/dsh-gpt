@@ -1,4 +1,4 @@
 <resources>
-    <string name="app_name">DSH GPT Diagnostics</string>
-    <string name="app_description">Runtime diagnostics module for the selected application scope.</string>
+    <string name="app_name">DSH GPT</string>
+    <string name="app_description">GPT Hook and local API gateway for Android.</string>
 </resources>

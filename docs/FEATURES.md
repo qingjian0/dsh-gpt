@@ -143,8 +143,24 @@ DSH_TEMPORARY=1 DSH_REASONING=high DSH_PERSONALIZATION=0 DSH_REWRITE=1 \
   node tools/openai-relay.mjs --kit ./kit --port 8794
 ```
 
-### 未覆盖
+### SSE 路径已覆盖（2026-11-23 04:0x）
 
-- `/backend-api/conversation` 是 SSE 流式，逐条 `data:` 改写成本高，
-  当前只在透传（非流式）路径生效；流式路径的 `banner_info` / `blocked_features` 仍是上游原值。
-  需要的话在 `dec()` 里对每条 JSON 做一次替换即可，代价是每块多一次 parse。
+`dec()` 里对每条 `data:` 行做 JSON 安全改写（parse 成功才改），实测：
+
+```
+POST /backend-api/conversation → 200
+banner_info:null 出现 1 次（被改写）
+blocked_features:[] 出现 1 次（被改写）
+回复内容正常："可以"
+```
+
+## 7 客户端接入的前提（下一步）
+
+以上全部在 **relay 路径**上生效。ChatGPT 客户端本身直连 `android.chat.openai.com`，
+不经过 relay，所以要让这些开关作用到 App 内，必须二者之一：
+
+1. **MITM**：relay 起 HTTPS 服务 + 自签 CA，hosts 把 `android.chat.openai.com` 指到 127.0.0.1，
+   再用模块的 TrustManager hook 让 App 接受该 CA（NetWatch 已有该 hook 实现）。
+2. **hook 网络层**：Cronet 实现类在 GmsCore 动态 dex，本项目实测始终未加载，暂不可行。
+
+方案 1 是唯一可落地路径，风险：改 hosts 会影响 App 全部流量，需保留回滚。

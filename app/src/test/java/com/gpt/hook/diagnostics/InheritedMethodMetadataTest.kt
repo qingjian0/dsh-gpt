@@ -28,12 +28,20 @@ class InheritedMethodMetadataTest {
         assertFalse(result.signatures.any { it.contains("declaredChildMethod") })
         assertFalse(result.truncated)
         assertFalse(result.unavailable)
+        assertTrue(result.methods.any { it.name == "inheritedParentMethod" })
+        assertTrue(result.methods.none { it.name == "declaredChildMethod" })
     }
 
     @Test
     fun retainsClassThatHasOnlyInheritedMethods() {
         val result = InheritedMethodMetadata.collect(InheritedOnlyChild::class.java, 100)
         assertTrue(result.signatures.any { it.contains("inheritedParentMethod") })
+        val method = result.methods.first { it.name == "inheritedParentMethod" }
+        val candidate = RuntimeCandidateProposal.fromMethod(
+            "com.openai.chatgpt", "com.openai.example.InheritedOnlyChild", method, listOf("dex-discovery:test")
+        )
+        assertTrue(candidate.candidateId.startsWith("dshc1_"))
+        assertEquals("inheritedParentMethod", candidate.methodName)
     }
 
     @Test

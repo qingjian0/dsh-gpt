@@ -2,7 +2,6 @@ package com.gpt.hook.diagnostics
 
 import io.github.libxposed.api.XposedInterface
 import java.lang.reflect.Method
-import java.lang.reflect.Modifier
 import org.json.JSONObject
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
@@ -27,6 +26,7 @@ class HookRuntime(
     private data class Installed(val handle: XposedInterface.HookHandle, val fingerprint: String)
     private val installed = ConcurrentHashMap<String, Installed>()
     private val counters = ConcurrentHashMap<String, AtomicLong>()
+    private val inspectedRules = ConcurrentHashMap.newKeySet<String>()
     private val discoveryEngine by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         DexDiscoveryEngine(classLoader)
     }
@@ -104,16 +104,25 @@ class HookRuntime(
                                         }
                                         chain.proceed(args)
                                     }
-                                    else -> {
-                                        if (rule.mode == "dump" || rule.mode == "inspect") {
-                                            ModuleLogger.i(
-                                                "hook ${rule.mode}: id=${rule.id}; method=${method.name}; " +
-                                                    "args=${method.parameterCount}; return=${method.returnType.name}" +
-                                                    if (rule.dumpStack) "\n${shortStack()}" else ""
-                                            )
+                                    "inspect" -> {
+                                        if (inspectedRules.add(rule.id)) {
+                                            ModuleLogger.i(inspectClass(method.declaringClass, rule.id))
                                         }
                                         chain.proceed()
                                     }
+                                    "dump" -> {
+                                        ModuleLogger.i(
+                                            "hook dump: id=${rule.id}; signature=${method.toGenericString().take(240)}; " +
+                                                "argTypes=${method.parameterTypes.joinToString { it.name }}"
+                                        )
+                                        val result = chain.proceed()
+                                        ModuleLogger.i(
+                                            "hook dump result: id=${rule.id}; type=${result?.javaClass?.name ?: "null"}" +
+                                                if (rule.dumpStack) "\n${shortStack()}" else ""
+                                        )
+                                        result
+                                    }
+                                    else -> chain.proceed()
                                 }
                             } catch (t: Throwable) {
                                 failure = t
@@ -214,6 +223,22 @@ class HookRuntime(
         java.lang.Character.TYPE -> '\u0000'
         else -> null
     }
+
+    private fun inspectClass(type: Class<*>, ruleId: String): String = buildString {
+        append("hook inspect: id=").append(ruleId).append("; class=").append(type.name).append('\n')
+        append("fields:\n")
+        type.declaredFields.take(80).forEach {
+            append("  ").append(it.type.name).append(' ').append(it.name).append('\n')
+        }
+        append("methods:\n")
+        type.declaredMethods.take(80).forEach {
+            append("  ").append(it.toGenericString().take(240)).append('\n')
+        }
+        append("constructors:\n")
+        type.declaredConstructors.take(40).forEach {
+            append("  ").append(it.toGenericString().take(240)).append('\n')
+        }
+    }.take(12 * 1024)
 
     private fun shortStack(): String = Thread.currentThread().stackTrace
         .drop(4).take(8).joinToString("\n") { "  at ${it.className}.${it.methodName}:${it.lineNumber}" }

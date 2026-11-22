@@ -1,6 +1,7 @@
 package com.gpt.hook.api
 
 import org.json.JSONObject
+import java.io.BufferedInputStream
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.io.OutputStream
@@ -51,10 +52,9 @@ class LocalApiServer(@Volatile var cfg: RelayConfig) {
         socket.use { s ->
             try {
                 s.soTimeout = 180000
-                val input = s.getInputStream()
+                val input = BufferedInputStream(s.getInputStream())
                 val out = s.getOutputStream()
-                val reader = BufferedReader(InputStreamReader(input, Charsets.ISO_8859_1))
-                val requestLine = reader.readLine() ?: return
+                val requestLine = readLine(input) ?: return
                 val parts = requestLine.split(" ")
                 if (parts.size < 2) return
                 val method = parts[0].uppercase()
@@ -63,7 +63,7 @@ class LocalApiServer(@Volatile var cfg: RelayConfig) {
                 var contentLength = 0
                 val headers = HashMap<String, String>()
                 while (true) {
-                    val line = reader.readLine() ?: break
+                    val line = readLine(input) ?: break
                     if (line.isEmpty()) break
                     val i = line.indexOf(':')
                     if (i > 0) {
@@ -96,6 +96,17 @@ class LocalApiServer(@Volatile var cfg: RelayConfig) {
             } catch (t: Throwable) {
                 try { socket.close() } catch (_: Throwable) { }
             }
+        }
+    }
+
+    /** 从同一个 BufferedInputStream 逐字节读一行，避免 BufferedReader 预读吞掉请求体。 */
+    private fun readLine(input: InputStream): String? {
+        val sb = StringBuilder()
+        while (true) {
+            val b = input.read()
+            if (b == -1) return if (sb.isEmpty()) null else sb.toString()
+            if (b == '\n'.code) return sb.toString()
+            if (b != '\r'.code) sb.append(b.toChar())
         }
     }
 

@@ -30,7 +30,7 @@ This is a review/triage record, not an instruction to merge.
 | Branch | Ahead | Behind | Assessment |
 |---|---:|---:|---|
 | `feat/dsh-gpt-hook-agent-bridge` | 27 | 12 | Contains the real HookAgentBridge, HTTP routes, EndpointCatalog and bundled profile plugin. Keep as source baseline; do not merge wholesale |
-| `refactor/dsh-gpt-hook-bridge-hardening` | 37 | 12 | Keep; protocol alignment, status/retry/cancel routes and plugin validation in progress |
+| `refactor/dsh-gpt-hook-bridge-hardening` | 38 | 12 | Keep; protocol alignment, status/retry/cancel routes and plugin validation in progress |
 
 The host branch remains 12 commits behind `main`; it is not merged. A merge-base file-overlap scan found only `app/build.gradle.kts` changed on both sides. The hardening branch's DSH plugin additions are separate lines, and its `versionCode`/`versionName` have been aligned to current main (393 / 1.6.0-beta.17). No other changed-file overlap was found. This lowers the predicted conflict risk but does not replace a real rebase/mergeability check.
 

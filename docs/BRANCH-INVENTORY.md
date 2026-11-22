@@ -9,7 +9,7 @@ This is a review/triage record, not an instruction to merge.
 |---|---:|---:|---|---|
 | `main` | 0 | 0 | — | Protected baseline |
 | `refactor/hook-capability-baseline` | 7 | 0 | No PR | Keep as the reviewed Kotlin/libxposed baseline |
-| `refactor/r1-bounded-discovery` | 53 | 0 | No PR | Keep; current R1 delivery branch, Android Debug CI and JVM tests passed |
+| `refactor/r1-bounded-discovery` | 55 | 0 | No PR | Keep; current R1 delivery branch, Android Debug CI and JVM tests passed |
 | `feat/dsh-agent-hook-extension` | 27 | 3 | No PR found | Keep as a source donor; do not merge wholesale because of scan/IPC issues |
 | `feat/dsh-gpt-runtime-plugin` | 89 | 92 | PR #1 open, Draft | Keep. Separate DSH general runtime/modes/skills plugin; not the Android Hook runtime. Needs a deliberate rebase/review before any integration |
 | `feat/observation-bridge-console` | 0 | 9 | PR #3 merged | No unique commits remain. Safe cleanup candidate |

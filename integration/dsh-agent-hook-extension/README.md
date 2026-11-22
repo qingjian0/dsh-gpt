@@ -7,7 +7,7 @@ the Android Gradle project and is never packaged into the LSPosed APK.
 
 - `dsh_hook_status`: inspect bridge/runtime status.
 - `dsh_hook_events`: read bounded metadata-only observations.
-- `dsh_hook_rules_get` / `dsh_hook_rules_update`: inspect and replace declarative rule snapshots.
+- `dsh_hook_rules_get` / `dsh_hook_rules_update`: inspect and replace declarative rule snapshots; `observeClassLoads: true` optionally enables bounded class-name observation.
 - `dsh_hook_discover`: request paginated class/method/constructor/field metadata discovery.
 - `dsh_hook_discover_status` / `dsh_hook_discover_cancel`: inspect or cancel a leased discovery task.
 - `dsh_hook_enable`: enable or disable the runtime.

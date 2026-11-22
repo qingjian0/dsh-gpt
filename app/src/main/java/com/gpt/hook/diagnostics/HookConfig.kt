@@ -1,5 +1,6 @@
 package com.gpt.hook.diagnostics
 
+import org.json.JSONArray
 import org.json.JSONObject
 
 data class HookRule(
@@ -8,19 +9,25 @@ data class HookRule(
     val methodName: String,
     val parameterTypes: List<String>,
     val enabled: Boolean,
-    val sampleEvery: Int
+    val sampleEvery: Int,
+    val mode: String = "observe",
+    val result: Any? = null,
+    val argPatch: Map<Int, Any?> = emptyMap(),
+    val dumpStack: Boolean = false
 )
 
 data class HookConfig(
     val schemaVersion: Int,
     val targetPackage: String,
     val rules: List<HookRule>,
-    val observeClassLoads: Boolean = false
+    val observeClassLoads: Boolean = false,
+    val scanAllClasses: Boolean = false
 )
 
 object HookConfigParser {
     private const val MAX_RULES = 64
     private const val TARGET = "com.openai.chatgpt"
+    private val MODES = setOf("observe", "dump", "return", "noop", "args", "throw", "inspect")
 
     fun parse(source: String): HookConfig {
         require(source.length <= 128 * 1024) { "Configuration exceeds 128 KiB" }
@@ -52,8 +59,36 @@ object HookConfigParser {
             }
             val sampleEvery = item.optInt("sampleEvery", 1)
             require(sampleEvery in 1..10_000) { "sampleEvery must be between 1 and 10000" }
-            rules += HookRule(id, className, methodName, parameterTypes, item.optBoolean("enabled", true), sampleEvery)
+            val mode = item.optString("mode", "observe").ifBlank { "observe" }
+            require(mode in MODES) { "Unsupported hook mode: $mode" }
+            val argPatch = LinkedHashMap<Int, Any?>()
+            val args = item.optJSONObject("args")
+            if (args != null) {
+                val keys = args.keys()
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    val index = key.toIntOrNull() ?: throw IllegalArgumentException("Argument index must be an integer")
+                    require(index in 0..31) { "Argument index out of range" }
+                    argPatch[index] = jsonValue(args.opt(key))
+                }
+            }
+            rules += HookRule(
+                id, className, methodName, parameterTypes,
+                item.optBoolean("enabled", true), sampleEvery, mode,
+                jsonValue(item.opt("result")), argPatch, item.optBoolean("stack", false)
+            )
         }
-        return HookConfig(version, target, rules, root.optBoolean("observeClassLoads", false))
+        return HookConfig(
+            version, target, rules,
+            root.optBoolean("observeClassLoads", false),
+            root.optBoolean("scanAllClasses", false)
+        )
+    }
+
+    private fun jsonValue(value: Any?): Any? = when (value) {
+        null, JSONObject.NULL -> null
+        is JSONArray -> value.toString()
+        is JSONObject -> value.toString()
+        else -> value
     }
 }

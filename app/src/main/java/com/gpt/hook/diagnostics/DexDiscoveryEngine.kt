@@ -21,14 +21,14 @@ class DexDiscoveryEngine(
     data class Limits(
         val maxDexCount: Int = 16,
         val maxClassesScanned: Int = 2_500,
-        val maxMethods: Int = 500,
+        val maxMemberRecords: Int = 500,
         val maxDurationMs: Long = 1_500,
         val maxResponseBytes: Int = 64 * 1024
     ) {
         init {
             require(maxDexCount in 1..32)
             require(maxClassesScanned in 1..10_000)
-            require(maxMethods in 1..1_000)
+            require(maxMemberRecords in 1..1_000)
             require(maxDurationMs in 100..5_000)
             require(maxResponseBytes in 4 * 1024..128 * 1024)
         }
@@ -43,7 +43,7 @@ class DexDiscoveryEngine(
         require(prefix.startsWith("com.openai.") && prefix.length <= 180) {
             "Discovery prefix must be within com.openai.*"
         }
-        require(limit in 1..limits.maxMethods)
+        require(limit in 1..limits.maxMemberRecords)
         require(cursor >= 0)
         if (exactClassName != null) {
             require(exactClassName.startsWith("com.openai.") && exactClassName.length <= 240)
@@ -139,6 +139,7 @@ class DexDiscoveryEngine(
             } catch (_: Throwable) {
                 // Metadata access can be denied for individual classes; continue safely.
             }
+            if (records >= limit) classWasTruncated = true
             classMetadataTruncated = classMetadataTruncated || classWasTruncated
             classJson.put("methods", methods)
                 .put("constructors", constructors)
@@ -155,6 +156,7 @@ class DexDiscoveryEngine(
             }
         }
 
+        if (System.nanoTime() >= deadline) timedOut = true
         if (exactClassFailure) return JSONObject().put("ok", false).put("error", "class_not_found")
         val next = cursor + inspected
         val hasMore = !responseTruncated && !timedOut && next < names.size

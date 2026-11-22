@@ -1,0 +1,230 @@
+# hosts: 214  urls: 494  backend paths: 29
+
+## ab.chatgpt.com
+https://ab.chatgpt.com/v1
+
+## android.chat.openai.com
+https://android.chat.openai.com/backend-anon/
+https://android.chat.openai.com/backend-api/
+https://android.chat.openai.com/ces/statsc/flush
+https://android.chat.openai.com/ces/v1/telemetry/intake
+https://android.chat.openai.com/public-api/
+https://android.chat.openai.com/realtime/
+
+## api.openai-staging.com
+https://api.openai-staging.com
+
+## api.openai.com
+https://api.openai.com
+https://api.openai.com/auth
+https://api.openai.com/connection_id
+https://api.openai.com/mfa
+https://api.openai.com/onboard
+https://api.openai.com/profile
+https://api.openai.com/v1
+
+## auth.api.openai.org
+https://auth.api.openai.org/api/accounts/authorize
+
+## auth.openai.com
+https://auth.openai.com
+https://auth.openai.com/
+https://auth.openai.com/api/accounts/authorize
+https://auth.openai.com/oauth/revoke
+https://auth.openai.com/oauth/token
+
+## aw.api.openai.com
+https://aw.api.openai.com/api/v2/rum
+https://aw.api.openai.com/api/v2/spans
+
+## bzr.openai.com
+https://bzr.openai.com/v1/sdk/events
+
+## cdn.openai.com
+https://cdn.openai.com/API/images/guides/gmail.svg
+https://cdn.openai.com/c6d7b0d0-3abf-40b5-9d0c-ecd2b9364692/
+https://cdn.openai.com/c6d7b0d0-3abf-40b5-9d0c-ecd2b9364692/thumbnails/
+https://cdn.openai.com/chatgpt/client/onboarding/pepper_2_2x.png
+https://cdn.openai.com/chatgpt/client/onboarding/pepper_2x.png
+https://cdn.openai.com/chatgpt/client/onboarding/pepper_3_2x.png
+https://cdn.openai.com/chatgpt/client/onboarding/pepper_4_2x.png
+https://cdn.openai.com/chatgpt/client/onboarding/pepper_5_2x.png
+https://cdn.openai.com/chatgpt/clients/bazaar/business-agent-disclosure/2026-09-23/business-disclosure-animation-1754caf3cef014e7.lottie
+https://cdn.openai.com/chatgpt/clients/bazaar/business-agent-disclosure/2026-09-23/business-disclosure-static-ade5a622504d70d9.png
+https://cdn.openai.com/chatgpt/clients/bazaar/onboarding/controls.png
+https://cdn.openai.com/chatgpt/clients/bazaar/onboarding/personalization.png
+https://cdn.openai.com/chatgpt/clients/bazaar/onboarding/personalization_unavailable_transparency_v1.jpg
+https://cdn.openai.com/chatgpt/clients/bazaar/onboarding/personalization_unavailable_trust_v1.jpg
+https://cdn.openai.com/chatgpt/clients/bazaar/onboarding/secure.png
+https://cdn.openai.com/chatgpt/clients/bazaar/onboarding/trusted.png
+https://cdn.openai.com/chatgpt/clients/onboarding/assets/image-gen-foreground-v2.webp
+https://cdn.openai.com/chatgpt/clients/onboarding/assets/plus-onboarding-low-8d49030169976a18.lottie
+https://cdn.openai.com/chatgpt/clients/onboarding/assets/plus-onboarding-low-alternative-ad7d1e93c019a0a3.lottie
+https://cdn.openai.com/chatgpt/clients/onboarding/assets/plus-onboarding-medium-2b0c53e1f2d2782d.lottie
+https://cdn.openai.com/chatgpt/clients/onboarding/assets/plus.webp
+https://cdn.openai.com/chatgpt/clients/onboarding/assets/students-2026-files-document.webp
+https://cdn.openai.com/chatgpt/clients/onboarding/assets/students-2026-files-slides.webp
+https://cdn.openai.com/chatgpt/clients/onboarding/assets/students-2026-work-flyout.webp
+https://cdn.openai.com/chatgpt/clients/onboarding/assets/students-2026-work-mode.webp
+https://cdn.openai.com/chatgpt/clients/onboarding/assets/trial-expiry-293f1cada97a6c2d.lottie
+https://cdn.openai.com/chatgpt/clients/onboarding/assets/trial-intelligence-f5e1b78959566107.lottie
+https://cdn.openai.com/chatgpt/clients/onboarding/assets/voice-orb.webp
+https://cdn.openai.com/chatgpt/clients/onboarding/background/image-gen-opaque.webp
+https://cdn.openai.com/chatgpt/clients/onboarding/background/students-2026-files.webp
+https://cdn.openai.com/chatgpt/clients/onboarding/background/students-2026-work.webp
+https://cdn.openai.com/chatgpt/clients/onboarding/background/voice-mode-opaque.webp
+https://cdn.openai.com/chatgpt/clients/onboarding/background/welcome-plus.webp
+
+## cdn.platform.openai.com
+https://cdn.platform.openai.com/deployments/widgets/index.html
+
+## chatgpt
+https://chatgpt
+
+## chatgpt-staging.com
+https://chatgpt-staging.com/
+https://chatgpt-staging.com/backend-api/
+
+## chatgpt.com
+https://chatgpt.com
+https://chatgpt.com/
+https://chatgpt.com/12345678
+https://chatgpt.com/auth/error
+https://chatgpt.com/c/
+https://chatgpt.com/codex
+https://chatgpt.com/college-plan/share/
+https://chatgpt.com/data-controls
+https://chatgpt.com/data-controls-settings
+https://chatgpt.com/explore/plus
+https://chatgpt.com/explore/pro
+https://chatgpt.com/finances
+https://chatgpt.com/football
+https://chatgpt.com/g/
+https://chatgpt.com/gg/v/example
+https://chatgpt.com/health
+https://chatgpt.com/images/ecosystem/apps/google_calendar/icon.png
+https://chatgpt.com/images/prompt/
+https://chatgpt.com/library
+https://chatgpt.com/maps/
+https://chatgpt.com/onepassword/callback
+https://chatgpt.com/parent-resources/safety-protections/
+https://chatgpt.com/plugins
+https://chatgpt.com/qr-login
+https://chatgpt.com/s/
+https://chatgpt.com/s/c_
+https://chatgpt.com/s/preview
+https://chatgpt.com/scheduled
+https://chatgpt.com/settings/Plugins
+https://chatgpt.com/settings/personalization
+https://chatgpt.com/space/
+https://chatgpt.com/wallet/bank/callback
+
+## codex-cloud-backend.chatgpt.com
+https://codex-cloud-backend.chatgpt.com/
+
+## codex-cloud-environments.chatgpt.com
+https://codex-cloud-environments.chatgpt.com/api/
+
+## help.openai.com
+https://help.openai.com
+https://help.openai.com/
+https://help.openai.com/articles/10303002-how-does-memory-use-past-conversations
+https://help.openai.com/articles/10471992-why-am-i-receiving-a-suspicious-activity-alert
+https://help.openai.com/articles/11084440-images-in-chatgpt
+https://help.openai.com/articles/11487775-apps-in-chatgpt
+https://help.openai.com/articles/11780217
+https://help.openai.com/articles/12315553-parental-controls-on-chatgpt-faq
+https://help.openai.com/articles/12652064-age-verification
+https://help.openai.com/articles/12703475-group-chats
+https://help.openai.com/articles/20001047-ads-in-chatgpt
+https://help.openai.com/articles/20001052
+https://help.openai.com/articles/20001411
+https://help.openai.com/articles/20001411-using-locked-chats-in-chatgpt
+https://help.openai.com/articles/20001509
+https://help.openai.com/articles/20001529
+https://help.openai.com/articles/5722486-how-your-data-is-used-to-improve-model-performance
+https://help.openai.com/articles/7730893-data-controls-faq
+https://help.openai.com/articles/7967234-enabling-or-disabling-multi-factor-authentication-mfa
+https://help.openai.com/articles/8590148-memory-faq
+https://help.openai.com/articles/8914046-temporary-chat-faq
+https://help.openai.com/articles/9237897-chatgpt-search
+https://help.openai.com/collections/12923329-connected-apps
+https://help.openai.com/en/articles/12315645
+https://help.openai.com/en/articles/12677603
+https://help.openai.com/en/articles/20001052
+https://help.openai.com/en/articles/20001105-trusted-contacts-in-chatgpt
+https://help.openai.com/en/articles/20001194-adding-and-managing-a-trusted-contact
+https://help.openai.com/en/articles/20001195-being-someones-trusted-contact
+https://help.openai.com/en/articles/20001258-openai-daybreak-trusted-access-for-cyber-overview
+https://help.openai.com/en/articles/20001326-additional-safety-checks-for-biological-and-cybersecurity-requests-in-api-and-codex
+https://help.openai.com/en/articles/20001424
+https://help.openai.com/en/articles/20001529-dots-privacy-security-and-safety-faqs
+https://help.openai.com/en/articles/5722486-how-your-data-is-used-to-improve-model-performance
+https://help.openai.com/en/articles/7925741-chatgpt-shared-links-faq
+https://help.openai.com/en/articles/8261897-chatgpt-android-app-sign-in-error-something-went-wrong-with-code-17-error
+https://help.openai.com/en/articles/8590148-memory-faq
+https://help.openai.com/en/articles/9247338-network-recommendations-for-chatgpt-errors-on-web-and-apps
+https://help.openai.com/ko-kr/articles/7232895
+https://help.openai.com/ko-kr/articles/7232927
+
+## ogimg.chatgpt.com
+https://ogimg.chatgpt.com/entity/
+
+## openai.com
+https://openai.com
+https://openai.com/
+https://openai.com/form/appeal/
+https://openai.com/form/enterprise-trusted-access-for-cyber/
+https://openai.com/form/report-content
+https://openai.com/index/advanced-account-security/
+https://openai.com/index/how-chatgpt-protects-privacy/
+https://openai.com/index/introducing-lockdown-mode-and-elevated-risk-labels-in-chatgpt/
+https://openai.com/index/introducing-openai-privacy-filter/
+https://openai.com/index/personal-finance-chatgpt/
+https://openai.com/ko-KR/policies/terms-of-use/
+https://openai.com/policies/privacy-policy/
+https://openai.com/policies/usage-policies/
+https://openai.com/privacy/
+https://openai.com/security-and-privacy/
+https://openai.com/terms/
+
+## peachpalace.chatgpt.site
+https://peachpalace.chatgpt.site
+
+## platform.openai.com
+https://platform.openai.com/docs/mcp
+https://platform.openai.com/docs/supported-countries
+
+## privacy.openai.com
+https://privacy.openai.com/
+
+## backend paths
+/backend-anon/f/conversation
+/backend-anon/f/conversation/prepare
+/backend-api/aip/ledger/credit/connection
+/backend-api/aip/ledger/tax_checkup
+/backend-api/conversation
+/backend-api/conversation/
+/backend-api/ecosystem/call_mcp
+/backend-api/ecosystem/widget
+/backend-api/estuary/public_content/enc/
+/backend-api/estuary/upload_content_and_finalize
+/backend-api/estuary/upload_content_bytes
+/backend-api/explore/feed/dil
+/backend-api/explore/interactions
+/backend-api/explore/interactions/batch
+/backend-api/explore_experimental/generate
+/backend-api/f/conversation
+/backend-api/f/conversation/prepare
+/backend-api/multiplayer/documents/
+/backend-api/multiplayer/documents/{documentId}/admission
+/backend-api/pages/
+/backend-api/playintegrity
+/backend-api/ps/mcp
+/backend-api/qr-code/action
+/backend-api/qr-code/details
+/backend-api/sentinel/chat-requirements
+/backend-api/tbo
+/backend-api/tbo/
+/backend-api/transcribe
+/backend-api/widget_server_action

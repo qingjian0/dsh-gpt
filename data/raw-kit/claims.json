@@ -1,0 +1,118 @@
+{
+  "access": {
+    "https://api.openai.com/auth": {
+      "user_id": "user-qZIk58qGss72HGh2CY0NI9N6",
+      "poid": "org-ZyLcbaB2y0gAD2xodiRzIy2v",
+      "chatgpt_account_user_id": "user-qZIk58qGss72HGh2CY0NI9N6__ec6cb46c-ba2d-4a9b-a295-1c624c0f51a3",
+      "chatgpt_account_id": "ec6cb46c-ba2d-4a9b-a295-1c624c0f51a3",
+      "chatgpt_user_id": "user-qZIk58qGss72HGh2CY0NI9N6",
+      "chatgpt_plan_type": "free",
+      "chatgpt_compute_residency": "no_constraint",
+      "amr": [
+        "urn:openai:amr:google"
+      ]
+    },
+    "auth_provider": "google",
+    "https://api.openai.com/profile": {
+      "email": "zhouyiai0@gmail.com",
+      "email_verified": true,
+      "name": "yi zhou",
+      "family_name": "zhou",
+      "given_name": "yi",
+      "picture": "https://lh3.googleusercontent.com/a/ACg8ocIQNcbruR8_bamMEyQLFjaoUvFLDMexME_JbfRGm6aoAUMUMw=s96-c"
+    },
+    "pwd_auth_time": 1794902192382,
+    "session_id": "authsess_vHOl6m6Ebj2zTTXZwVPgRTE6",
+    "scp": [
+      "email",
+      "model.read",
+      "model.request",
+      "offline_access",
+      "openid",
+      "organization.read",
+      "organization.write",
+      "profile"
+    ],
+    "sub": "google-oauth2|100133202084796572862",
+    "aud": [
+      "https://api.openai.com/v1"
+    ],
+    "client_id": "app_xwBKzt04752TTSfXnki17hmB",
+    "cnf": {
+      "jkt": "8QimZV51n51x-JSKFHQeChd6T5GV2eX3KOrb9nANTjE"
+    },
+    "iss": "https://auth.openai.com",
+    "iat": 1794902192,
+    "exp": 1795766192,
+    "jti": "f3adadb5e46f4777879be168b6f6a968",
+    "nbf": 1794902192
+  },
+  "id": {
+    "https://api.openai.com/auth": {
+      "user_id": "user-qZIk58qGss72HGh2CY0NI9N6",
+      "groups": [],
+      "organizations": [
+        {
+          "id": "org-ZyLcbaB2y0gAD2xodiRzIy2v",
+          "title": "Personal",
+          "role": "owner",
+          "is_default": true
+        }
+      ],
+      "chatgpt_account_id": "ec6cb46c-ba2d-4a9b-a295-1c624c0f51a3"
+    },
+    "name": "yi zhou",
+    "sub": "google-oauth2|100133202084796572862",
+    "email": "zhouyiai0@gmail.com",
+    "email_verified": true,
+    "picture": "https://lh3.googleusercontent.com/a/ACg8ocIQNcbruR8_bamMEyQLFjaoUvFLDMexME_JbfRGm6aoAUMUMw=s96-c",
+    "given_name": "yi",
+    "family_name": "zhou",
+    "auth_provider": "google",
+    "amr": [
+      "urn:openai:amr:google"
+    ],
+    "nonce": "St8ns7EOZQHiTvVRiPVuOGI0ShYQuS8Ve1vqXQepJkw",
+    "aud": "app_xwBKzt04752TTSfXnki17hmB",
+    "azp": "app_xwBKzt04752TTSfXnki17hmB",
+    "sid": "authsess_vHOl6m6Ebj2zTTXZwVPgRTE6",
+    "auth_time": 1794902192,
+    "rat": 1794902192,
+    "iss": "https://auth.openai.com",
+    "iat": 1794902192,
+    "exp": 1795766192,
+    "jti": "7e53a0965eca4abb90890e95b0a52ab4",
+    "at_hash": "bSqXpfqmYxHjsmaWmZM4Aw"
+  },
+  "dpop_cnf_jkt": "8QimZV51n51x-JSKFHQeChd6T5GV2eX3KOrb9nANTjE",
+  "client_id": "app_xwBKzt04752TTSfXnki17hmB",
+  "issuer": "https://auth.openai.com",
+  "audience": [
+    "https://api.openai.com/v1"
+  ],
+  "scopes": [
+    "email",
+    "model.read",
+    "model.request",
+    "offline_access",
+    "openid",
+    "organization.read",
+    "organization.write",
+    "profile"
+  ],
+  "chatgpt_account_id": "ec6cb46c-ba2d-4a9b-a295-1c624c0f51a3",
+  "chatgpt_user_id": "user-qZIk58qGss72HGh2CY0NI9N6",
+  "plan_type": "free",
+  "orgs": [
+    {
+      "id": "org-ZyLcbaB2y0gAD2xodiRzIy2v",
+      "title": "Personal",
+      "role": "owner",
+      "is_default": true
+    }
+  ],
+  "iat": 1794902192,
+  "exp": 1795766192,
+  "jti": "f3adadb5e46f4777879be168b6f6a968",
+  "session_id": "authsess_vHOl6m6Ebj2zTTXZwVPgRTE6"
+}

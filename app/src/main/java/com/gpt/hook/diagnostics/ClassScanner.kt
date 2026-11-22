@@ -28,11 +28,15 @@ object ClassScanner {
 
             for (element in elements) {
                 if (element == null) continue
-                val dexField = generateSequence(element.javaClass as Class<*>?) { it.superclass }
-                    .mapNotNull { type -> runCatching { type.getDeclaredField("dexFile") }.getOrNull() }
+                val dex = generateSequence(element.javaClass as Class<*>?) { it.superclass }
+                    .flatMap { it.declaredFields.asSequence() }
+                    .mapNotNull { field ->
+                        runCatching {
+                            field.isAccessible = true
+                            field.get(element) as? DexFile
+                        }.getOrNull()
+                    }
                     .firstOrNull() ?: continue
-                dexField.isAccessible = true
-                val dex = runCatching { dexField.get(element) as? DexFile }.getOrNull() ?: continue
                 val entries = runCatching { dex.entries() }.getOrNull() ?: continue
                 while (entries.hasMoreElements()) names.add(entries.nextElement())
             }

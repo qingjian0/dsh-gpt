@@ -110,6 +110,14 @@ class ObservationProvider : ContentProvider() {
                 require(limit in 1..MAX_DISCOVERY_RECORDS && cursor >= 0) { "Invalid discovery page bounds" }
 
                 val now = System.currentTimeMillis()
+                val existingTask = prefs.getString(KEY_DISCOVERY_TASK, null)?.let(::decodeTask)
+                require(existingTask == null || existingTask.status.terminal) {
+                    "A discovery request is already queued or running"
+                }
+                val lastSubmittedAt = prefs.getLong(KEY_DISCOVERY_SUBMITTED_AT, 0L)
+                require(now - lastSubmittedAt >= DISCOVERY_SUBMIT_INTERVAL_MS) {
+                    "Discovery request rate limit exceeded"
+                }
                 val task = DiscoveryTask.queued(requestId, now)
                 val payload = JSONObject()
                     .put("requestId", requestId)
@@ -121,6 +129,7 @@ class ObservationProvider : ContentProvider() {
                 val saved = prefs.edit()
                     .putString(KEY_DISCOVERY_REQUEST, payload)
                     .putString(KEY_DISCOVERY_TASK, encodeTask(task))
+                    .putLong(KEY_DISCOVERY_SUBMITTED_AT, now)
                     .remove(KEY_DISCOVERY_RESULT)
                     .commit()
                 Bundle().apply {
@@ -288,12 +297,14 @@ class ObservationProvider : ContentProvider() {
         const val KEY_DISCOVERY_RESULT = "discoveryResult"
         const val KEY_DISCOVERY_ID = "discoveryId"
         const val KEY_DISCOVERY_REVISION = "discoveryRevision"
+        private const val KEY_DISCOVERY_SUBMITTED_AT = "discoverySubmittedAt"
 
         private const val PREFS = "dsh-observations"
         private const val MAX_REPORT_BYTES = 128 * 1024
         private const val MAX_DISCOVERY_REQUEST_BYTES = 16 * 1024
         private const val MAX_DISCOVERY_RECORDS = 500
         private const val DISCOVERY_LEASE_MS = 30_000L
+        private const val DISCOVERY_SUBMIT_INTERVAL_MS = 500L
         private const val TARGET_PACKAGE = "com.openai.chatgpt"
         private const val DSH_HOST_PACKAGE = "app.dsh.mobile"
         private const val DEFAULT_PREFIX = "com.openai."

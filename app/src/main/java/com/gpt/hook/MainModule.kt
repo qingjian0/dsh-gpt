@@ -53,7 +53,8 @@ class MainModule : XposedModule() {
     @Volatile private var activeRuntime: HookRuntime? = null
     @Volatile private var targetClassLoader: ClassLoader? = null
     @Volatile private var lastProviderConfigVersion: Long = -1L
-    @Volatile private var lastClassScanVersion: Long = -1L
+    private val classScanRequested = AtomicBoolean(false)
+    private val classScanStarted = AtomicBoolean(false)
 
     override fun onModuleLoaded(param: ModuleLoadedParam) {
         super.onModuleLoaded(param)
@@ -81,6 +82,7 @@ class MainModule : XposedModule() {
                     updateClassLoadWatcher(config.observeClassLoads)
                     val report = hookRuntime.applyWithReport(config)
                     logApplyReport(config.rules.size, report.added, report.replaced, report.retained, report.removed, report.failed)
+                    if (config.scanAllClasses) scheduleClassScan()
                 } catch (t: Throwable) {
                     ModuleLogger.w("configuration rejected; reason=${t.javaClass.simpleName}")
                 }
@@ -106,6 +108,7 @@ class MainModule : XposedModule() {
                 if (targetContextForIpc == null && application != null) {
                     targetContextForIpc = application.baseContext?.applicationContext
                         ?: application.baseContext
+                    if (classScanRequested.get()) scheduleClassScan()
                     startProviderPolling()
                 }
                 result
@@ -152,14 +155,7 @@ class MainModule : XposedModule() {
                     updateClassLoadWatcher(config.observeClassLoads)
                     val report = runtime.applyWithReport(config)
                     logApplyReport(config.rules.size, report.added, report.replaced, report.retained, report.removed, report.failed, version)
-                    if (config.scanAllClasses && lastClassScanVersion != version) {
-                        lastClassScanVersion = version
-                        val loader = targetClassLoader
-                        if (loader != null) classScanExecutor.execute {
-                            val count = targetContextForIpc?.filesDir?.let { ClassScanner.scan(loader, it) } ?: 0
-                            if (count == 0) ModuleLogger.w("class scan produced no output; revision=$version")
-                        }
-                    }
+                    if (config.scanAllClasses) scheduleClassScan()
                 } catch (t: Throwable) {
                     ModuleLogger.w("DSH config rejected; revision=$version; reason=${t.javaClass.simpleName}")
                 }
@@ -238,6 +234,18 @@ class MainModule : XposedModule() {
         } catch (t: Throwable) {
             discoveryWorkQueued.set(false)
             ModuleLogger.w("Discovery request poll failed; reason=${t.javaClass.simpleName}")
+        }
+    }
+
+    private fun scheduleClassScan() {
+        classScanRequested.set(true)
+        val ctx = targetContextForIpc ?: return
+        val loader = targetClassLoader ?: return
+        if (!classScanStarted.compareAndSet(false, true)) return
+        classScanExecutor.execute {
+            val count = ClassScanner.scan(loader, ctx.filesDir)
+            if (count == 0) ModuleLogger.w("class scan produced no output")
+            else ModuleLogger.i("class table ready; classes=$count")
         }
     }
 

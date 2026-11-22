@@ -137,10 +137,12 @@ class HookRuntime(
         discoveryEngine.discover(prefix, exactClassName, limit, cursor)
 
     @Synchronized
-    fun clear() {
+    fun clear(): Int {
+        val removed = installed.size
         installed.values.forEach { runCatching { it.handle.unhook() } }
         installed.clear()
         counters.clear()
+        return removed
     }
 
     private fun methodMatches(method: Method, rule: HookRule): Boolean {

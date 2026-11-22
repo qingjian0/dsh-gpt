@@ -153,6 +153,7 @@ class DexDiscoveryEngine(
                 } else if (System.nanoTime() >= deadline) {
                     classWasTruncated = true
                 }
+                if (System.nanoTime() >= deadline) classWasTruncated = true
             } catch (_: Throwable) {
                 // Metadata access can be denied for individual classes; continue safely.
             }

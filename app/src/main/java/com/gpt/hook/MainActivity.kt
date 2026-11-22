@@ -37,6 +37,7 @@ class MainActivity : Activity() {
     private lateinit var editor: EditText
     private lateinit var report: EditText
     private lateinit var relayStatus: TextView
+    private lateinit var apiRelayStatus: TextView
     private lateinit var endpointView: TextView
     private lateinit var relayEnabled: Switch
     private lateinit var relayLan: Switch
@@ -320,9 +321,9 @@ class MainActivity : Activity() {
     }
 
     private fun buildRelaySection(root: LinearLayout) {
-        val card = sectionCard("本地 API 网关", "将 ChatGPT 会话能力通过本机 OpenAI 兼容接口提供")
-        relayStatus = text("已停止", 13f, warning, true)
-        card.addView(relayStatus)
+        val card = sectionCard("API 服务配置", "管理监听、访问凭据与上游 ChatGPT 身份")
+        apiRelayStatus = text("读取网关状态…", 12f, muted, true)
+        card.addView(apiRelayStatus)
         card.addView(text("http://127.0.0.1:8766/v1", 12f, primary, true).apply {
             setPadding(dp(12), dp(11), dp(12), dp(11))
             background = rounded(surfaceAlt, stroke, 10)
@@ -509,8 +510,16 @@ class MainActivity : Activity() {
     }
 
     private fun renderRelayStatus(cfg: RelayConfig) {
-        relayStatus.text = relayStatusLine(cfg)
-        relayStatus.setTextColor(if (cfg.enabled && cfg.ready) primary else warning)
+        val stateText = relayStatusLine(cfg)
+        val stateColor = if (cfg.enabled && cfg.ready) primary else warning
+        if (this::relayStatus.isInitialized) {
+            relayStatus.text = stateText
+            relayStatus.setTextColor(stateColor)
+        }
+        if (this::apiRelayStatus.isInitialized) {
+            apiRelayStatus.text = stateText
+            apiRelayStatus.setTextColor(stateColor)
+        }
         if (this::endpointView.isInitialized) {
             endpointView.text = "http://127.0.0.1:${cfg.port}/v1"
         }
@@ -586,8 +595,13 @@ class MainActivity : Activity() {
                 "连接失败：${t.javaClass.simpleName}"
             }
             runOnUiThread {
+                val resultColor = if (result.startsWith("HTTP 2")) primary else warning
                 relayStatus.text = result
-                relayStatus.setTextColor(if (result.startsWith("HTTP 2")) primary else warning)
+                relayStatus.setTextColor(resultColor)
+                if (this::apiRelayStatus.isInitialized) {
+                    apiRelayStatus.text = result
+                    apiRelayStatus.setTextColor(resultColor)
+                }
             }
         }.start()
     }

@@ -132,8 +132,8 @@ class MainModule : XposedModule() {
             configExecutor.execute {
                 val runtime = activeRuntime ?: return@execute
                 if (!enabled) {
-                    runtime.clear()
-                    ModuleLogger.i("DSH disabled Hook runtime; revision=$version")
+                    val removed = runtime.clear()
+                    ModuleLogger.i("DSH disabled Hook runtime; removed=$removed; revision=$version")
                     return@execute
                 }
                 try {

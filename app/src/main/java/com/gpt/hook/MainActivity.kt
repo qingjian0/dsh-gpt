@@ -80,7 +80,7 @@ class MainActivity : Activity() {
         super.onResume()
         refreshStatus()
         refreshReport()
-        if (this::relayStatus.isInitialized) fillRelayControls(RelayConfig.load(this))
+        if (this::relayStatus.isInitialized) renderRelayStatus(RelayConfig.load(this))
     }
 
     private fun buildHeader() {

@@ -1,0 +1,29 @@
+name: Validate DSH Agent plugin
+
+on:
+  push:
+    branches: [ main, 'feat/**', 'refactor/**' ]
+    paths:
+      - 'integration/dsh-agent-hook-extension/**'
+      - '.github/workflows/agent-plugin.yml'
+  pull_request:
+    paths:
+      - 'integration/dsh-agent-hook-extension/**'
+      - '.github/workflows/agent-plugin.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-plugin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate plugin syntax
+        run: node --check integration/dsh-agent-hook-extension/index.mjs
+      - name: Validate package metadata
+        run: node -e "const p=require('./integration/dsh-agent-hook-extension/package.json'); if(p.type!=='module'||p.main!=='index.mjs') process.exit(1)"

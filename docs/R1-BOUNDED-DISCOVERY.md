@@ -55,6 +55,9 @@ commits.
 - The Provider queue, MainModule polling, Hook lifecycle report and task retry changes
   require the current CI run to finish before they can be marked build-verified.
 - The DSH plugin syntax/package workflow passed after the package files were ported.
+- The separate DSH host bridge branch contains the expected Provider adapter and
+  HTTP routes; a non-merging hardening branch now aligns discovery task status,
+  retries, paging and cancellation.
 - No real-device LSPosed test has been performed in this delivery.
 
 ## Explicitly not complete
@@ -62,8 +65,10 @@ commits.
 1. Strong certificate/signature pinning for the DSH host Provider caller. Current host
    authorization checks that the Binder UID maps to `app.dsh.mobile`; this is not a
    cryptographic pairing guarantee.
-2. Source-level confirmation that the separate DSH host app implements all six bridge
-   routes and maps them correctly to Provider calls.
+2. The DSH host adapter has been located on
+   `qingjian0/Deepseek-Harness-Local-Android:feat/dsh-gpt-hook-agent-bridge`.
+   A separate `refactor/dsh-gpt-hook-bridge-hardening` branch is aligning its
+   discovery status/retry/cancel contract; it still needs CI and device verification.
 3. Real device validation of Binder identity, MIUI/Android package visibility, DEX
    reflection access, runtime hook replacement/unhook semantics, and process-restart
    recovery.

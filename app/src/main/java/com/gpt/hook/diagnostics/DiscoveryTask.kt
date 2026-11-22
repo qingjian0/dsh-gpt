@@ -61,12 +61,21 @@ data class DiscoveryTask(
         )
     }
 
-    fun finish(nowMs: Long, succeeded: Boolean, failureCode: String? = null): DiscoveryTask? {
+    fun finish(
+        nowMs: Long,
+        succeeded: Boolean,
+        failureCode: String? = null,
+        retryable: Boolean = false
+    ): DiscoveryTask? {
         if (status != DiscoveryTaskStatus.RUNNING || nowMs >= leaseUntilMs || nowMs >= expiresAtMs) {
             return null
         }
         return copy(
-            status = if (succeeded) DiscoveryTaskStatus.SUCCEEDED else DiscoveryTaskStatus.FAILED,
+            status = when {
+                succeeded -> DiscoveryTaskStatus.SUCCEEDED
+                retryable && attempt < DEFAULT_MAX_ATTEMPTS -> DiscoveryTaskStatus.QUEUED
+                else -> DiscoveryTaskStatus.FAILED
+            },
             updatedAtMs = nowMs,
             leaseUntilMs = 0,
             revision = revision + 1,

@@ -81,6 +81,7 @@ class DexDiscoveryEngine(
         var inspected = 0
         var timedOut = false
         var responseTruncated = false
+        var classMetadataTruncated = false
         var exactClassFailure = false
 
         for ((index, name) in names.withIndex()) {
@@ -97,26 +98,37 @@ class DexDiscoveryEngine(
                 continue
             }
 
+            val recordsBeforeClass = records
+            var classWasTruncated = false
             val classJson = JSONObject().put("className", type.name)
             val methods = JSONArray()
             val constructors = JSONArray()
             val fields = JSONArray()
             try {
                 type.declaredMethods.forEach { method ->
-                    if (records >= limit || System.nanoTime() >= deadline) return@forEach
+                    if (records >= limit || System.nanoTime() >= deadline) {
+                        classWasTruncated = true
+                        return@forEach
+                    }
                     methods.put(method.toGenericString())
                     records++
                 }
                 if (records < limit && System.nanoTime() < deadline) {
                     type.declaredConstructors.forEach { constructor ->
-                        if (records >= limit || System.nanoTime() >= deadline) return@forEach
+                        if (records >= limit || System.nanoTime() >= deadline) {
+                            classWasTruncated = true
+                            return@forEach
+                        }
                         constructors.put(constructor.toGenericString())
                         records++
                     }
                 }
                 if (records < limit && System.nanoTime() < deadline) {
                     type.declaredFields.forEach { field ->
-                        if (records >= limit || System.nanoTime() >= deadline) return@forEach
+                        if (records >= limit || System.nanoTime() >= deadline) {
+                            classWasTruncated = true
+                            return@forEach
+                        }
                         fields.put(JSONObject()
                             .put("name", field.name)
                             .put("type", field.type.name)
@@ -127,13 +139,16 @@ class DexDiscoveryEngine(
             } catch (_: Throwable) {
                 // Metadata access can be denied for individual classes; continue safely.
             }
+            classMetadataTruncated = classMetadataTruncated || classWasTruncated
             classJson.put("methods", methods)
                 .put("constructors", constructors)
                 .put("fields", fields)
+                .put("metadataTruncated", classWasTruncated)
             if (methods.length() + constructors.length() + fields.length() > 0 || exactClassName != null) {
                 classes.put(classJson)
                 if (classes.toString().toByteArray(Charsets.UTF_8).size > limits.maxResponseBytes) {
                     classes.remove(classes.length() - 1)
+                    records = recordsBeforeClass
                     responseTruncated = true
                     break
                 }
@@ -152,6 +167,7 @@ class DexDiscoveryEngine(
             .put("nextCursor", if (hasMore) next else JSONObject.NULL)
             .put("hasMore", hasMore)
             .put("responseTruncated", responseTruncated)
+            .put("classMetadataTruncated", classMetadataTruncated)
             .put("timedOut", timedOut)
             .put("classesInspected", inspected)
             .put("classesScanned", indexScanned)

@@ -97,19 +97,19 @@ class HookRuntime(
                                     "noop" -> defaultValue(method.returnType)
                                     "throw" -> throw IllegalStateException("DSH rule: ${rule.id}")
                                     "args" -> {
+                                        val args = Array(method.parameterCount) { chain.getArg(it) }
                                         rule.argPatch.forEach { (index, value) ->
                                             require(index < method.parameterCount) { "Argument index exceeds method arity" }
-                                            chain.setArg(index, coerceValue(value, method.parameterTypes[index]))
+                                            args[index] = coerceValue(value, method.parameterTypes[index])
                                         }
-                                        chain.proceed()
+                                        chain.proceed(args)
                                     }
                                     else -> {
                                         if (rule.mode == "dump" || rule.mode == "inspect") {
                                             ModuleLogger.i(
                                                 "hook ${rule.mode}: id=${rule.id}; method=${method.name}; " +
                                                     "args=${method.parameterCount}; return=${method.returnType.name}" +
-                                                    if (rule.dumpStack) "
-${shortStack()}" else ""
+                                                    if (rule.dumpStack) "\n${shortStack()}" else ""
                                             )
                                         }
                                         chain.proceed()
@@ -216,8 +216,7 @@ ${shortStack()}" else ""
     }
 
     private fun shortStack(): String = Thread.currentThread().stackTrace
-        .drop(4).take(8).joinToString("
-") { "  at ${it.className}.${it.methodName}:${it.lineNumber}" }
+        .drop(4).take(8).joinToString("\n") { "  at ${it.className}.${it.methodName}:${it.lineNumber}" }
 
     private fun stableHookId(ruleId: String, signature: String): String {
         val digest = MessageDigest.getInstance("SHA-256")

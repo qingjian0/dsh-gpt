@@ -148,3 +148,31 @@ README 已将显式 pairing / signature pin 标为 follow-up。进入正式发�
 - 因此，Agent 插件 README 中“status/events/rules/control routes are wired in both repositories”的描述，**目前无法由宿主仓库 main 的可检索代码证实**。
 
 这不等于断言实现不存在：它可能位于其他分支、未跟踪的运行时补丁、生成代码或尚未推送的提交。正式接入前必须定位具体文件和 commit，并做端到端测试；在此之前，Agent 插件只能标记为“模块侧 Provider + 插件工具代码存在，宿主路由待核实”，不能标记为双仓库已贯通。
+
+
+### P0 — 宿主桥接分支已定位，不能再按 main 缺失处理
+
+后续全局分支扫描找到了宿主仓库分支
+`qingjian0/Deepseek-Harness-Local-Android:feat/dsh-gpt-hook-agent-bridge`。
+该分支相对宿主 `main` ahead 27 / behind 12（diverged），包含可检索、可定位的真实实现：
+
+- `app/src/main/java/app/dsh/mobile/engine/HookAgentBridge.kt`：Provider 适配、status/events/rules/control/discover。
+- `AgentBridge.kt`：已注册 `/hook/status`、`/hook/events`、`/hook/rules`、`/hook/discover`、`/hook/control`。
+- `EndpointCatalog.kt`：已有 Hook 端点目录。
+- `ProfilePluginProvisioner.kt`、`app/build.gradle.kts`、`android-build.yml`：已把 Agent 插件作为 DSH profile bundle 单独打包并首装启用。
+- `AndroidManifest.xml`：已声明 dsh-gpt Provider 的 package visibility。
+
+因此，旧结论“宿主桥接实现未定位”已被新证据修正：宿主桥接代码确实存在于该功能分支，但不在当时检查的 `main` 中。
+
+进一步发现的协议问题：宿主 `HookAgentBridge.discover()` 原先只要收到非空 result 就立即返回，没有等待任务进入终态；而模块 Provider 已升级为 revision/lease/retry 状态机，非终态的失败尝试可能重新排队。宿主如果立即返回，会把一次可恢复失败提前暴露给 Agent。
+
+已在宿主独立分支
+`refactor/dsh-gpt-hook-bridge-hardening` 开始对齐：
+- 发现请求携带 cursor；
+- 等待 SUCCEEDED / FAILED / EXPIRED / CANCELLED 终态，不把 QUEUED 重试结果当最终结果；
+- 增加 GET `/hook/discover?requestId=...` 状态查询；
+- 增加 POST `/hook/discover/cancel` 取消接口；
+- Agent 工具增加分页、状态和取消；
+- EndpointCatalog 同步登记新路由。
+
+该宿主分支尚未合并、尚未完成 CI 和设备验收。它相对 main 的 12 个落后提交仍需做冲突审查，不能直接合并整个 27 提交分支。

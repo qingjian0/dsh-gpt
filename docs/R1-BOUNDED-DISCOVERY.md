@@ -61,9 +61,14 @@ commits.
 - APK inspection found no Node runtime, model payload, native libraries, or Agent plugin
   bundle in the LSPosed module APK.
 - The DSH plugin syntax/package workflow passed after the package files were ported.
-- The separate DSH host bridge branch contains the expected Provider adapter and
-  HTTP routes; a non-merging hardening branch now aligns discovery task status,
-  retries, paging and cancellation.
+- The separate DSH host hardening branch now aligns discovery task status, retries,
+  paging and cancellation. Its regression-probe workflow passed:
+  https://github.com/qingjian0/Deepseek-Harness-Local-Android/actions/runs/45002179774
+- The DSH host full CI matrix passed (aarch64/x86_64, full/noruntime, JVM behavior,
+  runtime fetch and plugin packaging):
+  https://github.com/qingjian0/Deepseek-Harness-Local-Android/actions/runs/45002179874
+- The packaged DSH Hook Agent plugin artifact is 3,417 bytes. It is bundled in the DSH
+  host profile, not in the dsh-gpt LSPosed module APK.
 - No real-device LSPosed test has been performed in this delivery.
 
 ## Explicitly not complete

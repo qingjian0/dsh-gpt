@@ -7,8 +7,9 @@ Base: `refactor/r3-inherited-method-metadata`
 
 - Define stable method identity from schema version, target package, runtime class, declaring class, method name, and JVM descriptor.
 - Use JVM descriptors so overloaded methods and inherited declarations remain distinct.
-- Emit versioned, JSON-serializable candidate proposals with bounded evidence references.
+- Emit versioned, JSON-serializable candidate proposals with bounded, method-specific discovery evidence references.
 - Restrict proposal targets to the `com.openai.*` namespace and the initial action to metadata-only timing observation.
+- Include proposals in the existing discovery JSON as `candidateProposals`, capped at 32 per response; keep existing discovery fields unchanged.
 - Enforce a staged lifecycle: proposed → approved → validated → applied. Rejection is available before application.
 - Require a non-empty approval actor, validation reference, and application reference at each transition.
 
@@ -23,6 +24,7 @@ The candidate ID is a truncated SHA-256 digest over a canonical, schema-versione
 ## Tests
 
 - Stable identity for repeated discovery of the same overload.
+- Candidate evidence references identify the discovered class, method name and JVM descriptor.
 - Distinct IDs and descriptors for overloaded methods.
 - Package-scope and evidence validation.
 - Approval and validation gates before application.
@@ -30,4 +32,4 @@ The candidate ID is a truncated SHA-256 digest over a canonical, schema-versione
 
 ## Acceptance
 
-Run Android Debug build, JVM unit tests, and LSPosed metadata verification in CI. Device acceptance remains separate and must confirm target class-loader identity and real hook lifecycle behavior.
+Run Android Debug build, JVM unit tests, and LSPosed metadata verification in CI. Run #201 passed all checks for the initial discovery integration. A follow-up tightened evidence references to identify the exact method; its CI result is pending. Device acceptance remains separate and must confirm target class-loader identity and real hook lifecycle behavior.

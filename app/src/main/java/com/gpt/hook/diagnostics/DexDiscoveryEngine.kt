@@ -51,6 +51,9 @@ class DexDiscoveryEngine(
 
         val started = System.nanoTime()
         val deadline = started + limits.maxDurationMs * 1_000_000
+        var indexScanned = 0
+        var indexDexScanned = 0
+        var indexTruncated = false
         val names = if (exactClassName != null) {
             listOf(exactClassName)
         } else {
@@ -63,6 +66,9 @@ class DexDiscoveryEngine(
                     .put("classesScanned", indexed.scanned)
                     .put("dexScanned", indexed.dexScanned)
             }
+            indexScanned = indexed.scanned
+            indexDexScanned = indexed.dexScanned
+            indexTruncated = indexed.scanTruncated
             indexed.names
         }
 
@@ -75,7 +81,7 @@ class DexDiscoveryEngine(
         var inspected = 0
         var timedOut = false
         var responseTruncated = false
-        val end = (cursor.toLong() + limit).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+        var exactClassFailure = false
 
         for ((index, name) in names.withIndex()) {
             if (index < cursor) continue
@@ -87,6 +93,7 @@ class DexDiscoveryEngine(
             val type = try {
                 Class.forName(name, false, classLoader)
             } catch (_: Throwable) {
+                if (exactClassName != null) exactClassFailure = true
                 continue
             }
 
@@ -133,6 +140,7 @@ class DexDiscoveryEngine(
             }
         }
 
+        if (exactClassFailure) return JSONObject().put("ok", false).put("error", "class_not_found")
         val next = cursor + inspected
         val hasMore = !responseTruncated && !timedOut && next < names.size
         val elapsedMs = (System.nanoTime() - started) / 1_000_000
@@ -146,7 +154,9 @@ class DexDiscoveryEngine(
             .put("responseTruncated", responseTruncated)
             .put("timedOut", timedOut)
             .put("classesInspected", inspected)
-            .put("scanTruncated", exactClassName == null && names.size >= limits.maxClassesScanned)
+            .put("classesScanned", indexScanned)
+            .put("dexScanned", indexDexScanned)
+            .put("scanTruncated", indexTruncated)
             .put("recordCount", records)
             .put("elapsedMs", elapsedMs)
             .put("classes", classes)

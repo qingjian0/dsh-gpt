@@ -39,6 +39,8 @@ class MainActivity : Activity() {
     private lateinit var relayStatus: TextView
     private lateinit var apiRelayStatus: TextView
     private lateinit var endpointView: TextView
+    private lateinit var apiEndpointView: TextView
+    private lateinit var infoEndpointView: TextView
     private lateinit var relayEnabled: Switch
     private lateinit var relayLan: Switch
     private lateinit var relayPort: EditText
@@ -264,9 +266,10 @@ class MainActivity : Activity() {
 
         val info = sectionCard("接口信息", "供 OpenAI 兼容客户端使用")
         info.addView(text("Base URL", 11f, muted, true))
-        info.addView(text("http://127.0.0.1:8766/v1", 13f, white, true).apply {
+        infoEndpointView = text("http://127.0.0.1:${RelayConfig.load(this).port}/v1", 13f, white, true).apply {
             setPadding(0, dp(5), 0, dp(12))
-        })
+        }
+        info.addView(infoEndpointView)
         info.addView(text("认证方式", 11f, muted, true))
         info.addView(text("使用本地配置的 API Key；留空时按当前网关配置处理", 12f, white))
         overviewPage.addView(info, sectionParams())
@@ -324,10 +327,11 @@ class MainActivity : Activity() {
         val card = sectionCard("API 服务配置", "管理监听、访问凭据与上游 ChatGPT 身份")
         apiRelayStatus = text("读取网关状态…", 12f, muted, true)
         card.addView(apiRelayStatus)
-        card.addView(text("http://127.0.0.1:8766/v1", 12f, primary, true).apply {
+        apiEndpointView = text("http://127.0.0.1:${RelayConfig.load(this).port}/v1", 12f, primary, true).apply {
             setPadding(dp(12), dp(11), dp(12), dp(11))
             background = rounded(surfaceAlt, stroke, 10)
-        }, fieldParams(0, dp(12)))
+        }
+        card.addView(apiEndpointView, fieldParams(0, dp(12)))
 
         relayEnabled = Switch(this).apply {
             text = "启用本地 API"
@@ -520,9 +524,10 @@ class MainActivity : Activity() {
             apiRelayStatus.text = stateText
             apiRelayStatus.setTextColor(stateColor)
         }
-        if (this::endpointView.isInitialized) {
-            endpointView.text = "http://127.0.0.1:${cfg.port}/v1"
-        }
+        val baseUrl = "http://127.0.0.1:${cfg.port}/v1"
+        if (this::endpointView.isInitialized) endpointView.text = baseUrl
+        if (this::apiEndpointView.isInitialized) apiEndpointView.text = baseUrl
+        if (this::infoEndpointView.isInitialized) infoEndpointView.text = baseUrl
     }
 
     private fun currentRelayConfig(base: RelayConfig): RelayConfig {

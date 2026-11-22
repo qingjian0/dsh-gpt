@@ -113,7 +113,7 @@ class ObservationProvider : ContentProvider() {
                 val payload = JSONObject()
                     .put("requestId", requestId)
                     .put("prefix", prefix)
-                    .put("className", className.ifEmpty { JSONObject.NULL })
+                    .put("className", if (className.isEmpty()) JSONObject.NULL else className)
                     .put("limit", limit)
                     .put("cursor", cursor)
                     .toString()
@@ -183,8 +183,8 @@ class ObservationProvider : ContentProvider() {
             METHOD_HOST_DISCOVERY_RESULT -> {
                 enforceDshHostCaller(uid)
                 val requestId = extras?.getString(KEY_DISCOVERY_ID).orEmpty()
-                val task = prefs.getString(KEY_DISCOVERY_TASK, null)?.let(::decodeTask)
-                if (task?.requestId != requestId) return Bundle()
+                val task = prefs.getString(KEY_DISCOVERY_TASK, null)?.let(::decodeTask) ?: return Bundle()
+                if (task.requestId != requestId) return Bundle()
                 Bundle().apply {
                     putString(KEY_DISCOVERY_TASK, encodeTask(task))
                     putString(KEY_DISCOVERY_RESULT, prefs.getString(KEY_DISCOVERY_RESULT, null))
@@ -194,7 +194,8 @@ class ObservationProvider : ContentProvider() {
                 enforceDshHostCaller(uid)
                 val requestId = extras?.getString(KEY_DISCOVERY_ID).orEmpty()
                 val task = prefs.getString(KEY_DISCOVERY_TASK, null)?.let(::decodeTask)
-                if (task?.requestId != requestId) throw IllegalStateException("Discovery task is no longer current")
+                    ?: throw IllegalStateException("Discovery task is unavailable")
+                if (task.requestId != requestId) throw IllegalStateException("Discovery task is no longer current")
                 val cancelled = task.cancel(System.currentTimeMillis())
                 val saved = prefs.edit().putString(KEY_DISCOVERY_TASK, encodeTask(cancelled)).commit()
                 Bundle().apply { putBoolean(KEY_ACCEPTED, saved); putString(KEY_DISCOVERY_TASK, encodeTask(cancelled)) }

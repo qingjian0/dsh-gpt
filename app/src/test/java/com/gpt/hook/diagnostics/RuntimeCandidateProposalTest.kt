@@ -10,6 +10,7 @@ class RuntimeCandidateProposalTest {
     open class Parent {
         fun overloaded(value: Int): String = value.toString()
         fun overloaded(value: String): String = value
+        fun arrays(values: Array<String>): Array<IntArray> = emptyArray()
     }
 
     class Child : Parent()

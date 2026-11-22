@@ -28,7 +28,7 @@ class LocalApiServer(@Volatile var cfg: RelayConfig) {
     private var server: ServerSocket? = null
     private val pool = Executors.newFixedThreadPool(8)
     private val sessions = ConcurrentHashMap<String, RelaySession>()
-    private val sessionLocks = ConcurrentHashMap<String, Any>()
+    private val sessionLocks = Array(64) { Any() }
     @Volatile private var running = false
 
     val port: Int get() = cfg.port
@@ -155,7 +155,7 @@ class LocalApiServer(@Volatile var cfg: RelayConfig) {
             json(out, 400, err("invalid_request", "body is not JSON")); return
         }
         val key = sessionKey(req)
-        val lock = sessionLocks.computeIfAbsent(key) { Any() }
+        val lock = sessionLocks[(key.hashCode() and Int.MAX_VALUE) % sessionLocks.size]
         synchronized(lock) { chatLocked(out, req, key) }
     }
 
@@ -246,9 +246,6 @@ class LocalApiServer(@Volatile var cfg: RelayConfig) {
             sessions.entries.sortedBy { it.value.updatedAt }
                 .take(sessions.size - MAX_SESSIONS)
                 .forEach { sessions.remove(it.key, it.value) }
-        }
-        if (sessionLocks.size > MAX_SESSIONS * 2) {
-            sessionLocks.keys.toList().take(sessionLocks.size - MAX_SESSIONS).forEach(sessionLocks::remove)
         }
     }
 

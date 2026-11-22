@@ -156,7 +156,7 @@ class DexDiscoveryEngine(
                 .put("constructors", constructors)
                 .put("fields", fields)
                 .put("metadataTruncated", classWasTruncated)
-            if (methods.length() + constructors.length() + fields.length() > 0 || exactClassName != null) {
+            if (methods.length() + inheritedMethods.length() + constructors.length() + fields.length() > 0 || exactClassName != null) {
                 classes.put(classJson)
                 if (classes.toString().toByteArray(Charsets.UTF_8).size > limits.maxResponseBytes) {
                     classes.remove(classes.length() - 1)

@@ -132,7 +132,7 @@ internal object JvmDescriptors {
         java.lang.Void.TYPE -> "V"
         java.lang.Boolean.TYPE -> "Z"
         java.lang.Byte.TYPE -> "B"
-        java.lang.Char.TYPE -> "C"
+        java.lang.Character.TYPE -> "C"
         java.lang.Short.TYPE -> "S"
         java.lang.Integer.TYPE -> "I"
         java.lang.Long.TYPE -> "J"

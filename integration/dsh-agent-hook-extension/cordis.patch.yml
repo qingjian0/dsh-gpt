@@ -1,0 +1,5 @@
+# Adds the Hook controls to the DSH Agent tool registry.
+# The Android host bridge routes must be installed before these tools can execute.
+- insert:
+    - id: dsh-gpt-hook-agent
+      name: '@dsh-external/dsh-gpt-hook-agent'

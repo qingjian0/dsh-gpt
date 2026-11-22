@@ -36,6 +36,8 @@ class RuntimeCandidateProposalTest {
         assertEquals("(I)Ljava/lang/String;", first.jvmDescriptor)
         assertEquals("(Ljava/lang/String;)Ljava/lang/String;", second.jvmDescriptor)
         assertEquals("com.gpt.hook.diagnostics.RuntimeCandidateProposalTest\$Parent", first.declaringClassName)
+        val arrayMethod = Parent::class.java.declaredMethods.first { it.name == "arrays" }
+        assertEquals("([Ljava/lang/String;)[[I", JvmDescriptors.method(arrayMethod))
     }
 
     @Test

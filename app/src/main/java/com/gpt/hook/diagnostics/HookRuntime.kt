@@ -2,6 +2,7 @@ package com.gpt.hook.diagnostics
 
 import io.github.libxposed.api.XposedInterface
 import java.lang.reflect.Method
+import org.json.JSONObject
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
@@ -15,6 +16,9 @@ class HookRuntime(
     private data class Installed(val handle: XposedInterface.HookHandle)
     private val installed = ConcurrentHashMap<String, Installed>()
     private val counters = ConcurrentHashMap<String, AtomicLong>()
+    private val discoveryEngine by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        DexDiscoveryEngine(classLoader)
+    }
 
     /**
      * Applies a validated snapshot. Method ordering and hook IDs are deterministic, so
@@ -97,6 +101,10 @@ class HookRuntime(
         }
         return applied to failed
     }
+
+    /** Bounded metadata-only class, method, constructor and field discovery. */
+    fun discover(prefix: String, exactClassName: String? = null, limit: Int = 100, cursor: Int = 0): JSONObject =
+        discoveryEngine.discover(prefix, exactClassName, limit, cursor)
 
     @Synchronized
     fun clear() {

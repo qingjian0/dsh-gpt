@@ -7,8 +7,6 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <!-- Package visibility: the module app must reach the target app's ContentProvider
-         and vice versa, otherwise MIUI/AOSP AppsFilter blocks cross-app calls. -->
     <queries>
         <package android:name="com.openai.chatgpt" />
         <package android:name="org.lsposed.manager" />
@@ -23,7 +21,7 @@
         android:allowBackup="false"
         android:supportsRtl="true">
         <activity
-            android:name=".RelayActivity"
+            android:name=".MainActivity"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

@@ -66,7 +66,7 @@ class RuntimeCandidateProposalTest {
         assertEquals(RuntimeCandidateProposal.Status.VALIDATED, validated.status)
         assertEquals(RuntimeCandidateProposal.Status.APPLIED, applied.status)
         assertEquals("operator", approved.approvedBy)
-        assertTrue(applied.toJson().getString("candidateId").startsWith("dshc1_"))
+        assertTrue(applied.candidateId.startsWith("dshc1_"))
     }
 
     @Test

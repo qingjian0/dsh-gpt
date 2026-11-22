@@ -4,28 +4,31 @@ import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
+import android.content.res.ColorStateList
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Bundle
 import android.text.InputType
+import android.view.Gravity
 import android.view.ViewGroup
-import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Switch
 import android.widget.TextView
+import android.widget.Toast
 import com.gpt.hook.api.ApiService
 import com.gpt.hook.api.RelayConfig
 import com.gpt.hook.diagnostics.HookConfigParser
 
-/** On-device configuration and metadata-only observation console. */
+/** Unified DSH GPT Hook and local API dashboard. */
 class MainActivity : Activity() {
+    private lateinit var page: LinearLayout
     private lateinit var status: TextView
     private lateinit var reportStatus: TextView
     private lateinit var editor: EditText
     private lateinit var report: EditText
-
-    // 本地 API 网关控件
     private lateinit var relayStatus: TextView
     private lateinit var relayEnabled: Switch
     private lateinit var relayLan: Switch
@@ -35,68 +38,40 @@ class MainActivity : Activity() {
     private lateinit var relayToken: EditText
     private var relayRefreshing = false
 
+    private val bg = 0xFF090E1B.toInt()
+    private val surface = 0xFF121B2D.toInt()
+    private val surfaceAlt = 0xFF0D1525.toInt()
+    private val stroke = 0xFF26354D.toInt()
+    private val primary = 0xFF63E6D3.toInt()
+    private val white = 0xFFF1F5FB.toInt()
+    private val muted = 0xFF91A0B7.toInt()
+    private val warning = 0xFFFFC978.toInt()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val root = LinearLayout(this).apply {
+        window.statusBarColor = bg
+        window.navigationBarColor = bg
+        window.decorView.systemUiVisibility = 0
+
+        val scroll = ScrollView(this).apply {
+            setBackgroundColor(bg)
+            isFillViewport = true
+            clipToPadding = false
+        }
+        page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(24, 24, 24, 24)
+            setPadding(dp(18), dp(18), dp(18), dp(30))
         }
-        status = TextView(this).apply { text = "Connecting to LSPosed service…" }
-        editor = EditText(this).apply {
-            setText(DEFAULT_CONFIG)
-            minLines = 10
-            gravity = android.view.Gravity.TOP
-            typeface = android.graphics.Typeface.MONOSPACE
-            setHorizontallyScrolling(true)
-        }
-        root.addView(status)
-        root.addView(TextView(this).apply { text = "Hook configuration (JSON)" })
-        root.addView(ScrollView(this).apply {
-            addView(editor)
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 0, 2f
-            )
-        })
-        root.addView(Button(this).apply {
-            text = "Validate and apply configuration"
-            setOnClickListener { saveConfig() }
-        })
-        root.addView(Button(this).apply {
-            text = "Restore empty safe configuration"
-            setOnClickListener { editor.setText(DEFAULT_CONFIG) }
-        })
-        root.addView(reportStatusText().also { reportStatus = it })
-        root.addView(TextView(this).apply { text = "Latest metadata-only observations" })
-        report = EditText(this).apply {
-            isFocusable = false
-            isFocusableInTouchMode = false
-            minLines = 6
-            typeface = android.graphics.Typeface.MONOSPACE
-            setText(EMPTY_REPORT)
-        }
-        root.addView(ScrollView(this).apply {
-            addView(report)
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 0, 2f
-            )
-        })
-        root.addView(LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            addView(Button(this@MainActivity).apply {
-                text = "Refresh"
-                setOnClickListener { refreshReport() }
-            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            addView(Button(this@MainActivity).apply {
-                text = "Copy JSON"
-                setOnClickListener { copyReport() }
-            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            addView(Button(this@MainActivity).apply {
-                text = "Share to AI"
-                setOnClickListener { shareReport() }
-            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        })
-        buildRelaySection(root)
-        setContentView(root)
+        scroll.addView(page, ScrollView.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        ))
+        setContentView(scroll)
+
+        buildHeader()
+        buildHookSection()
+        buildObservationSection()
+        buildRelaySection(page)
         refreshStatus()
         refreshReport()
     }
@@ -105,28 +80,91 @@ class MainActivity : Activity() {
         super.onResume()
         refreshStatus()
         refreshReport()
-        if (this::relayStatus.isInitialized) renderRelayStatus(RelayConfig.load(this))
+        if (this::relayStatus.isInitialized) fillRelayControls(RelayConfig.load(this))
     }
 
-    private fun reportStatusText() = TextView(this).apply { text = "Observation transport: waiting" }
+    private fun buildHeader() {
+        val hero = panel()
+        hero.addView(text("DSH  /  GPT BRIDGE", 11f, primary, true).apply {
+            letterSpacing = 0.16f
+        })
+        hero.addView(text("GPT Runtime Console", 27f, white, true).apply {
+            setPadding(0, dp(8), 0, dp(5))
+        })
+        hero.addView(text("LSPosed Hook  ·  Local API Gateway", 13f, muted))
+        status = text("正在连接 LSPosed…", 13f, muted, true).apply {
+            setPadding(0, dp(16), 0, 0)
+        }
+        hero.addView(status)
+        page.addView(hero, sectionParams())
+        page.addView(text("控制台", 12f, muted, true).apply {
+            setPadding(dp(3), dp(5), 0, dp(10))
+        })
+    }
 
-    // ---------------------------------------------------------------- 本地 API 网关
+    private fun buildHookSection() {
+        val card = sectionCard("GPT Hook", "配置目标应用中的 Hook 规则")
+        card.addView(text("目标应用  ·  com.openai.chatgpt", 12f, primary, true))
+        editor = EditText(this).apply {
+            setText(DEFAULT_CONFIG)
+            minLines = 7
+            gravity = Gravity.TOP
+            typeface = Typeface.MONOSPACE
+            textSize = 12f
+            setTextColor(white)
+            setHintTextColor(muted)
+            background = rounded(surfaceAlt, stroke, 12)
+            setPadding(dp(13), dp(12), dp(13), dp(12))
+            setHorizontallyScrolling(true)
+        }
+        card.addView(editor, fieldParams(0, dp(12)))
+        card.addView(buttonRow(
+            ("验证并应用" to true) to { saveConfig() },
+            ("恢复默认" to false) to { editor.setText(DEFAULT_CONFIG) }
+        ))
+        page.addView(card, sectionParams())
+    }
+
+    private fun buildObservationSection() {
+        val card = sectionCard("运行时观察", "查看 Hook 产生的元数据报告")
+        reportStatus = text("等待观察报告…", 12f, muted)
+        card.addView(reportStatus)
+        report = EditText(this).apply {
+            isFocusable = false
+            isFocusableInTouchMode = false
+            minLines = 5
+            maxLines = 10
+            textSize = 11f
+            typeface = Typeface.MONOSPACE
+            setTextColor(0xFFB9C8DA.toInt())
+            background = rounded(surfaceAlt, stroke, 12)
+            setPadding(dp(13), dp(12), dp(13), dp(12))
+            setText(EMPTY_REPORT)
+        }
+        card.addView(report, fieldParams(0, dp(12)))
+        card.addView(buttonRow(
+            ("刷新" to true) to { refreshReport() },
+            ("复制 JSON" to false) to { copyReport() },
+            ("分享给 AI" to false) to { shareReport() }
+        ))
+        page.addView(card, sectionParams())
+    }
 
     private fun buildRelaySection(root: LinearLayout) {
-        val box = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(0, 32, 0, 0)
-        }
-        box.addView(TextView(this).apply {
-            text = "本地 API 网关"
-            textSize = 18f
-            setPadding(0, 0, 0, 8)
-        })
-        relayStatus = TextView(this).apply { text = "已停止" }
-        box.addView(relayStatus)
+        val card = sectionCard("本地 API 网关", "将 ChatGPT 会话能力通过本机 OpenAI 兼容接口提供")
+        relayStatus = text("已停止", 13f, warning, true)
+        card.addView(relayStatus)
+        card.addView(text("http://127.0.0.1:8766/v1", 12f, primary, true).apply {
+            setPadding(dp(12), dp(11), dp(12), dp(11))
+            background = rounded(surfaceAlt, stroke, 10)
+        }, fieldParams(0, dp(12)))
 
         relayEnabled = Switch(this).apply {
-            text = "启用"
+            text = "启用本地 API"
+            textSize = 14f
+            setTextColor(white)
+            thumbTintList = ColorStateList.valueOf(primary)
+            trackTintList = ColorStateList.valueOf(0xFF42616B.toInt())
             setOnCheckedChangeListener { _, checked ->
                 if (relayRefreshing) return@setOnCheckedChangeListener
                 val cfg = RelayConfig.load(this@MainActivity)
@@ -137,96 +175,148 @@ class MainActivity : Activity() {
                 renderRelayStatus(next)
             }
         }
-        box.addView(relayEnabled)
+        card.addView(relayEnabled)
 
         relayLan = Switch(this).apply {
-            text = "局域网监听（0.0.0.0）"
+            text = "允许局域网访问"
+            textSize = 14f
+            setTextColor(white)
+            thumbTintList = ColorStateList.valueOf(primary)
+            trackTintList = ColorStateList.valueOf(0xFF42616B.toInt())
             setOnCheckedChangeListener { _, checked ->
                 if (relayRefreshing) return@setOnCheckedChangeListener
                 val cfg = RelayConfig.load(this@MainActivity)
                 if (cfg.lan == checked) return@setOnCheckedChangeListener
                 val next = cfg.copy(lan = checked)
                 RelayConfig.save(this@MainActivity, next)
-                // ApiService.restart() 是实例方法，这里用 stop + start 让它按新配置重建监听
                 if (next.enabled) restartRelayService()
                 renderRelayStatus(next)
             }
         }
-        box.addView(relayLan)
+        card.addView(relayLan)
 
-        box.addView(labelView("端口（1-65535）"))
-        relayPort = EditText(this).apply {
-            inputType = InputType.TYPE_CLASS_NUMBER
-            hint = RelayConfig().port.toString()
-        }
-        box.addView(relayPort)
-
-        box.addView(labelView("client apiKey（留空表示不校验）"))
-        relayApiKey = EditText(this).apply {
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
-            hint = "可留空"
-        }
-        box.addView(relayApiKey)
-
-        box.addView(labelView("oai-did"))
-        relayDid = EditText(this).apply {
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
-            hint = "oai-did"
-        }
-        box.addView(relayDid)
-
-        box.addView(labelView("access_token"))
-        relayToken = EditText(this).apply {
-            inputType = InputType.TYPE_CLASS_TEXT or
-                InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+        relayPort = addInput(card, "监听端口", "8766", InputType.TYPE_CLASS_NUMBER)
+        relayApiKey = addInput(
+            card, "客户端 API Key", "留空表示不校验",
+            InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+        )
+        relayDid = addInput(card, "oai-did", "设备标识", InputType.TYPE_CLASS_TEXT)
+        relayToken = addInput(
+            card, "access_token", "粘贴 ChatGPT access_token",
+            InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or
                 InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-            isSingleLine = false
+        ).apply {
             minLines = 3
-            maxLines = 8
-            gravity = android.view.Gravity.TOP
-            typeface = android.graphics.Typeface.MONOSPACE
-            hint = "Bearer 后面的 token"
+            maxLines = 6
+            isSingleLine = false
+            gravity = Gravity.TOP
+            typeface = Typeface.MONOSPACE
         }
-        box.addView(relayToken)
 
-        box.addView(
-            buttonRow(
-                "保存并重启" to { saveRelayAndRestart() },
-                "导入 kit.json（粘贴）" to { importRelayKit() },
-            )
-        )
-        box.addView(
-            buttonRow(
-                "复制启动命令" to { copyRelayCommand() },
-                "测试 /health" to { testRelayHealth() },
-            )
-        )
-
-        root.addView(ScrollView(this).apply {
-            addView(box)
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 0, 2f
-            )
-        })
+        card.addView(buttonRow(
+            ("保存并重启" to true) to { saveRelayAndRestart() },
+            ("导入 kit.json" to false) to { importRelayKit() }
+        ))
+        card.addView(buttonRow(
+            ("复制 API 配置" to false) to { copyRelayCommand() },
+            ("测试连接" to false) to { testRelayHealth() }
+        ))
+        root.addView(card, sectionParams())
         fillRelayControls(RelayConfig.load(this))
     }
 
-    private fun labelView(text: String) = TextView(this).apply {
-        this.text = text
-        setPadding(0, 12, 0, 0)
+    private fun sectionCard(title: String, subtitle: String): LinearLayout {
+        val card = panel()
+        card.addView(text(title, 18f, white, true))
+        card.addView(text(subtitle, 12f, muted).apply {
+            setPadding(0, dp(4), 0, dp(14))
+        })
+        return card
     }
 
-    private fun buttonRow(vararg items: Pair<String, () -> Unit>) = LinearLayout(this).apply {
-        orientation = LinearLayout.HORIZONTAL
-        for ((label, action) in items) {
-            addView(Button(this@MainActivity).apply {
-                text = label
-                setOnClickListener { action() }
-            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+    private fun panel() = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        background = rounded(surface, stroke, 18)
+        setPadding(dp(16), dp(16), dp(16), dp(16))
+    }
+
+    private fun text(value: String, size: Float, color: Int, bold: Boolean = false) =
+        TextView(this).apply {
+            text = value
+            textSize = size
+            setTextColor(color)
+            if (bold) typeface = Typeface.DEFAULT_BOLD
+        }
+
+    private fun addInput(parent: LinearLayout, label: String, hint: String, inputType: Int): EditText {
+        parent.addView(text(label, 12f, muted, true).apply {
+            setPadding(dp(1), dp(11), 0, dp(5))
+        })
+        return EditText(this).apply {
+            this.hint = hint
+            this.inputType = inputType
+            textSize = 13f
+            setTextColor(white)
+            setHintTextColor(0xFF66758D.toInt())
+            background = rounded(surfaceAlt, stroke, 11)
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            if (inputType and InputType.TYPE_TEXT_FLAG_MULTI_LINE == 0) isSingleLine = true
+            parent.addView(this, fieldParams(0, dp(2)))
         }
     }
 
-    /** 回填控件；期间屏蔽 Switch 监听，避免写盘 + 启停服务的递归触发。 */
+    private fun buttonRow(vararg items: Pair<Pair<String, Boolean>, () -> Unit>) =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(12), 0, 0)
+            items.forEachIndexed { index, item ->
+                val (label, isPrimary) = item.first
+                val action = item.second
+                val button = TextView(this@MainActivity).apply {
+                    text = label
+                    textSize = 12f
+                    typeface = Typeface.DEFAULT_BOLD
+                    gravity = Gravity.CENTER
+                    setTextColor(if (isPrimary) 0xFF071A1C.toInt() else white)
+                    background = rounded(
+                        if (isPrimary) primary else 0xFF1B2940.toInt(),
+                        if (isPrimary) primary else stroke, 11
+                    )
+                    setPadding(dp(8), dp(13), dp(8), dp(13))
+                    isClickable = true
+                    isFocusable = true
+                    setOnClickListener { action() }
+                }
+                addView(button, LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
+                ).apply {
+                    if (index > 0) leftMargin = dp(7)
+                })
+            }
+        }
+
+    private fun rounded(color: Int, border: Int, radius: Int): GradientDrawable =
+        GradientDrawable().apply {
+            setColor(color)
+            cornerRadius = dp(radius).toFloat()
+            setStroke(dp(1), border)
+        }
+
+    private fun sectionParams() = LinearLayout.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+    ).apply { bottomMargin = dp(14) }
+
+    private fun fieldParams(top: Int, bottom: Int) = LinearLayout.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+    ).apply {
+        topMargin = top
+        bottomMargin = bottom
+    }
+
+    private fun dp(value: Int): Int =
+        (value * resources.displayMetrics.density + 0.5f).toInt()
+
     private fun fillRelayControls(cfg: RelayConfig) {
         relayRefreshing = true
         try {
@@ -245,15 +335,15 @@ class MainActivity : Activity() {
     private fun relayStatusLine(cfg: RelayConfig): String {
         val state = if (cfg.enabled) "运行中" else "已停止"
         val host = if (cfg.lan) "0.0.0.0" else "127.0.0.1"
-        val ready = if (cfg.ready) "就绪" else "未就绪（缺 access_token / oai-did）"
-        return "$state · 端口 ${cfg.port} · $host · $ready"
+        val ready = if (cfg.ready) "凭据就绪" else "等待 access_token / oai-did"
+        return "$state  ·  $host:${cfg.port}  ·  $ready"
     }
 
     private fun renderRelayStatus(cfg: RelayConfig) {
         relayStatus.text = relayStatusLine(cfg)
+        relayStatus.setTextColor(if (cfg.enabled && cfg.ready) primary else warning)
     }
 
-    /** 读控件 + 校验端口，合并到已有配置上。 */
     private fun currentRelayConfig(base: RelayConfig): RelayConfig {
         val typed = relayPort.text.toString().trim().toIntOrNull()
         val port = if (typed != null && typed in 1..65535) typed else base.port
@@ -261,7 +351,7 @@ class MainActivity : Activity() {
             port = port,
             apiKey = relayApiKey.text.toString().trim(),
             oaiDid = relayDid.text.toString().trim(),
-            accessToken = relayToken.text.toString().trim(),
+            accessToken = relayToken.text.toString().trim()
         )
     }
 
@@ -271,13 +361,11 @@ class MainActivity : Activity() {
     }
 
     private fun saveRelayAndRestart() {
-        val base = RelayConfig.load(this)
-        val next = currentRelayConfig(base)
+        val next = currentRelayConfig(RelayConfig.load(this))
         RelayConfig.save(this, next)
         if (next.enabled) restartRelayService()
         fillRelayControls(next)
-        val hint = if (next.enabled) "已保存并重启" else "已保存（未启用，未启动服务）"
-        relayStatus.text = hint + "\n" + relayStatusLine(next)
+        toast(if (next.enabled) "配置已保存并请求重启" else "配置已保存")
     }
 
     private fun importRelayKit() {
@@ -287,65 +375,66 @@ class MainActivity : Activity() {
             clip.getItemAt(0).coerceToText(this).toString()
         } else ""
         if (json.isBlank()) {
-            relayStatus.text = "剪贴板为空：先复制 kit.json 内容再点这里"
+            toast("剪贴板为空，请先复制 kit.json 内容")
             return
         }
         try {
             val next = RelayConfig.importKit(this, json)
             fillRelayControls(next)
-            relayStatus.text = "已导入 kit.json\n" + relayStatusLine(next)
+            toast("kit.json 导入成功")
         } catch (t: Throwable) {
-            relayStatus.text = "导入失败: ${t.message ?: t.javaClass.simpleName}"
+            toast("导入失败：${t.message ?: t.javaClass.simpleName}")
         }
     }
 
     private fun copyRelayCommand() {
         val cfg = currentRelayConfig(RelayConfig.load(this))
-        val cmd = "curl -H \"Authorization: Bearer ${cfg.apiKey}\" " +
-            "http://127.0.0.1:${cfg.port}/v1/models"
+        val content = "base_url=http://127.0.0.1:${cfg.port}/v1\napi_key=${cfg.apiKey}"
         val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
-        clipboard.setPrimaryClip(ClipData.newPlainText("local api curl", cmd))
-        relayStatus.text = "已复制启动命令\n$cmd"
+        clipboard.setPrimaryClip(ClipData.newPlainText("DSH GPT API", content))
+        toast("客户端 API 配置已复制")
     }
 
-    /** 后台线程请求 /health，结果回主线程写状态。 */
     private fun testRelayHealth() {
         val cfg = currentRelayConfig(RelayConfig.load(this))
         val url = "http://127.0.0.1:${cfg.port}/health"
-        relayStatus.text = "测试中… $url"
+        relayStatus.text = "正在测试 $url"
         Thread {
-            val body = try {
-                val conn = (java.net.URI(url).toURL().openConnection() as java.net.HttpURLConnection).apply {
-                    requestMethod = "GET"
-                    connectTimeout = 3000
-                    readTimeout = 3000
-                }
-                val code = conn.responseCode
-                val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-                val text = stream?.bufferedReader()?.use { it.readText() } ?: ""
-                conn.disconnect()
-                "HTTP $code\n" + text.take(600)
+            val result = try {
+                val connection = (java.net.URI(url).toURL().openConnection() as java.net.HttpURLConnection)
+                connection.requestMethod = "GET"
+                connection.connectTimeout = 3000
+                connection.readTimeout = 3000
+                val code = connection.responseCode
+                val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+                val body = stream?.bufferedReader()?.use { it.readText() } ?: ""
+                connection.disconnect()
+                "HTTP $code  ·  ${body.take(240)}"
             } catch (t: Throwable) {
-                "请求失败: ${t.javaClass.simpleName}: ${t.message ?: ""}"
+                "连接失败：${t.javaClass.simpleName}"
             }
-            runOnUiThread { relayStatus.text = "$url\n$body" }
+            runOnUiThread {
+                relayStatus.text = result
+                relayStatus.setTextColor(if (result.startsWith("HTTP 2")) primary else warning)
+            }
         }.start()
     }
 
     private fun refreshStatus() {
         val service = DshApplication.currentService
         status.text = if (service == null) {
-            "LSPosed service unavailable. Enable the module and open it again."
+            "●  LSPosed 未连接  ·  请启用模块并重新打开"
         } else {
-            "Connected: ${service.frameworkName} / API ${service.apiVersion}\n" +
-                "Scope: ${service.scope.joinToString()}"
+            "●  LSPosed 已连接  ·  ${service.frameworkName} / API ${service.apiVersion}"
         }
+        status.setTextColor(if (service == null) warning else primary)
     }
 
     private fun saveConfig() {
         val service = DshApplication.currentService
         if (service == null) {
-            status.text = "Cannot save: LSPosed service is not connected."
+            status.text = "LSPosed 服务未连接，无法应用配置"
+            status.setTextColor(warning)
             return
         }
         try {
@@ -354,9 +443,11 @@ class MainActivity : Activity() {
             service.getRemotePreferences("dsh").edit()
                 .putString("hook_config", source)
                 .apply()
-            status.text = "Saved: ${parsed.rules.size} rule(s). The target process validates and applies the update."
+            status.text = "●  配置已提交  ·  ${parsed.rules.size} 条规则"
+            status.setTextColor(primary)
         } catch (t: Throwable) {
-            status.text = "Rejected: ${t.message ?: t.javaClass.simpleName}"
+            status.text = "配置被拒绝：${t.message ?: t.javaClass.simpleName}"
+            status.setTextColor(warning)
         }
     }
 
@@ -370,32 +461,37 @@ class MainActivity : Activity() {
             report.setText(json)
             val updated = result?.getLong(ObservationProvider.KEY_UPDATED) ?: 0L
             reportStatus.text = if (updated == 0L) {
-                "No observation report received yet. Trigger a configured method in the target app."
+                "尚无报告 · 在目标应用触发已配置的方法后刷新"
             } else {
-                "Report received: ${updated} (epoch ms), ${json.length} characters"
+                "已收到报告 · ${updated} · ${json.length} 字符"
             }
         } catch (t: Throwable) {
-            reportStatus.text = "Report read failed: ${t.javaClass.simpleName}"
+            reportStatus.text = "读取失败：${t.javaClass.simpleName}"
         }
     }
 
     private fun copyReport() {
         val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
         clipboard.setPrimaryClip(ClipData.newPlainText("DSH observations", report.text))
-        reportStatus.text = "Observation JSON copied to clipboard."
+        toast("观察报告已复制")
     }
 
     private fun shareReport() {
         val send = Intent(Intent.ACTION_SEND).apply {
             type = "application/json"
-            putExtra(Intent.EXTRA_SUBJECT, "DSH metadata-only Hook observations")
+            putExtra(Intent.EXTRA_SUBJECT, "DSH GPT Hook observations")
             putExtra(Intent.EXTRA_TEXT, report.text.toString())
         }
-        startActivity(Intent.createChooser(send, "Send sanitized report to an AI assistant"))
+        startActivity(Intent.createChooser(send, "分享观察报告"))
+    }
+
+    private fun toast(message: String) {
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
 
     companion object {
-        private const val EMPTY_REPORT = """{"schemaVersion":1,"kind":"dsh-hook-observations","events":[]}"""
+        private const val EMPTY_REPORT =
+            """{"schemaVersion":1,"kind":"dsh-hook-observations","events":[]}"""
         private const val DEFAULT_CONFIG = """{
   "schemaVersion": 1,
   "targetPackage": "com.openai.chatgpt",

@@ -40,4 +40,12 @@ class InheritedMethodMetadataTest {
         assertTrue(result.signatures.isEmpty())
         assertTrue(result.truncated)
     }
+    @Test
+    fun expiredDeadlineStopsCollectionAndReportsTimeout() {
+        val result = InheritedMethodMetadata.collect(Child::class.java, 100, System.nanoTime() - 1)
+        assertTrue(result.signatures.isEmpty())
+        assertTrue(result.truncated)
+        assertTrue(result.timedOut)
+    }
+
 }

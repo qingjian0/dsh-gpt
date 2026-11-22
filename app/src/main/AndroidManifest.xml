@@ -12,9 +12,6 @@
     <queries>
         <package android:name="com.openai.chatgpt" />
         <package android:name="org.lsposed.manager" />
-        <activity
-            android:name=".MainActivity"
-            android:exported="false" />
         <provider android:authorities="com.openai.chatgpt.observations" />
     </queries>
 
@@ -26,7 +23,7 @@
         android:allowBackup="false"
         android:supportsRtl="true">
         <activity
-            android:name=".RelayActivity"
+            android:name=".MainActivity"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

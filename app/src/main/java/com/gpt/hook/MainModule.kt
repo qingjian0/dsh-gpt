@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Bundle
 import com.gpt.hook.diagnostics.EventBuffer
 import com.gpt.hook.diagnostics.ClassLoadWatcher
+import com.gpt.hook.diagnostics.ClassScanner
 import com.gpt.hook.diagnostics.HookConfigParser
 import com.gpt.hook.diagnostics.HookRuntime
 import com.gpt.hook.diagnostics.ModuleLogger
@@ -35,6 +36,9 @@ class MainModule : XposedModule() {
     private val discoveryExecutor = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "dsh-discovery-worker").apply { isDaemon = true }
     }
+    private val classScanExecutor = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "dsh-class-scan").apply { isDaemon = true }
+    }
     private val reportExecutor = Executors.newSingleThreadScheduledExecutor { runnable ->
         Thread(runnable, "dsh-report-publish").apply { isDaemon = true }
     }
@@ -47,7 +51,9 @@ class MainModule : XposedModule() {
     private var configListener: SharedPreferences.OnSharedPreferenceChangeListener? = null
     @Volatile private var targetContextForIpc: Context? = null
     @Volatile private var activeRuntime: HookRuntime? = null
+    @Volatile private var targetClassLoader: ClassLoader? = null
     @Volatile private var lastProviderConfigVersion: Long = -1L
+    @Volatile private var lastClassScanVersion: Long = -1L
 
     override fun onModuleLoaded(param: ModuleLoadedParam) {
         super.onModuleLoaded(param)
@@ -60,6 +66,7 @@ class MainModule : XposedModule() {
         if (param.packageName != TARGET_PACKAGE) return
         ModuleLogger.i("target package ready; package=${param.packageName}; classLoader=${param.classLoader.javaClass.name}")
         installContextBootstrap()
+        targetClassLoader = param.classLoader
 
         val hookRuntime = HookRuntime(this, param.classLoader, eventBuffer)
         activeRuntime = hookRuntime
@@ -145,6 +152,14 @@ class MainModule : XposedModule() {
                     updateClassLoadWatcher(config.observeClassLoads)
                     val report = runtime.applyWithReport(config)
                     logApplyReport(config.rules.size, report.added, report.replaced, report.retained, report.removed, report.failed, version)
+                    if (config.scanAllClasses && lastClassScanVersion != version) {
+                        lastClassScanVersion = version
+                        val loader = targetClassLoader
+                        if (loader != null) classScanExecutor.execute {
+                            val count = targetContextForIpc?.filesDir?.let { ClassScanner.scan(loader, it) } ?: 0
+                            if (count == 0) ModuleLogger.w("class scan produced no output; revision=$version")
+                        }
+                    }
                 } catch (t: Throwable) {
                     ModuleLogger.w("DSH config rejected; revision=$version; reason=${t.javaClass.simpleName}")
                 }

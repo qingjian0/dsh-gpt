@@ -118,7 +118,7 @@ class DexDiscoveryEngine(
                     if (candidateCount < MAX_CANDIDATES_PER_RESPONSE) {
                         runCatching {
                             RuntimeCandidateProposal.fromMethod(
-                                TARGET_PACKAGE, type.name, method, listOf("dex-discovery:${type.name}")
+                                TARGET_PACKAGE, type.name, method, listOf("dex-discovery:${type.name}#${method.name}${JvmDescriptors.method(method)}")
                             ).toJson()
                         }.onSuccess { candidate ->
                             candidateProposals.put(candidate)
@@ -138,7 +138,7 @@ class DexDiscoveryEngine(
                         if (candidateCount >= MAX_CANDIDATES_PER_RESPONSE) return@forEach
                         runCatching {
                             RuntimeCandidateProposal.fromMethod(
-                                TARGET_PACKAGE, type.name, method, listOf("dex-discovery:${type.name}")
+                                TARGET_PACKAGE, type.name, method, listOf("dex-discovery:${type.name}#${method.name}${JvmDescriptors.method(method)}")
                             ).toJson()
                         }.onSuccess { candidate ->
                             candidateProposals.put(candidate)

@@ -56,6 +56,7 @@ class MainModule : XposedModule() {
                     val config = HookConfigParser.parse(source)
                     val (applied, failed) = hookRuntime.apply(config)
                     ModuleLogger.i("configuration applied; rules=${config.rules.size}; hooks=$applied; failed=$failed")
+                    if (config.scanFields) scanLoadedClasses(param.classLoader)
                 } catch (t: Throwable) {
                     ModuleLogger.w("configuration rejected; reason=${t.javaClass.simpleName}")
                 }
@@ -105,6 +106,56 @@ class MainModule : XposedModule() {
             }
         } catch (t: Throwable) {
             ModuleLogger.w("context bootstrap hook failed: ${t.javaClass.simpleName}")
+        }
+    }
+
+    /** 遍历 com.openai.* 的已加载类，导出字段/方法名里带功能关键词的，用于定位混淆类。 */
+    private fun scanLoadedClasses(cl: ClassLoader) {
+        val keys = listOf("temporary", "personaliz", "reasoning", "thinking", "plugin", "connector", "maxtokens", "readonly", "readonly")
+        var classes = 0
+        var hits = 0
+        try {
+            val pl = Class.forName("dalvik.system.BaseDexClassLoader").getDeclaredField("pathList").apply { isAccessible = true }.get(cl)
+            val els = pl.javaClass.getDeclaredField("dexElements").apply { isAccessible = true }.get(pl) as Array<*>
+            val found = StringBuilder()
+            for (el in els) {
+                if (el == null) continue
+                var dex: Any? = null
+                for (f in el.javaClass.declaredFields) {
+                    f.isAccessible = true
+                    val v = f.get(el)
+                    if (v != null && v.javaClass.name == "dalvik.system.DexFile") { dex = v; break }
+                }
+                if (dex == null) continue
+                @Suppress("UNCHECKED_CAST")
+                val en = dex.javaClass.getMethod("entries").invoke(dex) as java.util.Enumeration<String>
+                while (en.hasMoreElements()) {
+                    val name = en.nextElement()
+                    if (!name.startsWith("com.openai.")) continue
+                    classes++
+                    val c = try { Class.forName(name, false, cl) } catch (t: Throwable) { continue }
+                    val sb = StringBuilder()
+                    try {
+                        for (f in c.declaredFields) {
+                            val n = f.name.lowercase()
+                            if (keys.any { n.contains(it) }) sb.append("  F ").append(f.type.simpleName).append(' ').append(f.name).append('\n')
+                        }
+                    } catch (_: Throwable) { }
+                    try {
+                        for (mm in c.declaredMethods) {
+                            val n = mm.name.lowercase()
+                            if (keys.any { n.contains(it) }) sb.append("  M ").append(mm.returnType.simpleName).append(' ').append(mm.name).append('\n')
+                        }
+                    } catch (_: Throwable) { }
+                    if (sb.isNotEmpty()) {
+                        hits++
+                        ModuleLogger.i("SCAN " + name + "\n" + sb)
+                    }
+                }
+            }
+            ModuleLogger.i("class field scan done; classes=" + classes + "; hits=" + hits)
+        } catch (t: Throwable) {
+            ModuleLogger.w("class field scan failed; reason=" + t.javaClass.simpleName)
         }
     }
 

@@ -117,3 +117,34 @@ GET  /backend-api/me           → 补 features / entitlements 字段
 ```
 
 这套改写不依赖任何类名，纯 JSON 层，改了立即生效，且能在 relay 的 `/backend-api/*` 透传分支里做。
+
+---
+
+## 6 响应改写（已实测）
+
+`DSH_REWRITE=1` 时，`/backend-api/*` 的 JSON 响应会被改写后再返回：
+
+| 端点 | 改写内容 |
+|---|---|
+| `/backend-api/models` | 每个 model 补 `capabilities.tools = true`，补 `product_features.attachments` |
+| `/backend-api/conversation` | `banner_info` → `null`，`blocked_features` → `[]`（仅非流式/透传路径） |
+
+实测（2026-11-23 03:56，端口 8794）：
+
+```
+GET /health          → {"ok":true,"port":8794,"models":[...]}
+GET /backend-api/models → tools: true | attachments: true
+```
+
+启动：
+
+```sh
+DSH_TEMPORARY=1 DSH_REASONING=high DSH_PERSONALIZATION=0 DSH_REWRITE=1 \
+  node tools/openai-relay.mjs --kit ./kit --port 8794
+```
+
+### 未覆盖
+
+- `/backend-api/conversation` 是 SSE 流式，逐条 `data:` 改写成本高，
+  当前只在透传（非流式）路径生效；流式路径的 `banner_info` / `blocked_features` 仍是上游原值。
+  需要的话在 `dec()` 里对每条 JSON 做一次替换即可，代价是每块多一次 parse。

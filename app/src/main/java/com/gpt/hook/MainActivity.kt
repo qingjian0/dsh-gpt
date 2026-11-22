@@ -37,6 +37,7 @@ class MainActivity : Activity() {
     private lateinit var editor: EditText
     private lateinit var report: EditText
     private lateinit var relayStatus: TextView
+    private lateinit var endpointView: TextView
     private lateinit var relayEnabled: Switch
     private lateinit var relayLan: Switch
     private lateinit var relayPort: EditText
@@ -242,10 +243,11 @@ class MainActivity : Activity() {
         statusCard.addView(text("服务地址", 11f, muted, true).apply {
             setPadding(0, dp(15), 0, dp(5))
         })
-        statusCard.addView(text("http://127.0.0.1:8766/v1", 13f, primary, true).apply {
+        endpointView = text("http://127.0.0.1:${RelayConfig.load(this).port}/v1", 13f, primary, true).apply {
             setPadding(dp(12), dp(12), dp(12), dp(12))
             background = rounded(surfaceAlt, stroke, 10)
-        })
+        }
+        statusCard.addView(endpointView)
         statusCard.addView(buttonRow(
             ("网关设置" to true) to { showPage(1) },
             ("测试连接" to false) to { testRelayHealth() }
@@ -509,6 +511,9 @@ class MainActivity : Activity() {
     private fun renderRelayStatus(cfg: RelayConfig) {
         relayStatus.text = relayStatusLine(cfg)
         relayStatus.setTextColor(if (cfg.enabled && cfg.ready) primary else warning)
+        if (this::endpointView.isInitialized) {
+            endpointView.text = "http://127.0.0.1:${cfg.port}/v1"
+        }
     }
 
     private fun currentRelayConfig(base: RelayConfig): RelayConfig {

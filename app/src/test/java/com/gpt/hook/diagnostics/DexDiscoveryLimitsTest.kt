@@ -10,7 +10,7 @@ class DexDiscoveryLimitsTest {
         val limits = DexDiscoveryEngine.Limits()
         assertEquals(16, limits.maxDexCount)
         assertEquals(2_500, limits.maxClassesScanned)
-        assertEquals(500, limits.maxMethods)
+        assertEquals(500, limits.maxMemberRecords)
         assertEquals(1_500L, limits.maxDurationMs)
         assertEquals(64 * 1024, limits.maxResponseBytes)
     }

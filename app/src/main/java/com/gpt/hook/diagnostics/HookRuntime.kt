@@ -83,6 +83,15 @@ class HookRuntime(
                     continue
                 }
                 try {
+                    val preparedReturn = if (rule.mode == "return") {
+                        coerceValue(rule.result, method.returnType)
+                    } else null
+                    val preparedArgs = if (rule.mode == "args") {
+                        rule.argPatch.mapValues { (index, value) ->
+                            require(index < method.parameterCount) { "Argument index exceeds method arity" }
+                            coerceValue(value, method.parameterTypes[index])
+                        }
+                    } else emptyMap()
                     val hookId = stableHookId(rule.id, signature)
                     val handle = framework.hook(method).setId(hookId).intercept { chain ->
                         val count = counters.getOrPut(key) { AtomicLong() }.incrementAndGet()
@@ -95,15 +104,12 @@ class HookRuntime(
                             var failure: Throwable? = null
                             try {
                                 when (rule.mode) {
-                                    "return" -> coerceValue(rule.result, method.returnType)
+                                    "return" -> preparedReturn
                                     "noop" -> defaultValue(method.returnType)
                                     "throw" -> throw IllegalStateException("DSH rule: ${rule.id}")
                                     "args" -> {
                                         val args = Array(method.parameterCount) { chain.getArg(it) }
-                                        rule.argPatch.forEach { (index, value) ->
-                                            require(index < method.parameterCount) { "Argument index exceeds method arity" }
-                                            args[index] = coerceValue(value, method.parameterTypes[index])
-                                        }
+                                        preparedArgs.forEach { (index, value) -> args[index] = value }
                                         chain.proceed(args)
                                     }
                                     "inspect" -> {

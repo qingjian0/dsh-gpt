@@ -28,6 +28,24 @@ class EventBuffer(
     fun record(rule: HookRule, signature: String, elapsedNanos: Long, error: Throwable?) {
         val event = Event(sequence.incrementAndGet(), rule.id, rule.className, rule.methodName,
             signature.take(256), elapsedNanos.coerceAtLeast(0), error?.javaClass?.name?.take(120))
+        append(event)
+    }
+
+    /** Store only a class name and fixed watcher signature; never retain Class or ClassLoader. */
+    fun recordClassLoaded(className: String, elapsedNanos: Long) {
+        if (!className.startsWith("com.openai.") || className.length > 240) return
+        append(Event(
+            sequence.incrementAndGet(),
+            "system.classloader",
+            className,
+            "loadClass",
+            "ClassLoader.loadClass(String,boolean)",
+            elapsedNanos.coerceAtLeast(0),
+            null
+        ))
+    }
+
+    private fun append(event: Event) {
         synchronized(lock) {
             if (events.size >= capacity) events.removeFirst()
             events.addLast(event)

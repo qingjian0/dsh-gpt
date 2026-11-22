@@ -86,7 +86,9 @@ class HookRuntime(
                     val hookId = stableHookId(rule.id, signature)
                     val handle = framework.hook(method).setId(hookId).intercept { chain ->
                         val count = counters.getOrPut(key) { AtomicLong() }.incrementAndGet()
-                        if ((count - 1) % rule.sampleEvery != 0L) {
+                        val sampled = (count - 1) % rule.sampleEvery == 0L
+                        val metadataMode = rule.mode == "observe" || rule.mode == "dump" || rule.mode == "inspect"
+                        if (!sampled && metadataMode) {
                             chain.proceed()
                         } else {
                             val started = System.nanoTime()

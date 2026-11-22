@@ -21,6 +21,7 @@ import org.json.JSONObject
 class ObservationProvider : ContentProvider() {
     override fun onCreate(): Boolean = true
 
+    @Synchronized
     override fun call(method: String, arg: String?, extras: Bundle?): Bundle {
         val ctx = requireNotNull(context)
         val uid = Binder.getCallingUid()
@@ -133,7 +134,8 @@ class ObservationProvider : ContentProvider() {
                     ?: return Bundle()
                 val claimed = current.claim(System.currentTimeMillis(), DISCOVERY_LEASE_MS)
                 if (claimed == current) return Bundle()
-                prefs.edit().putString(KEY_DISCOVERY_TASK, encodeTask(claimed)).commit()
+                val claimSaved = prefs.edit().putString(KEY_DISCOVERY_TASK, encodeTask(claimed)).commit()
+                if (!claimSaved) return Bundle()
                 if (claimed.status != DiscoveryTaskStatus.RUNNING) return Bundle().apply {
                     putString(KEY_DISCOVERY_TASK, encodeTask(claimed))
                 }

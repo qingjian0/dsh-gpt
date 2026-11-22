@@ -29,7 +29,7 @@ This is a review/triage record, not an instruction to merge.
 | Branch | Ahead | Behind | Assessment |
 |---|---:|---:|---|
 | `feat/dsh-gpt-hook-agent-bridge` | 27 | 12 | Contains the real HookAgentBridge, HTTP routes, EndpointCatalog and bundled profile plugin. Keep as source baseline; do not merge wholesale |
-| `refactor/dsh-gpt-hook-bridge-hardening` | 36 | 12 | Keep; protocol alignment, status/retry/cancel routes and plugin validation in progress |
+| `refactor/dsh-gpt-hook-bridge-hardening` | 37 | 12 | Keep; protocol alignment, status/retry/cancel routes and plugin validation in progress |
 
 The host branch remains 12 commits behind `main`; conflict reconciliation is a separate task. The hardening branch is not merged.
 

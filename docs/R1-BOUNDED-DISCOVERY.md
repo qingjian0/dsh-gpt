@@ -73,6 +73,14 @@ commits.
 
 ## Explicitly not complete
 
+R1 is a bounded discovery/observation foundation, **not full legacy Hook parity**.
+The following legacy capabilities remain unported and must be handled as a separate
+R2 capability-preservation phase: dynamic ClassLoader.loadClass watching, constructor
+Hook installation, explicit static-field mutation, and constrained argument/return
+transforms. No arbitrary AI-generated code execution is introduced. Before enabling
+behavior-changing rules, define a per-rule permission model, last-known-good rollback,
+and tests that prove failures cannot silently remove an existing valid Hook.
+
 1. Strong certificate/signature pinning for the DSH host Provider caller. Current host
    authorization checks that the Binder UID maps to `app.dsh.mobile`; this is not a
    cryptographic pairing guarantee.

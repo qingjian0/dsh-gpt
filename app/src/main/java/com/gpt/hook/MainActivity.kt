@@ -21,6 +21,7 @@ import android.widget.Toast
 import com.gpt.hook.api.ApiService
 import com.gpt.hook.api.RelayConfig
 import com.gpt.hook.diagnostics.HookConfigParser
+import org.json.JSONObject
 
 /** Unified DSH GPT Hook and local API dashboard. */
 class MainActivity : Activity() {
@@ -294,6 +295,9 @@ class MainActivity : Activity() {
         card.addView(buttonRow(
             ("验证并应用" to true) to { saveConfig() },
             ("恢复默认" to false) to { editor.setText(DEFAULT_CONFIG) }
+        ))
+        card.addView(buttonRow(
+            ("扫描并生成类表" to false) to { requestClassScan() }
         ))
         root.addView(card, sectionParams())
     }
@@ -639,6 +643,17 @@ class MainActivity : Activity() {
         } catch (t: Throwable) {
             status.text = "配置被拒绝：${t.message ?: t.javaClass.simpleName}"
             status.setTextColor(warning)
+        }
+    }
+
+    private fun requestClassScan() {
+        try {
+            val config = JSONObject(editor.text.toString()).put("scanAllClasses", true)
+            editor.setText(config.toString(2))
+            saveConfig()
+            toast("已请求全量类扫描；文件将写入 ChatGPT 私有目录 files/class-scan.txt")
+        } catch (t: Throwable) {
+            toast("类扫描请求失败：${t.message ?: t.javaClass.simpleName}")
         }
     }
 

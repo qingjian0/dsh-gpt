@@ -76,7 +76,8 @@ class MainModule : XposedModule() {
      */
     private fun readLocalOverride(): String? {
         return try {
-            val cmd = java.io.File("/proc/self/cmdline").readText().trim().substringBefore(':')
+            val raw = java.io.File("/proc/self/cmdline").readBytes().toString(Charsets.UTF_8)
+            val cmd = raw.substringBefore('\u0000').substringBefore(':')
             val f = java.io.File("/data/data/" + cmd + "/files/hook-config.json")
             if (!f.exists()) return null
             val text = f.readText()

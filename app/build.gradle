@@ -50,4 +50,5 @@ kotlin {
 dependencies {
     compileOnly libs.libxposed
     implementation libs.libxposed.service
+    testImplementation 'junit:junit:4.13.2'
 }

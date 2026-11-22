@@ -53,8 +53,12 @@ class MainModule : XposedModule() {
             configExecutor.execute {
                 try {
                     val config = HookConfigParser.parse(source)
-                    val (applied, failed) = hookRuntime.apply(config)
-                    ModuleLogger.i("configuration applied; rules=${config.rules.size}; hooks=$applied; failed=$failed")
+                    val report = hookRuntime.applyWithReport(config)
+                    ModuleLogger.i(
+                        "configuration applied; rules=${config.rules.size}; added=${report.added}; " +
+                            "replaced=${report.replaced}; retained=${report.retained}; " +
+                            "removed=${report.removed}; failed=${report.failed}"
+                    )
                 } catch (t: Throwable) {
                     ModuleLogger.w("configuration rejected; reason=${t.javaClass.simpleName}")
                 }

@@ -66,6 +66,10 @@ class DexDiscoveryEngine(
             indexed.names
         }
 
+        if (exactClassName != null && names.isEmpty()) {
+            return JSONObject().put("ok", false).put("error", "class_not_found")
+        }
+
         val classes = JSONArray()
         var records = 0
         var inspected = 0
@@ -142,6 +146,7 @@ class DexDiscoveryEngine(
             .put("responseTruncated", responseTruncated)
             .put("timedOut", timedOut)
             .put("classesInspected", inspected)
+            .put("scanTruncated", exactClassName == null && names.size >= limits.maxClassesScanned)
             .put("recordCount", records)
             .put("elapsedMs", elapsedMs)
             .put("classes", classes)
@@ -167,7 +172,7 @@ class DexDiscoveryEngine(
 
     private fun indexClassNames(prefix: String, deadline: Long): IndexResult {
         val base = classLoader as? BaseDexClassLoader
-            ?: return IndexResult(emptyList(), 0, 0, "unsupported_class_loader")
+            ?: return IndexResult(emptyList(), 0, 0, error = "unsupported_class_loader")
         return try {
             val pathListField = BaseDexClassLoader::class.java.getDeclaredField("pathList").apply {
                 isAccessible = true
@@ -177,14 +182,18 @@ class DexDiscoveryEngine(
                 isAccessible = true
             }
             val elements = elementsField.get(pathList) as? Array<*>
-                ?: return IndexResult(emptyList(), 0, 0, "dex_elements_unavailable")
+                ?: return IndexResult(emptyList(), 0, 0, error = "dex_elements_unavailable")
 
             val names = TreeSet<String>()
             var scanned = 0
             var dexScanned = 0
+            var truncated = false
             for (element in elements) {
-                if (element == null || dexScanned >= limits.maxDexCount ||
-                    scanned >= limits.maxClassesScanned || System.nanoTime() >= deadline) break
+                if (element == null) continue
+                if (dexScanned >= limits.maxDexCount || scanned >= limits.maxClassesScanned || System.nanoTime() >= deadline) {
+                    truncated = true
+                    break
+                }
                 dexScanned++
                 val dexField = runCatching {
                     element.javaClass.getDeclaredField("dexFile").apply { isAccessible = true }
@@ -192,15 +201,15 @@ class DexDiscoveryEngine(
                 val dex = runCatching { dexField.get(element) as? DexFile }.getOrNull() ?: continue
                 val entries = runCatching { dex.entries() }.getOrNull() ?: continue
                 while (entries.hasMoreElements()) {
-                    if (scanned >= limits.maxClassesScanned || System.nanoTime() >= deadline) break
+                    if (scanned >= limits.maxClassesScanned || System.nanoTime() >= deadline) { truncated = true; break }
                     val name = entries.nextElement()
                     scanned++
                     if (name.startsWith(prefix)) names.add(name)
                 }
             }
-            IndexResult(names.toList(), scanned, dexScanned)
+            IndexResult(names.toList(), scanned, dexScanned, truncated)
         } catch (t: Throwable) {
-            IndexResult(emptyList(), 0, 0, t.javaClass.simpleName)
+            IndexResult(emptyList(), 0, 0, error = t.javaClass.simpleName)
         }
     }
 }

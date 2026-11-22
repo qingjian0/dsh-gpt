@@ -164,3 +164,65 @@ blocked_features:[] 出现 1 次（被改写）
 2. **hook 网络层**：Cronet 实现类在 GmsCore 动态 dex，本项目实测始终未加载，暂不可行。
 
 方案 1 是唯一可落地路径，风险：改 hosts 会影响 App 全部流量，需保留回滚。
+
+---
+
+## 8 hook 规则真正生效了（2026-11-23 03:58 实测）
+
+### 8.1 卡点与解法
+
+现象：改了 `modules_config.db` 里的 `hook_config`，目标进程始终 `rules=0`。
+根因：libxposed 的 remote prefs 由 lspd 侧缓存，只在 lspd 进程启动时刷新，
+写库/写 app prefs 都不会让缓存失效（lspd 一旦 kill 就起不来，只能整机重启）。
+
+解法：**override 文件**。`MainModule` 在 `onPackageReady` 里优先读
+`/data/data/<目标包>/files/hook-config.json`，读到了就用，读不到才回退到 remote prefs。
+
+```kotlin
+private fun readLocalOverride(): String? {
+    val raw = java.io.File("/proc/self/cmdline").readBytes().toString(Charsets.UTF_8)
+    val cmd = raw.substringBefore('\u0000').substringBefore(':')   // cmdline 以 NUL 结尾，trim() 去不掉
+    val f = java.io.File("/data/data/" + cmd + "/files/hook-config.json")
+    if (!f.exists()) return null
+    return f.readText()
+}
+```
+
+用法（不用重启设备）：
+
+```sh
+cat > /data/data/com.openai.chatgpt/files/hook-config.json <<'J'
+{"schemaVersion":1,"targetPackage":"com.openai.chatgpt","rules":[
+ {"id":"p1","className":"com.openai.valdi.celsius.CelsiusSubscriptionState",
+  "methodName":"values","parameterTypes":[],"enabled":true,"sampleEvery":1}]}
+J
+am force-stop com.openai.chatgpt && am start -n com.openai.chatgpt/.MainActivity
+```
+
+实测日志：
+
+```
+configuration applied; rules=1; hooks=1; failed=0
+```
+
+### 8.2 规则引擎的硬限制
+
+`HookConfigParser` 要求 `className` 必须以 `com.openai.` 开头，否则整份配置被拒：
+
+```
+configuration rejected; reason=IllegalArgumentException
+```
+
+实测：写 `com.android.org.conscrypt.TrustManagerImpl` 直接被拒。
+
+推论：**6 个功能开关里，凡是不落在 `com.openai.*` 的（TLS、Build、文件系统、系统服务），
+规则引擎一概够不到**。这也是为什么「临时聊天 / 个性化 / 深入思考 / 文件插件 / 会话上限 / 只读」
+最终只能走反代注入，而不是 hook 规则。
+
+### 8.3 最终结论
+
+| 目标 | 路径 | 状态 |
+|---|---|---|
+| hook 规则可即时生效（不重启设备） | override 文件 | ✅ `rules=1; hooks=1` |
+| 6 个功能开关可用 | 反代请求体注入 + 响应改写 | ✅ 全部实测 |
+| 6 个开关用 hook 规则实现 | 类不在 `com.openai.*` | ❌ 被解析器拒绝，不可行 |

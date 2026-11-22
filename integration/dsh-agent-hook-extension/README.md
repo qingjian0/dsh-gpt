@@ -8,7 +8,8 @@ the Android Gradle project and is never packaged into the LSPosed APK.
 - `dsh_hook_status`: inspect bridge/runtime status.
 - `dsh_hook_events`: read bounded metadata-only observations.
 - `dsh_hook_rules_get` / `dsh_hook_rules_update`: inspect and replace declarative rule snapshots.
-- `dsh_hook_discover`: request class/method metadata discovery.
+- `dsh_hook_discover`: request paginated class/method/constructor/field metadata discovery.
+- `dsh_hook_discover_status` / `dsh_hook_discover_cancel`: inspect or cancel a leased discovery task.
 - `dsh_hook_enable`: enable or disable the runtime.
 
 The plugin reads `DSH_BRIDGE_TOKEN` only in the DSH engine process and calls the
@@ -36,6 +37,8 @@ The plugin expects an authenticated local DSH bridge exposing:
 | GET | `/hook/rules` |
 | POST | `/hook/rules` |
 | POST | `/hook/discover` |
+| GET | `/hook/discover?requestId=...` |
+| POST | `/hook/discover/cancel` |
 | POST | `/hook/control` |
 
 **Integration status:** the plugin client and tool definitions are present in this

@@ -90,10 +90,10 @@ data class RuntimeCandidateProposal private constructor(
             require(targetPackage.startsWith("com.openai.")) {
                 "Candidate target must be within com.openai.*"
             }
-            require(runtimeClassName.startsWith("com.openai.")) {
+            require(runtimeClassName.startsWith("com.openai.") && runtimeClassName.length <= 240) {
                 "Runtime class must be within com.openai.*"
             }
-            val safeEvidence = evidence.map { it.trim() }.filter { it.isNotEmpty() }.distinct().take(16)
+            val safeEvidence = evidence.map { it.trim().take(256) }.filter { it.isNotEmpty() }.distinct().take(16)
             require(safeEvidence.isNotEmpty()) { "At least one evidence reference is required" }
 
             val declaring = method.declaringClass.name

@@ -8,12 +8,22 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
 /** Applies declarative metadata-only observation rules using libxposed interceptors. */
+data class HookApplyReport(
+    val added: Int,
+    val replaced: Int,
+    val retained: Int,
+    val removed: Int,
+    val failed: Int
+) {
+    val activeCount: Int get() = added + replaced + retained
+}
+
 class HookRuntime(
     private val framework: XposedInterface,
     private val classLoader: ClassLoader,
     private val events: EventBuffer
 ) {
-    private data class Installed(val handle: XposedInterface.HookHandle)
+    private data class Installed(val handle: XposedInterface.HookHandle, val fingerprint: String)
     private val installed = ConcurrentHashMap<String, Installed>()
     private val counters = ConcurrentHashMap<String, AtomicLong>()
     private val discoveryEngine by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
@@ -25,10 +35,18 @@ class HookRuntime(
      * adding/removing an overload cannot accidentally replace a different overload's hook.
      * A failed individual method does not prevent other overloads/rules from being applied.
      */
-    @Synchronized
     fun apply(config: HookConfig): Pair<Int, Int> {
+        val report = applyWithReport(config)
+        return report.activeCount to report.failed
+    }
+
+    @Synchronized
+    fun applyWithReport(config: HookConfig): HookApplyReport {
         val activeKeys = HashSet<String>()
-        var applied = 0
+        var added = 0
+        var replaced = 0
+        var retained = 0
+        var removed = 0
         var failed = 0
 
         for (rule in config.rules) {
@@ -41,14 +59,18 @@ class HookRuntime(
                     .take(8)
             } catch (t: Throwable) {
                 failed++
-                installed.keys.filter { it.startsWith("${rule.id}:") }.forEach(activeKeys::add)
+                val oldKeys = installed.keys.filter { it.startsWith("${rule.id}:") }
+                activeKeys.addAll(oldKeys)
+                retained += oldKeys.size
                 ModuleLogger.w("rule lookup failed: id=${rule.id}; reason=${t.javaClass.simpleName}")
                 continue
             }
 
             if (candidates.isEmpty()) {
                 failed++
-                installed.keys.filter { it.startsWith("${rule.id}:") }.forEach(activeKeys::add)
+                val oldKeys = installed.keys.filter { it.startsWith("${rule.id}:") }
+                activeKeys.addAll(oldKeys)
+                retained += oldKeys.size
                 ModuleLogger.w("rule has no matching methods: id=${rule.id}")
                 continue
             }
@@ -57,6 +79,12 @@ class HookRuntime(
                 val signature = method.toGenericString()
                 val key = "${rule.id}:$signature"
                 activeKeys += key
+                val fingerprint = "${rule.className}|${rule.methodName}|${rule.parameterTypes.joinToString(",")}|sample=${rule.sampleEvery}"
+                val existing = installed[key]
+                if (existing?.fingerprint == fingerprint) {
+                    retained++
+                    continue
+                }
                 try {
                     val hookId = stableHookId(rule.id, signature)
                     val handle = framework.hook(method)
@@ -79,10 +107,11 @@ class HookRuntime(
                             }
                         }
                     // libxposed setId atomically replaces an existing hook with this ID.
-                    installed[key] = Installed(handle)
-                    applied++
+                    installed[key] = Installed(handle, fingerprint)
+                    if (existing == null) added++ else replaced++
                 } catch (t: Throwable) {
                     failed++
+                    if (existing != null) retained++
                     ModuleLogger.w(
                         "method hook failed: id=${rule.id}; signature=${signature.take(180)}; " +
                             "reason=${t.javaClass.simpleName}"
@@ -97,9 +126,10 @@ class HookRuntime(
                 runCatching { value.handle.unhook() }
                 installed.remove(key)
                 counters.remove(key)
+                removed++
             }
         }
-        return applied to failed
+        return HookApplyReport(added, replaced, retained, removed, failed)
     }
 
     /** Bounded metadata-only class, method, constructor and field discovery. */

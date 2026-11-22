@@ -115,12 +115,13 @@ class DexDiscoveryEngine(
                     records++
                 }
                 if (records < limit && System.nanoTime() < deadline) {
-                    val inherited = InheritedMethodMetadata.collect(type, limit - records)
+                    val inherited = InheritedMethodMetadata.collect(type, limit - records, deadline)
                     inherited.signatures.forEach { signature ->
                         inheritedMethods.put(signature)
                         records++
                     }
                     classWasTruncated = classWasTruncated || inherited.truncated
+                    timedOut = timedOut || inherited.timedOut
                 }
                 if (records < limit && System.nanoTime() < deadline) {
                     type.declaredConstructors.forEach { constructor ->

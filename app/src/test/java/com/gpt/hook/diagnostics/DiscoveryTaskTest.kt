@@ -38,6 +38,14 @@ class DiscoveryTaskTest {
     }
 
     @Test
+    fun transientFailureCanBeRetriedWithinAttemptBudget() {
+        val running = task().claim(2_000L, leaseMs = 30_000L)
+        val retry = running.finish(3_000L, succeeded = false, failureCode = "temporary", retryable = true)
+        assertEquals(DiscoveryTaskStatus.QUEUED, retry?.status)
+        assertEquals(1, retry?.attempt)
+    }
+
+    @Test
     fun terminalTaskCannotBeClaimedAgain() {
         val done = task().claim(2_000L, leaseMs = 30_000L).finish(3_000L, true)!!
         assertSame(done, done.claim(4_000L, leaseMs = 30_000L))

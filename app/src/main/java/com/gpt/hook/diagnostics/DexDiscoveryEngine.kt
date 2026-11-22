@@ -102,20 +102,20 @@ class DexDiscoveryEngine(
             val constructors = JSONArray()
             val fields = JSONArray()
             try {
-                type.declaredMethods.sortedBy { it.toGenericString() }.forEach { method ->
+                type.declaredMethods.forEach { method ->
                     if (records >= limit || System.nanoTime() >= deadline) return@forEach
                     methods.put(method.toGenericString())
                     records++
                 }
                 if (records < limit && System.nanoTime() < deadline) {
-                    type.declaredConstructors.sortedBy { it.toGenericString() }.forEach { constructor ->
+                    type.declaredConstructors.forEach { constructor ->
                         if (records >= limit || System.nanoTime() >= deadline) return@forEach
                         constructors.put(constructor.toGenericString())
                         records++
                     }
                 }
                 if (records < limit && System.nanoTime() < deadline) {
-                    type.declaredFields.sortedBy { it.name }.forEach { field ->
+                    type.declaredFields.forEach { field ->
                         if (records >= limit || System.nanoTime() >= deadline) return@forEach
                         fields.put(JSONObject()
                             .put("name", field.name)
@@ -177,6 +177,7 @@ class DexDiscoveryEngine(
         val names: List<String>,
         val scanned: Int,
         val dexScanned: Int,
+        val scanTruncated: Boolean = false,
         val error: String? = null
     )
 

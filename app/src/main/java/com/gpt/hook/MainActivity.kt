@@ -25,6 +25,13 @@ import com.gpt.hook.diagnostics.HookConfigParser
 /** Unified DSH GPT Hook and local API dashboard. */
 class MainActivity : Activity() {
     private lateinit var page: LinearLayout
+    private lateinit var contentHost: LinearLayout
+    private lateinit var overviewPage: LinearLayout
+    private lateinit var apiPage: LinearLayout
+    private lateinit var hookPage: LinearLayout
+    private lateinit var logsPage: LinearLayout
+    private val navItems = mutableListOf<TextView>()
+    private var selectedPage = 0
     private lateinit var status: TextView
     private lateinit var reportStatus: TextView
     private lateinit var editor: EditText
@@ -78,7 +85,7 @@ class MainActivity : Activity() {
         }
         page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(18), dp(18), dp(30))
+            setPadding(dp(16), dp(16), dp(16), dp(28))
         }
         scroll.addView(page, ViewGroup.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
@@ -87,9 +94,27 @@ class MainActivity : Activity() {
         setContentView(scroll)
 
         buildHeader()
-        buildHookSection()
-        buildObservationSection()
-        buildRelaySection(page)
+        buildNavigation()
+        contentHost = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        page.addView(contentHost, ViewGroup.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        ))
+
+        overviewPage = screen()
+        apiPage = screen()
+        hookPage = screen()
+        logsPage = screen()
+        contentHost.addView(overviewPage)
+        contentHost.addView(apiPage)
+        contentHost.addView(hookPage)
+        contentHost.addView(logsPage)
+
+        buildOverview()
+        buildRelaySection(apiPage)
+        buildHookSection(hookPage)
+        buildObservationSection(logsPage)
+        showPage(0)
         refreshStatus()
         refreshReport()
     }
@@ -152,24 +177,99 @@ class MainActivity : Activity() {
 
     private fun buildHeader() {
         val hero = panel()
-        hero.addView(text("DSH  /  GPT BRIDGE", 11f, primary, true).apply {
-            letterSpacing = 0.16f
+        hero.addView(text("DSH GPT  /  API GATEWAY", 11f, primary, true).apply {
+            letterSpacing = 0.14f
         })
-        hero.addView(text("GPT Runtime Console", 27f, white, true).apply {
-            setPadding(0, dp(8), 0, dp(5))
+        hero.addView(text("控制中心", 26f, white, true).apply {
+            setPadding(0, dp(7), 0, dp(3))
         })
-        hero.addView(text("LSPosed Hook  ·  Local API Gateway", 13f, muted))
-        status = text("正在连接 LSPosed…", 13f, muted, true).apply {
-            setPadding(0, dp(16), 0, 0)
+        hero.addView(text("ChatGPT Runtime  ·  Local OpenAI-compatible API", 12f, muted))
+        status = text("正在连接 LSPosed…", 12f, muted, true).apply {
+            setPadding(0, dp(13), 0, 0)
         }
         hero.addView(status)
         page.addView(hero, sectionParams())
-        page.addView(text("控制台", 12f, muted, true).apply {
-            setPadding(dp(3), dp(5), 0, dp(10))
-        })
     }
 
-    private fun buildHookSection() {
+    private fun buildNavigation() {
+        val bar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            background = rounded(surface, stroke, 14)
+            setPadding(dp(4), dp(4), dp(4), dp(4))
+        }
+        listOf("总览", "API 网关", "GPT Hook", "运行日志").forEachIndexed { index, label ->
+            val item = TextView(this).apply {
+                text = label
+                textSize = 12f
+                typeface = Typeface.DEFAULT_BOLD
+                gravity = Gravity.CENTER
+                setPadding(dp(4), dp(12), dp(4), dp(12))
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { showPage(index) }
+            }
+            navItems.add(item)
+            bar.addView(item, LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
+            ))
+        }
+        page.addView(bar, sectionParams())
+    }
+
+    private fun showPage(index: Int) {
+        selectedPage = index.coerceIn(0, 3)
+        val screens = listOf(overviewPage, apiPage, hookPage, logsPage)
+        screens.forEachIndexed { i, view ->
+            view.visibility = if (i == selectedPage) android.view.View.VISIBLE else android.view.View.GONE
+        }
+        navItems.forEachIndexed { i, item ->
+            val active = i == selectedPage
+            item.setTextColor(if (active) primaryText else muted)
+            item.background = if (active) rounded(primary, primary, 10)
+                else rounded(surface, surface, 10)
+        }
+    }
+
+    private fun screen() = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        visibility = android.view.View.GONE
+    }
+
+    private fun buildOverview() {
+        val statusCard = sectionCard("网关状态", "本机 API 服务与 ChatGPT 凭据状态")
+        relayStatus = text("正在读取状态…", 15f, warning, true)
+        statusCard.addView(relayStatus)
+        statusCard.addView(text("服务地址", 11f, muted, true).apply {
+            setPadding(0, dp(15), 0, dp(5))
+        })
+        statusCard.addView(text("http://127.0.0.1:8766/v1", 13f, primary, true).apply {
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            background = rounded(surfaceAlt, stroke, 10)
+        })
+        statusCard.addView(buttonRow(
+            ("网关设置" to true) to { showPage(1) },
+            ("测试连接" to false) to { testRelayHealth() }
+        ))
+        overviewPage.addView(statusCard, sectionParams())
+
+        val quick = sectionCard("快速入口", "分区管理配置，避免所有操作堆在同一页面")
+        quick.addView(buttonRow(
+            ("GPT Hook 规则" to false) to { showPage(2) },
+            ("运行观察报告" to false) to { showPage(3) }
+        ))
+        overviewPage.addView(quick, sectionParams())
+
+        val info = sectionCard("接口信息", "供 OpenAI 兼容客户端使用")
+        info.addView(text("Base URL", 11f, muted, true))
+        info.addView(text("http://127.0.0.1:8766/v1", 13f, white, true).apply {
+            setPadding(0, dp(5), 0, dp(12))
+        })
+        info.addView(text("认证方式", 11f, muted, true))
+        info.addView(text("使用本地配置的 API Key；留空时按当前网关配置处理", 12f, white))
+        overviewPage.addView(info, sectionParams())
+    }
+
+    private fun buildHookSection(root: LinearLayout) {
         val card = sectionCard("GPT Hook", "配置目标应用中的 Hook 规则")
         card.addView(text("目标应用  ·  com.openai.chatgpt", 12f, primary, true))
         editor = EditText(this).apply {
@@ -189,18 +289,18 @@ class MainActivity : Activity() {
             ("验证并应用" to true) to { saveConfig() },
             ("恢复默认" to false) to { editor.setText(DEFAULT_CONFIG) }
         ))
-        page.addView(card, sectionParams())
+        root.addView(card, sectionParams())
     }
 
-    private fun buildObservationSection() {
-        val card = sectionCard("运行时观察", "查看 Hook 产生的元数据报告")
+    private fun buildObservationSection(root: LinearLayout) {
+        val card = sectionCard("运行日志", "只展示 Hook 观察到的元数据报告")
         reportStatus = text("等待观察报告…", 12f, muted)
         card.addView(reportStatus)
         report = EditText(this).apply {
             isFocusable = false
             isFocusableInTouchMode = false
-            minLines = 5
-            maxLines = 10
+            minLines = 8
+            maxLines = 16
             textSize = 11f
             typeface = Typeface.MONOSPACE
             setTextColor(palette.reportText)
@@ -210,11 +310,11 @@ class MainActivity : Activity() {
         }
         card.addView(report, fieldParams(0, dp(12)))
         card.addView(buttonRow(
-            ("刷新" to true) to { refreshReport() },
+            ("刷新报告" to true) to { refreshReport() },
             ("复制 JSON" to false) to { copyReport() },
             ("分享给 AI" to false) to { shareReport() }
         ))
-        page.addView(card, sectionParams())
+        root.addView(card, sectionParams())
     }
 
     private fun buildRelaySection(root: LinearLayout) {

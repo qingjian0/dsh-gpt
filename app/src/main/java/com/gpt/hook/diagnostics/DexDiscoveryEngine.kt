@@ -102,6 +102,7 @@ class DexDiscoveryEngine(
             var classWasTruncated = false
             val classJson = JSONObject().put("className", type.name)
             val methods = JSONArray()
+            val inheritedMethods = JSONArray()
             val constructors = JSONArray()
             val fields = JSONArray()
             try {
@@ -112,6 +113,14 @@ class DexDiscoveryEngine(
                     }
                     methods.put(method.toGenericString())
                     records++
+                }
+                if (records < limit && System.nanoTime() < deadline) {
+                    val inherited = InheritedMethodMetadata.collect(type, limit - records)
+                    inherited.signatures.forEach { signature ->
+                        inheritedMethods.put(signature)
+                        records++
+                    }
+                    classWasTruncated = classWasTruncated || inherited.truncated
                 }
                 if (records < limit && System.nanoTime() < deadline) {
                     type.declaredConstructors.forEach { constructor ->
@@ -142,6 +151,7 @@ class DexDiscoveryEngine(
             if (records >= limit) classWasTruncated = true
             classMetadataTruncated = classMetadataTruncated || classWasTruncated
             classJson.put("methods", methods)
+                .put("inheritedMethods", inheritedMethods)
                 .put("constructors", constructors)
                 .put("fields", fields)
                 .put("metadataTruncated", classWasTruncated)

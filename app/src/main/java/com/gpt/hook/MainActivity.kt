@@ -38,20 +38,38 @@ class MainActivity : Activity() {
     private lateinit var relayToken: EditText
     private var relayRefreshing = false
 
-    private val bg = 0xFF090E1B.toInt()
-    private val surface = 0xFF121B2D.toInt()
-    private val surfaceAlt = 0xFF0D1525.toInt()
-    private val stroke = 0xFF26354D.toInt()
-    private val primary = 0xFF63E6D3.toInt()
-    private val white = 0xFFF1F5FB.toInt()
-    private val muted = 0xFF91A0B7.toInt()
-    private val warning = 0xFFFFC978.toInt()
+    private data class Palette(
+        val bg: Int,
+        val surface: Int,
+        val surfaceAlt: Int,
+        val stroke: Int,
+        val primary: Int,
+        val primaryText: Int,
+        val white: Int,
+        val muted: Int,
+        val warning: Int,
+        val switchTrack: Int,
+        val secondaryButton: Int,
+        val reportText: Int,
+        val hint: Int,
+        val lightSystemBars: Boolean
+    )
+
+    private lateinit var palette: Palette
+    private val bg get() = palette.bg
+    private val surface get() = palette.surface
+    private val surfaceAlt get() = palette.surfaceAlt
+    private val stroke get() = palette.stroke
+    private val primary get() = palette.primary
+    private val primaryText get() = palette.primaryText
+    private val white get() = palette.white
+    private val muted get() = palette.muted
+    private val warning get() = palette.warning
+
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.statusBarColor = bg
-        window.navigationBarColor = bg
-        window.decorView.systemUiVisibility = 0
+        applySystemTheme()
 
         val scroll = ScrollView(this).apply {
             setBackgroundColor(bg)
@@ -74,6 +92,55 @@ class MainActivity : Activity() {
         buildRelaySection(page)
         refreshStatus()
         refreshReport()
+    }
+
+    private fun applySystemTheme() {
+        val night = (resources.configuration.uiMode and
+            android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+            android.content.res.Configuration.UI_MODE_NIGHT_YES
+        palette = if (night) {
+            Palette(
+                bg = 0xFF090E1B.toInt(),
+                surface = 0xFF121B2D.toInt(),
+                surfaceAlt = 0xFF0D1525.toInt(),
+                stroke = 0xFF26354D.toInt(),
+                primary = 0xFF63E6D3.toInt(),
+                primaryText = 0xFF071A1C.toInt(),
+                white = 0xFFF1F5FB.toInt(),
+                muted = 0xFF91A0B7.toInt(),
+                warning = 0xFFFFC978.toInt(),
+                switchTrack = 0xFF42616B.toInt(),
+                secondaryButton = 0xFF1B2940.toInt(),
+                reportText = 0xFFB9C8DA.toInt(),
+                hint = 0xFF66758D.toInt(),
+                lightSystemBars = false
+            )
+        } else {
+            Palette(
+                bg = 0xFFF4F7FB.toInt(),
+                surface = 0xFFFFFFFF.toInt(),
+                surfaceAlt = 0xFFF7F9FC.toInt(),
+                stroke = 0xFFDCE4EE.toInt(),
+                primary = 0xFF087F75.toInt(),
+                primaryText = 0xFFFFFFFF.toInt(),
+                white = 0xFF172338.toInt(),
+                muted = 0xFF66758A.toInt(),
+                warning = 0xFF9A5A00.toInt(),
+                switchTrack = 0xFF9BBAB5.toInt(),
+                secondaryButton = 0xFFE8EEF5.toInt(),
+                reportText = 0xFF34445B.toInt(),
+                hint = 0xFF8996A8.toInt(),
+                lightSystemBars = true
+            )
+        }
+        window.statusBarColor = bg
+        window.navigationBarColor = bg
+        window.decorView.systemUiVisibility = if (palette.lightSystemBars) {
+            android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or
+                android.view.View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        } else {
+            0
+        }
     }
 
     override fun onResume() {
@@ -136,7 +203,7 @@ class MainActivity : Activity() {
             maxLines = 10
             textSize = 11f
             typeface = Typeface.MONOSPACE
-            setTextColor(0xFFB9C8DA.toInt())
+            setTextColor(palette.reportText)
             background = rounded(surfaceAlt, stroke, 12)
             setPadding(dp(13), dp(12), dp(13), dp(12))
             setText(EMPTY_REPORT)
@@ -164,7 +231,7 @@ class MainActivity : Activity() {
             textSize = 14f
             setTextColor(white)
             thumbTintList = ColorStateList.valueOf(primary)
-            trackTintList = ColorStateList.valueOf(0xFF42616B.toInt())
+            trackTintList = ColorStateList.valueOf(palette.switchTrack)
             setOnCheckedChangeListener { _, checked ->
                 if (relayRefreshing) return@setOnCheckedChangeListener
                 val cfg = RelayConfig.load(this@MainActivity)
@@ -257,7 +324,7 @@ class MainActivity : Activity() {
             this.inputType = inputType
             textSize = 13f
             setTextColor(white)
-            setHintTextColor(0xFF66758D.toInt())
+            setHintTextColor(palette.hint)
             background = rounded(surfaceAlt, stroke, 11)
             setPadding(dp(12), dp(10), dp(12), dp(10))
             if (inputType and InputType.TYPE_TEXT_FLAG_MULTI_LINE == 0) isSingleLine = true
@@ -278,9 +345,9 @@ class MainActivity : Activity() {
                     textSize = 12f
                     typeface = Typeface.DEFAULT_BOLD
                     gravity = Gravity.CENTER
-                    setTextColor(if (isPrimary) 0xFF071A1C.toInt() else white)
+                    setTextColor(if (isPrimary) primaryText else white)
                     background = rounded(
-                        if (isPrimary) primary else 0xFF1B2940.toInt(),
+                        if (isPrimary) primary else palette.secondaryButton,
                         if (isPrimary) primary else stroke, 11
                     )
                     setPadding(dp(8), dp(13), dp(8), dp(13))

@@ -1,9 +1,27 @@
 name: Build DSH GPT module
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches: [ main, 'feat/**', 'refactor/**' ]
+    paths:
+      - 'app/**'
+      - 'gradle/**'
+      - '*.gradle'
+      - '*.gradle.kts'
+      - 'gradle.properties'
+      - '.github/workflows/build.yml'
   pull_request:
+    paths:
+      - 'app/**'
+      - 'gradle/**'
+      - '*.gradle'
+      - '*.gradle.kts'
+      - 'gradle.properties'
+      - '.github/workflows/build.yml'
   workflow_dispatch:
 
 permissions:
@@ -23,6 +41,8 @@ jobs:
           gradle-version: '9.6.1'
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon
+      - name: Run JVM unit tests
+        run: gradle testDebugUnitTest --no-daemon
       - name: Verify LSPosed module metadata
         shell: bash
         run: |

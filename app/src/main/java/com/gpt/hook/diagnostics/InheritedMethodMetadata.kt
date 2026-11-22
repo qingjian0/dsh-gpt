@@ -11,19 +11,35 @@ internal object InheritedMethodMetadata {
     data class Result(
         val signatures: List<String>,
         val truncated: Boolean,
-        val timedOut: Boolean
+        val timedOut: Boolean,
+        val unavailable: Boolean = false
     )
 
     fun collect(type: Class<*>, limit: Int, deadlineNanos: Long = Long.MAX_VALUE): Result {
         require(limit >= 0)
         if (limit == 0) {
-            val hasInherited = runCatching { type.methods.any { it.declaringClass != type } }.getOrDefault(false)
-            return Result(emptyList(), hasInherited, System.nanoTime() >= deadlineNanos)
+            // Do not perform an unbounded reflection query just to decide whether
+            // omitted records existed. Report conservatively that this section was skipped.
+            return Result(emptyList(), truncated = true, timedOut = System.nanoTime() >= deadlineNanos)
+        }
+        if (System.nanoTime() >= deadlineNanos) {
+            return Result(emptyList(), truncated = true, timedOut = true)
+        }
+
+        // Class.methods itself is a VM reflection operation and cannot be interrupted.
+        // Check immediately before and after it, and report an overrun rather than
+        // pretending the wall-clock budget was strictly enforceable inside the VM call.
+        val methods = try {
+            type.methods
+        } catch (_: Throwable) {
+            return Result(emptyList(), truncated = true, timedOut = false, unavailable = true)
+        }
+        if (System.nanoTime() >= deadlineNanos) {
+            return Result(emptyList(), truncated = true, timedOut = true)
         }
 
         val selected = ArrayList<String>(limit + 1)
         var timedOut = false
-        val methods = runCatching { type.methods }.getOrDefault(emptyArray())
         for (method in methods) {
             if (System.nanoTime() >= deadlineNanos) {
                 timedOut = true

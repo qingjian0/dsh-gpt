@@ -18,15 +18,15 @@ class RuntimeCandidateProposalTest {
     fun createsStableIdsAndJvmDescriptorsForOverloads() {
         val methods = Parent::class.java.declaredMethods.filter { it.name == "overloaded" }
         val first = RuntimeCandidateProposal.fromMethod(
-            "com.openai.chatgpt", Child::class.java.name, methods.first { it.parameterTypes[0] == Int::class.javaPrimitiveType },
+            "com.openai.chatgpt", "com.openai.chatgpt.FakeChild", methods.first { it.parameterTypes[0] == Int::class.javaPrimitiveType },
             listOf("discovery:42")
         )
         val same = RuntimeCandidateProposal.fromMethod(
-            "com.openai.chatgpt", Child::class.java.name, methods.first { it.parameterTypes[0] == Int::class.javaPrimitiveType },
+            "com.openai.chatgpt", "com.openai.chatgpt.FakeChild", methods.first { it.parameterTypes[0] == Int::class.javaPrimitiveType },
             listOf("discovery:42")
         )
         val second = RuntimeCandidateProposal.fromMethod(
-            "com.openai.chatgpt", Child::class.java.name, methods.first { it.parameterTypes[0] == String::class.java },
+            "com.openai.chatgpt", "com.openai.chatgpt.FakeChild", methods.first { it.parameterTypes[0] == String::class.java },
             listOf("discovery:42")
         )
 
@@ -41,10 +41,10 @@ class RuntimeCandidateProposalTest {
     fun requiresEvidenceAndRestrictsTargetPackage() {
         val method = Parent::class.java.declaredMethods.first()
         assertThrows(IllegalArgumentException::class.java) {
-            RuntimeCandidateProposal.fromMethod("com.example.app", Child::class.java.name, method, listOf("e1"))
+            RuntimeCandidateProposal.fromMethod("com.example.app", "com.openai.chatgpt.FakeChild", method, listOf("e1"))
         }
         assertThrows(IllegalArgumentException::class.java) {
-            RuntimeCandidateProposal.fromMethod("com.openai.chatgpt", Child::class.java.name, method, emptyList())
+            RuntimeCandidateProposal.fromMethod("com.openai.chatgpt", "com.openai.chatgpt.FakeChild", method, emptyList())
         }
     }
 
@@ -52,7 +52,7 @@ class RuntimeCandidateProposalTest {
     fun lifecycleRequiresApprovalAndValidationBeforeApplication() {
         val method = Parent::class.java.declaredMethods.first()
         val proposed = RuntimeCandidateProposal.fromMethod(
-            "com.openai.chatgpt", Child::class.java.name, method, listOf("discovery:7")
+            "com.openai.chatgpt", "com.openai.chatgpt.FakeChild", method, listOf("discovery:7")
         )
         assertThrows(IllegalArgumentException::class.java) { proposed.markValidated("test:1") }
         val approved = proposed.approve("operator")
@@ -70,7 +70,7 @@ class RuntimeCandidateProposalTest {
     fun rejectionIsTerminal() {
         val method = Parent::class.java.declaredMethods.first()
         val rejected = RuntimeCandidateProposal.fromMethod(
-            "com.openai.chatgpt", Child::class.java.name, method, listOf("discovery:9")
+            "com.openai.chatgpt", "com.openai.chatgpt.FakeChild", method, listOf("discovery:9")
         ).reject("not relevant")
         assertEquals(RuntimeCandidateProposal.Status.REJECTED, rejected.status)
         assertThrows(IllegalArgumentException::class.java) { rejected.approve("operator") }

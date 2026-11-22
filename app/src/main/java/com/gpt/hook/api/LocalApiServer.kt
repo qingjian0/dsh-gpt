@@ -1,5 +1,6 @@
 package com.gpt.hook.api
 
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedInputStream
 import java.io.BufferedReader
@@ -10,6 +11,7 @@ import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 
 /**
@@ -17,9 +19,16 @@ import java.util.concurrent.Executors
  * 无第三方依赖，手写 HTTP/1.1，SSE 用 Connection: close 定界。
  */
 class LocalApiServer(@Volatile var cfg: RelayConfig) {
+    private data class RelaySession(
+        val conversationId: String,
+        val parentMessageId: String,
+        val updatedAt: Long
+    )
 
     private var server: ServerSocket? = null
     private val pool = Executors.newFixedThreadPool(8)
+    private val sessions = ConcurrentHashMap<String, RelaySession>()
+    private val sessionLocks = ConcurrentHashMap<String, Any>()
     @Volatile private var running = false
 
     val port: Int get() = cfg.port
@@ -47,6 +56,7 @@ class LocalApiServer(@Volatile var cfg: RelayConfig) {
         running = false
         try { server?.close() } catch (_: Throwable) { }
         server = null
+        pool.shutdownNow()
     }
 
     private fun handle(socket: Socket) {
@@ -74,6 +84,10 @@ class LocalApiServer(@Volatile var cfg: RelayConfig) {
                         if (k == "content-length") contentLength = v.toIntOrNull() ?: 0
                     }
                 }
+                if (contentLength !in 0..(8 * 1024 * 1024)) {
+                    json(out, 413, err("request_too_large", "body exceeds 8 MiB"))
+                    return
+                }
                 val body = if (contentLength > 0) {
                     val buf = ByteArray(contentLength)
                     var off = 0
@@ -82,6 +96,10 @@ class LocalApiServer(@Volatile var cfg: RelayConfig) {
                         if (n < 0) break
                         off += n
                     }
+                    if (off != contentLength) {
+                        json(out, 400, err("invalid_request", "incomplete request body"))
+                        return
+                    }
                     buf
                 } else null
 
@@ -89,8 +107,9 @@ class LocalApiServer(@Volatile var cfg: RelayConfig) {
                     target == "/health" -> json(out, 200, health())
                     !authorized(headers) -> json(out, 401, err("invalid_api_key", "missing or bad Authorization"))
                     target == "/v1/models" -> json(out, 200, OpenAiCompat.modelsJson(OpenAiCompat.DEFAULT_MODELS))
+                    method == "GET" && target == "/v1/sessions" -> json(out, 200, sessionsJson())
                     method == "POST" && target.startsWith("/v1/chat/completions") ->
-                        chat(out, body ?: ByteArray(0), headers)
+                        chat(out, body ?: ByteArray(0))
                     target.startsWith("/backend-api") -> passthrough(out, method, target, body, headers)
                     else -> json(out, 404, err("not_found", "route not found"))
                 }
@@ -100,7 +119,6 @@ class LocalApiServer(@Volatile var cfg: RelayConfig) {
         }
     }
 
-    /** 从同一个 BufferedInputStream 逐字节读一行，避免 BufferedReader 预读吞掉请求体。 */
     private fun readLine(input: InputStream): String? {
         val sb = StringBuilder()
         while (true) {
@@ -122,18 +140,37 @@ class LocalApiServer(@Volatile var cfg: RelayConfig) {
         .put("ready", cfg.ready).put("upstream", cfg.upstreamBase)
         .toString()
 
-    private fun chat(out: OutputStream, body: ByteArray, headers: Map<String, String>) {
+    private fun sessionKey(req: JSONObject): String {
+        val supplied = req.opt("user")
+        val key = when (supplied) {
+            is String -> supplied.trim()
+            is JSONObject -> supplied.toString()
+            else -> ""
+        }
+        return (key.ifBlank { "model:" + req.optString("model", "auto") }).take(256)
+    }
+
+    private fun chat(out: OutputStream, body: ByteArray) {
         val req = try { JSONObject(String(body, Charsets.UTF_8)) } catch (t: Throwable) {
             json(out, 400, err("invalid_request", "body is not JSON")); return
         }
+        val key = sessionKey(req)
+        val lock = sessionLocks.computeIfAbsent(key) { Any() }
+        synchronized(lock) { chatLocked(out, req, key) }
+    }
+
+    private fun chatLocked(out: OutputStream, req: JSONObject, key: String) {
+        val now = System.currentTimeMillis()
+        val previous = sessions[key]?.takeIf { now - it.updatedAt <= SESSION_TTL_MS }
+        if (previous == null) sessions.remove(key)
         val stream = req.optBoolean("stream", false)
         val model = req.optString("model", "auto").ifBlank { "auto" }
         val id = "chatcmpl-" + UUID.randomUUID().toString().replace("-", "").take(24)
-        val client = ChatGptClient(cfg)
-        val payload = OpenAiCompat.toConversation(req).toString().toByteArray(Charsets.UTF_8)
-
+        val payload = OpenAiCompat.toConversation(
+            req, previous?.conversationId, previous?.parentMessageId
+        ).toString().toByteArray(Charsets.UTF_8)
         val conn = try {
-            client.open("POST", "/backend-api/conversation", payload, "text/event-stream")
+            ChatGptClient(cfg).open("POST", "/backend-api/conversation", payload, "text/event-stream")
         } catch (t: Throwable) {
             json(out, 502, err("upstream_unreachable", t.message ?: "connect failed")); return
         }
@@ -141,57 +178,95 @@ class LocalApiServer(@Volatile var cfg: RelayConfig) {
         if (code >= 400) {
             val text = (conn.errorStream ?: conn.inputStream)?.bufferedReader()?.readText().orEmpty()
             json(out, code, text.ifBlank { err("upstream_error", "HTTP $code") })
+            conn.disconnect()
             return
         }
 
         val textOut = StringBuilder()
         var sent = ""
         val reader = BufferedReader(InputStreamReader(conn.inputStream, Charsets.UTF_8))
-
-        if (stream) {
-            writeHead(out, 200, "text/event-stream; charset=utf-8", null)
-            var line: String?
-            while (reader.readLine().also { line = it } != null) {
-                val l = line ?: continue
-                if (l == "data: [DONE]") break
-                if (!l.startsWith("data:")) continue
-                val delta = extractDelta(l.substring(5).trim(), sent) ?: continue
-                sent += delta
-                textOut.append(delta)
-                writeChunk(out, "data: " + OpenAiCompat.chunk(id, model, delta) + "\n\n")
-            }
-            writeChunk(out, "data: " + OpenAiCompat.chunk(id, model, "", "stop") + "\n\n")
-            writeChunk(out, "data: [DONE]\n\n")
-            out.flush()
-        } else {
-            reader.forEachLine { l ->
-                if (l.startsWith("data:")) {
-                    val d = extractDelta(l.substring(5).trim(), sent)
-                    if (d != null) { sent += d; textOut.append(d) }
+        try {
+            if (stream) {
+                writeHead(out, 200, "text/event-stream; charset=utf-8", null)
+                var line: String?
+                while (reader.readLine().also { line = it } != null) {
+                    val l = line ?: continue
+                    if (l == "data: [DONE]") break
+                    if (!l.startsWith("data:")) continue
+                    val event = extractDelta(l.substring(5).trim(), sent, key)
+                    if (event != null) {
+                        sent += event
+                        textOut.append(event)
+                        writeChunk(out, "data: " + OpenAiCompat.chunk(id, model, event) + "\n\n")
+                    }
                 }
+                writeChunk(out, "data: " + OpenAiCompat.chunk(id, model, "", "stop") + "\n\n")
+                writeChunk(out, "data: [DONE]\n\n")
+                out.flush()
+            } else {
+                reader.forEachLine { l ->
+                    if (l.startsWith("data:")) {
+                        val event = extractDelta(l.substring(5).trim(), sent, key)
+                        if (event != null) { sent += event; textOut.append(event) }
+                    }
+                }
+                json(out, 200, OpenAiCompat.completion(id, model, textOut.toString()))
             }
-            json(out, 200, OpenAiCompat.completion(id, model, textOut.toString()))
+        } finally {
+            runCatching { reader.close() }
+            runCatching { conn.disconnect() }
+            pruneSessions()
         }
-        try { conn.disconnect() } catch (_: Throwable) { }
     }
 
-    /** 上游每条 assistant 消息携带完整文本，取与已发送部分的增量。 */
-    private fun extractDelta(payload: String, sent: String): String? {
+    /** Extract assistant text and persist backend conversation/message IDs for the next turn. */
+    private fun extractDelta(payload: String, sent: String, key: String): String? {
         if (payload.isEmpty() || payload == "[DONE]") return null
         val obj = try { JSONObject(payload) } catch (t: Throwable) { return null }
         val msg = obj.optJSONObject("message") ?: return null
         val role = msg.optJSONObject("author")?.optString("role")
         if (role != "assistant") return null
+        val conversationId = obj.optString("conversation_id")
+            .takeIf { it.isNotBlank() && it != "null" }
+            ?: sessions[key]?.conversationId.orEmpty()
+        val messageId = msg.optString("id").takeIf { it.isNotBlank() && it != "null" }
+        if (conversationId.isNotBlank() && messageId != null) {
+            sessions[key] = RelaySession(conversationId, messageId, System.currentTimeMillis())
+        }
         val parts = msg.optJSONObject("content")?.optJSONArray("parts") ?: return null
         val full = parts.optString(0, "")
         if (full.isEmpty() || full.length <= sent.length) return null
         return full.substring(sent.length)
     }
 
+    private fun pruneSessions() {
+        val now = System.currentTimeMillis()
+        sessions.entries.removeIf { now - it.value.updatedAt > SESSION_TTL_MS }
+        if (sessions.size > MAX_SESSIONS) {
+            sessions.entries.sortedBy { it.value.updatedAt }
+                .take(sessions.size - MAX_SESSIONS)
+                .forEach { sessions.remove(it.key, it.value) }
+        }
+        if (sessionLocks.size > MAX_SESSIONS * 2) {
+            sessionLocks.keys.toList().take(sessionLocks.size - MAX_SESSIONS).forEach(sessionLocks::remove)
+        }
+    }
+
+    private fun sessionsJson(): String {
+        val rows = JSONArray()
+        sessions.forEach { (key, value) ->
+            rows.put(JSONObject()
+                .put("user", key)
+                .put("conversation_id", value.conversationId)
+                .put("parent_message_id", value.parentMessageId)
+                .put("updated_at", value.updatedAt))
+        }
+        return JSONObject().put("object", "list").put("data", rows).toString()
+    }
+
     private fun passthrough(out: OutputStream, method: String, target: String, body: ByteArray?, headers: Map<String, String>) {
-        val client = ChatGptClient(cfg)
         val conn = try {
-            client.open(method, target, body, headers["accept"] ?: "application/json")
+            ChatGptClient(cfg).open(method, target, body, headers["accept"] ?: "application/json")
         } catch (t: Throwable) {
             json(out, 502, err("upstream_unreachable", t.message ?: "connect failed")); return
         }
@@ -201,7 +276,7 @@ class LocalApiServer(@Volatile var cfg: RelayConfig) {
         writeHead(out, code, ct, null)
         stream?.copyTo(out)
         out.flush()
-        try { conn.disconnect() } catch (_: Throwable) { }
+        conn.disconnect()
     }
 
     private fun writeHead(out: OutputStream, code: Int, contentType: String, length: Long?) {
@@ -228,4 +303,9 @@ class LocalApiServer(@Volatile var cfg: RelayConfig) {
 
     private fun err(type: String, message: String): String =
         JSONObject().put("error", JSONObject().put("type", type).put("message", message)).toString()
+
+    private companion object {
+        const val SESSION_TTL_MS = 6L * 60 * 60 * 1000
+        const val MAX_SESSIONS = 256
+    }
 }

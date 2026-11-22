@@ -1,5 +1,7 @@
 package com.gpt.hook.diagnostics
 
+import java.lang.reflect.Method
+
 /**
  * Bounded discovery of inherited public method signatures.
  *
@@ -12,7 +14,8 @@ internal object InheritedMethodMetadata {
         val signatures: List<String>,
         val truncated: Boolean,
         val timedOut: Boolean,
-        val unavailable: Boolean = false
+        val unavailable: Boolean = false,
+        val methods: List<Method> = emptyList()
     )
 
     fun collect(type: Class<*>, limit: Int, deadlineNanos: Long = Long.MAX_VALUE): Result {
@@ -38,7 +41,7 @@ internal object InheritedMethodMetadata {
             return Result(emptyList(), truncated = true, timedOut = true)
         }
 
-        val selected = ArrayList<String>(limit + 1)
+        val selected = ArrayList<Method>(limit + 1)
         var timedOut = false
         for (method in methods) {
             if (System.nanoTime() >= deadlineNanos) {
@@ -46,10 +49,11 @@ internal object InheritedMethodMetadata {
                 break
             }
             if (method.declaringClass == type) continue
-            selected += method.toGenericString()
+            selected += method
             if (selected.size > limit) break
         }
         val truncated = selected.size > limit || timedOut
-        return Result(selected.take(limit).sorted(), truncated, timedOut)
+        val bounded = selected.take(limit).sortedBy { it.toGenericString() }
+        return Result(bounded.map { it.toGenericString() }, truncated, timedOut, methods = bounded)
     }
 }

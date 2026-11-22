@@ -19,12 +19,21 @@ class InheritedMethodMetadataTest {
         override fun inheritedContractMethod() = Unit
     }
 
+    class InheritedOnlyChild : Parent()
+
     @Test
     fun returnsInheritedPublicMethodsButNotMethodsDeclaredOnTarget() {
         val result = InheritedMethodMetadata.collect(Child::class.java, 100)
         assertTrue(result.signatures.any { it.contains("inheritedParentMethod") })
         assertFalse(result.signatures.any { it.contains("declaredChildMethod") })
         assertFalse(result.truncated)
+        assertFalse(result.unavailable)
+    }
+
+    @Test
+    fun retainsClassThatHasOnlyInheritedMethods() {
+        val result = InheritedMethodMetadata.collect(InheritedOnlyChild::class.java, 100)
+        assertTrue(result.signatures.any { it.contains("inheritedParentMethod") })
     }
 
     @Test
@@ -35,11 +44,13 @@ class InheritedMethodMetadataTest {
     }
 
     @Test
-    fun zeroBudgetDoesNotReturnRecords() {
+    fun zeroBudgetSkipsReflectionAndReportsOmittedSection() {
         val result = InheritedMethodMetadata.collect(Child::class.java, 0)
         assertTrue(result.signatures.isEmpty())
         assertTrue(result.truncated)
+        assertFalse(result.timedOut)
     }
+
     @Test
     fun expiredDeadlineStopsCollectionAndReportsTimeout() {
         val result = InheritedMethodMetadata.collect(Child::class.java, 100, System.nanoTime() - 1)
@@ -47,5 +58,4 @@ class InheritedMethodMetadataTest {
         assertTrue(result.truncated)
         assertTrue(result.timedOut)
     }
-
 }

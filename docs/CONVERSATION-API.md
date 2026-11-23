@@ -6,7 +6,7 @@ The API is deliberately caller-scoped: every conversation request must include
 the database stores its SHA-256 digest. A conversation ID belonging to another caller
 is indistinguishable from a missing ID (404).
 
-All endpoints require the gateway's configured Bearer API key. Conversation endpoints are disabled with HTTP 503 until a non-empty API key is configured.
+All protected endpoints require the gateway's configured Bearer API key. Only `/health` remains public. If the API key is blank, protected routes fail closed with HTTP 503; an absent or incorrect key returns HTTP 401. Each conversation is limited to 500 messages, and each appended message is limited to 256 KiB.
 
 ## Endpoints
 

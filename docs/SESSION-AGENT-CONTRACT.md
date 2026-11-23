@@ -1,13 +1,13 @@
 # Session and Agent integration contract
 
-Status: SQLite conversation persistence, caller-scoped CRUD, and an initial upstream continuation path are implemented in PR #9. The DSH Agent execution contract below remains architectural; no Agent engine is implemented.
+Status: SQLite conversation persistence, caller-scoped CRUD, and an initial upstream continuation path are implemented in PR #9. The DSH-side Cordis tool adapter is present in `integration/dsh-agent-hook-extension/`. Its host counterpart is implemented on `qingjian0/Deepseek-Harness-Local-Android:refactor/dsh-gpt-hook-bridge-hardening` and that branch's CI passed on 2026-11-22; it is not merged into host `main` and still requires host-main conflict review plus device-level IPC validation. The separate `qingjian0/dsh-android` 0.1.0 demo app has no Agent runtime and is not the DSH host engine.
 
 ## 1. Responsibilities
 
 - `LocalApiServer` is the HTTP adapter. It parses OpenAI-compatible requests and forwards them upstream.
 - `ConversationRepository` owns durable conversation identity, parent/child relationships, provider binding, and activity metadata.
 - `AgentCoordinator` owns task planning, delegation policy, depth/concurrency limits, cancellation, and result aggregation.
-- DSH is the intended orchestration host. DSH-GPT must expose an adapter contract and must not create a competing subagent engine.
+- The existing Deepseek Harness DSH host is the intended orchestration engine. The Cordis adapter exposes Hook tools to it; DSH-GPT must not create a competing subagent engine.
 - LSPosed runtime observation remains a separate capability. Agent planning must never directly execute arbitrary Hook code.
 
 ## 2. Conversation identity
@@ -99,7 +99,7 @@ Run events:
 - each child event carries run ID, agent ID, parent agent ID, and conversation ID
 - redact credentials and sensitive message content from diagnostics
 
-The DSH adapter should negotiate capabilities at runtime. If DSH does not expose the required operation, show it as unavailable; do not simulate success locally.
+The DSH adapter should negotiate capabilities at runtime. If the host does not expose the required operation, show it as unavailable; do not simulate success locally. The host hardening branch currently has CI evidence for JVM behavior, plugin packaging, arm64/x86_64 full and no-runtime APK builds; this does not establish live Binder identity or ChatGPT target-process operation.
 
 ## 6. Review findings for PR #8 (do not merge as-is)
 
@@ -121,6 +121,7 @@ Keep PR #8 open as a source of selected changes only. Rebase or port individual 
 2. Implement app-private persistent repository and additive migrations. (implemented; device migration test pending)
 3. Add local conversation endpoints and API contract tests. (endpoints implemented; HTTP integration tests pending)
 4. Adapt the Compose Conversations tab to the repository. (basic list/create/delete integration implemented)
-5. Implement DSH Agent adapter and capability negotiation. (not implemented; DSH host currently has no Agent engine)
-6. Connect Agent tab to real runs, progress, cancellation, and conversation lineage.
-7. Device-test process death, restart recovery, privacy, upstream continuation, and concurrent requests.
+5. Package and install the DSH Cordis Hook adapter in the host profile. (adapter and host bridge code exist on integration branches; host main integration pending)
+6. Verify the host bridge against the target Provider, including revisioned discovery polling, retries, status and cancellation. (host hardening branch CI passed; device IPC validation pending)
+7. Connect the Android Agent tab to real host runs only if the host exposes a supported run API; otherwise keep it explicitly unavailable rather than inventing a second coordinator.
+8. Device-test process death, restart recovery, Binder caller identity, privacy, upstream continuation, and concurrent requests.

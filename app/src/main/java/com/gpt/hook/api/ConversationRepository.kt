@@ -14,7 +14,7 @@ import java.util.UUID
  * Raw caller identifiers are never persisted; only a SHA-256 digest is stored.
  */
 class ConversationRepository(context: Context) : SQLiteOpenHelper(
-    context.applicationContext, "dsh_conversations.db", null, 1
+    context.applicationContext, "dsh_conversations.db", null, 2
 ) {
     data class Conversation(
         val id: String,
@@ -23,7 +23,9 @@ class ConversationRepository(context: Context) : SQLiteOpenHelper(
         val parentId: String?,
         val createdAt: Long,
         val updatedAt: Long,
-        val messages: JSONArray
+        val messages: JSONArray,
+        val upstreamConversationId: String?,
+        val upstreamParentMessageId: String?
     )
 
     override fun onCreate(db: SQLiteDatabase) {
@@ -36,7 +38,9 @@ class ConversationRepository(context: Context) : SQLiteOpenHelper(
                 parent_id TEXT,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
-                messages TEXT NOT NULL
+                messages TEXT NOT NULL,
+                upstream_conversation_id TEXT,
+                upstream_parent_message_id TEXT
             )""".trimIndent()
         )
         db.execSQL("CREATE INDEX conversations_caller_updated ON conversations(caller_hash, updated_at DESC)")
@@ -44,7 +48,10 @@ class ConversationRepository(context: Context) : SQLiteOpenHelper(
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        // Versioned migrations are added here; never silently drop conversation data.
+        if (oldVersion < 2) {
+            db.execSQL("ALTER TABLE conversations ADD COLUMN upstream_conversation_id TEXT")
+            db.execSQL("ALTER TABLE conversations ADD COLUMN upstream_parent_message_id TEXT")
+        }
     }
 
     fun create(callerId: String, title: String, model: String, parentId: String? = null): Conversation {
@@ -110,6 +117,23 @@ class ConversationRepository(context: Context) : SQLiteOpenHelper(
         }
     }
 
+    fun updateUpstreamState(
+        callerId: String,
+        id: String,
+        upstreamConversationId: String?,
+        upstreamParentMessageId: String?
+    ): Boolean {
+        if (upstreamConversationId == null && upstreamParentMessageId == null) return false
+        val values = ContentValues()
+        if (upstreamConversationId != null) values.put("upstream_conversation_id", upstreamConversationId)
+        if (upstreamParentMessageId != null) values.put("upstream_parent_message_id", upstreamParentMessageId)
+        values.put("updated_at", System.currentTimeMillis())
+        return writableDatabase.update(
+            "conversations", values, "id=? AND caller_hash=?",
+            arrayOf(id, callerHash(callerId))
+        ) > 0
+    }
+
     fun delete(callerId: String, id: String): Boolean {
         val db = writableDatabase
         db.beginTransaction()
@@ -140,7 +164,9 @@ class ConversationRepository(context: Context) : SQLiteOpenHelper(
         parentId = getString(getColumnIndexOrThrow("parent_id")),
         createdAt = getLong(getColumnIndexOrThrow("created_at")),
         updatedAt = getLong(getColumnIndexOrThrow("updated_at")),
-        messages = JSONArray(getString(getColumnIndexOrThrow("messages")))
+        messages = JSONArray(getString(getColumnIndexOrThrow("messages"))),
+        upstreamConversationId = getString(getColumnIndexOrThrow("upstream_conversation_id")),
+        upstreamParentMessageId = getString(getColumnIndexOrThrow("upstream_parent_message_id"))
     )
 
     private fun callerHash(value: String): String {

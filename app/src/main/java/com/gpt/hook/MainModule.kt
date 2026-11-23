@@ -110,6 +110,7 @@ class MainModule : XposedModule() {
     }
 
     private fun startProviderPolling() {
+        scheduleReportPublish()
         if (providerPollStarted.compareAndSet(false, true)) {
             providerConfigExecutor.scheduleWithFixedDelay({
                 pollProviderConfig()

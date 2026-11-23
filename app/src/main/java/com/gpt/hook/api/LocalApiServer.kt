@@ -106,6 +106,10 @@ class LocalApiServer(@Volatile var cfg: RelayConfig, private val conversations: 
 
 
     private fun conversationRoute(out: OutputStream, method: String, target: String, body: ByteArray?, headers: Map<String, String>) {
+        if (cfg.apiKey.isBlank()) {
+            json(out, 503, err("configuration_required", "configure a gateway API key before using conversation endpoints"))
+            return
+        }
         val caller = headers["x-dsh-client-id"]
         if (caller.isNullOrBlank()) { json(out, 400, err("invalid_request", "X-DSH-Client-Id is required")); return }
         try {

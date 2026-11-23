@@ -198,8 +198,8 @@ private fun HomeScreen(onNavigate: (MainTab) -> Unit) {
         SectionCard("平台模块") {
             StatusLine("API Gateway", "已接入")
             StatusLine("Hook 配置与观察", "已接入")
-            StatusLine("会话持久化", "待接入")
-            StatusLine("多智能体调度", "待接入")
+            StatusLine("会话持久化", "SQLite 已接入")
+            StatusLine("多智能体调度", "等待 DSH 引擎")
             StatusLine("GPT UI 定制执行器", "待接入")
         }
     }

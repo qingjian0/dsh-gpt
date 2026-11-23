@@ -597,11 +597,12 @@ private fun HookScreen() {
         val response = withContext(Dispatchers.IO) {
             context.contentResolver.call(providerUri, ObservationProvider.METHOD_HOST_DISCOVER, null, extras)
         }
-        require(response?.getBoolean(ObservationProvider.KEY_ACCEPTED) == true) {
+        val accepted = response ?: throw IllegalStateException("扫描请求没有返回状态。")
+        require(accepted.getBoolean(ObservationProvider.KEY_ACCEPTED)) {
             "扫描请求未被接受；请检查是否已有任务正在运行。"
         }
         discoveryId = requestId
-        discoveryTaskText = response.getString(ObservationProvider.KEY_DISCOVERY_TASK) ?: "已提交"
+        discoveryTaskText = accepted.getString(ObservationProvider.KEY_DISCOVERY_TASK) ?: "已提交"
         discoveryResultText = ""
         discoveryNextCursor = null
         discoveryActive = true

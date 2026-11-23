@@ -1,0 +1,46 @@
+{
+  "name": "@dsh-external/dsh-gpt-runtime",
+  "version": "0.1.0",
+  "private": false,
+  "description": "A configurable GPT-style DSH runtime plugin with a bundled, on-demand skill library.",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "files": [
+    "src",
+    "skills",
+    "README.md",
+    "docs",
+    "cordis.patch.yml"
+  ],
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*",
+    "@deepseek-ai/dsh-tools": "*",
+    "@deepseek-ai/schemastery": "*",
+    "@deepseek-ai/dsh-skill": "*",
+    "@deepseek-ai/dsh-tool-skill": "*",
+    "@deepseek-ai/dsh-skill-filesystem": "*",
+    "@deepseek-ai/dsh-system-prompt": "*"
+  },
+  "dsh": {
+    "manifestVersion": 1,
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "license": "GPL-3.0-only",
+  "engines": {
+    "node": ">=24.9.0",
+    "dsh": ">=0.2.2-rc.1 <0.3.0"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-skill-filesystem": {
+      "optional": true
+    }
+  }
+}

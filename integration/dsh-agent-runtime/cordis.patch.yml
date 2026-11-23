@@ -1,0 +1,15 @@
+# Requires the official @deepseek-ai/dsh-base bundle.
+# dsh-base already mounts systemPrompt, tools, dsh-skill, dsh-tool-skill,
+# and dsh-skill-filesystem. Reuse those services; never insert duplicate rows.
+- insert:
+    - id: dsh-gpt-runtime
+      name: '@dsh-external/dsh-gpt-runtime'
+      config:
+        enabled: true
+        skillsEnabled: true
+        profileName: 'DSH-GPT 默认配置'
+        language: 'zh-CN'
+        verbosity: 'balanced'
+        defaultMode: 'adaptive'
+        executionPolicy: 'confirm-sensitive-actions'
+        promptProfile: '你是一个严谨、透明的任务执行助手。先理解目标与约束，再给出可验证的步骤；调用工具前说明目的，调用后核对结果。区分已完成、进行中、失败和未验证事项。'

@@ -143,6 +143,7 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                 .put("runtimeState", runtime.optString("state", "unavailable"))
                 .put("runtimeSnapshotAtMs", runtime.optLong("capturedAtMs", 0L))
                 .put("activeHookCount", runtime.optInt("activeHookCount", 0))
+                .put("hookInventoryTruncated", runtime.optBoolean("inventoryTruncated", false))
                 .put("installedHooks", installedHooks)
                 .put("classLoadWatcherEnabled", report.optBoolean("classLoadWatcherEnabled", false))
                 .put("discoveryTask", taskRaw?.let { JSONObject(it) } ?: JSONObject.NULL)

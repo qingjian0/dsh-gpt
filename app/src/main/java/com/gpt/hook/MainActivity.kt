@@ -31,8 +31,11 @@ import com.gpt.hook.api.ApiService
 import com.gpt.hook.api.RelayConfig
 import com.gpt.hook.diagnostics.HookConfigParser
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.net.HttpURLConnection
+import java.net.URL
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -211,13 +214,43 @@ private fun ApiScreen() {
     var did by remember(config) { mutableStateOf(config.oaiDid) }
     var token by remember(config) { mutableStateOf(config.accessToken) }
     var message by rememberSaveable { mutableStateOf("") }
+    var runtimeStatus by rememberSaveable { mutableStateOf("等待检测") }
+
+    LaunchedEffect(config.port, config.enabled) {
+        while (true) {
+            runtimeStatus = if (!config.enabled) {
+                "已停止（配置开关关闭）"
+            } else {
+                withContext(Dispatchers.IO) {
+                    runCatching {
+                        val connection = URL("http://127.0.0.1:${config.port}/health").openConnection() as HttpURLConnection
+                        try {
+                            connection.requestMethod = "GET"
+                            connection.connectTimeout = 1500
+                            connection.readTimeout = 1500
+                            val code = connection.responseCode
+                            if (code in 200..299) {
+                                val body = connection.inputStream.bufferedReader().use { it.readText() }
+                                val healthy = org.json.JSONObject(body).optBoolean("ok", false)
+                                if (healthy) "运行中 · HTTP $code" else "服务响应异常 · HTTP $code"
+                            } else "未正常响应 · HTTP $code"
+                        } finally {
+                            connection.disconnect()
+                        }
+                    }.getOrElse { "未检测到监听服务：${it.javaClass.simpleName}" }
+                }
+            }
+            delay(3000)
+        }
+    }
 
     PageColumn {
         PageHeading("API Gateway", "本地反代服务与上游连接配置。")
         SectionCard("服务状态") {
             StatusLine("监听地址", (if (config.lan) "0.0.0.0" else "127.0.0.1") + ":" + config.port)
             StatusLine("上游凭据", if (config.ready) "已配置" else "未配置", config.ready)
-            StatusLine("服务开关", if (config.enabled) "已启用" else "已停止", config.enabled)
+            StatusLine("配置开关", if (config.enabled) "已启用" else "已停止", config.enabled)
+            StatusLine("实际运行状态", runtimeStatus, runtimeStatus.startsWith("运行中"))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
                     onClick = {

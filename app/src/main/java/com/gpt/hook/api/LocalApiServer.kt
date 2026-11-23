@@ -94,7 +94,7 @@ class LocalApiServer(@Volatile var cfg: RelayConfig, private val conversations: 
                     target == "/v1/models" -> json(out, 200, OpenAiCompat.modelsJson(OpenAiCompat.DEFAULT_MODELS))
                     target == "/v1/conversations" || target.startsWith("/v1/conversations/") ->
                         conversationRoute(out, method, target, body, headers)
-                    method == "POST" && target.startsWith("/v1/chat/completions") ->
+                    method == "POST" && target == "/v1/chat/completions" ->
                         chat(out, body ?: ByteArray(0), headers)
                     target.startsWith("/backend-api") -> passthrough(out, method, target, body, headers)
                     else -> json(out, 404, err("not_found", "route not found"))
@@ -188,53 +188,118 @@ class LocalApiServer(@Volatile var cfg: RelayConfig, private val conversations: 
         val req = try { JSONObject(String(body, Charsets.UTF_8)) } catch (t: Throwable) {
             json(out, 400, err("invalid_request", "body is not JSON")); return
         }
-        val stream = req.optBoolean("stream", false)
+        val caller = headers["x-dsh-client-id"]
+        if (caller.isNullOrBlank()) {
+            json(out, 400, err("invalid_request", "X-DSH-Client-Id is required for chat completions")); return
+        }
         val model = req.optString("model", "auto").ifBlank { "auto" }
+        val userText = OpenAiCompat.lastUserText(req)
+        if (userText.isBlank()) {
+            json(out, 400, err("invalid_request", "messages must contain a non-empty user message")); return
+        }
+        val requestedConversationId = headers["x-dsh-conversation-id"]?.takeIf { it.isNotBlank() }
+        val localConversation = try {
+            if (requestedConversationId == null) {
+                conversations.create(caller, userText.take(160), model)
+            } else {
+                conversations.get(caller, requestedConversationId)
+                    ?: run { json(out, 404, err("not_found", "conversation not found")); return }
+            }
+        } catch (e: IllegalArgumentException) {
+            json(out, 400, err("invalid_request", e.message ?: "invalid conversation identity")); return
+        }
+        val localId = localConversation.id
+        val responseHeaders = mapOf("X-DSH-Conversation-Id" to localId)
+        try {
+            conversations.appendMessage(
+                caller, localId,
+                JSONObject().put("role", "user").put("content", userText).put("created_at", System.currentTimeMillis())
+            )
+        } catch (e: IllegalArgumentException) {
+            json(out, 413, err("conversation_limit", e.message ?: "conversation limit reached"), responseHeaders); return
+        }
+
+        val stream = req.optBoolean("stream", false)
         val id = "chatcmpl-" + UUID.randomUUID().toString().replace("-", "").take(24)
         val client = ChatGptClient(cfg)
-        val payload = OpenAiCompat.toConversation(req).toString().toByteArray(Charsets.UTF_8)
+        val payload = OpenAiCompat.toConversation(
+            req, localConversation.upstreamConversationId, localConversation.upstreamParentMessageId
+        ).toString().toByteArray(Charsets.UTF_8)
 
         val conn = try {
             client.open("POST", "/backend-api/conversation", payload, "text/event-stream")
         } catch (t: Throwable) {
-            json(out, 502, err("upstream_unreachable", t.message ?: "connect failed")); return
+            json(out, 502, err("upstream_unreachable", t.message ?: "connect failed"), responseHeaders); return
         }
         val code = conn.responseCode
         if (code >= 400) {
             val text = (conn.errorStream ?: conn.inputStream)?.bufferedReader()?.readText().orEmpty()
-            json(out, code, text.ifBlank { err("upstream_error", "HTTP $code") })
+            json(out, code, text.ifBlank { err("upstream_error", "HTTP $code") }, responseHeaders)
+            try { conn.disconnect() } catch (_: Throwable) { }
             return
         }
 
         val textOut = StringBuilder()
         var sent = ""
         val reader = BufferedReader(InputStreamReader(conn.inputStream, Charsets.UTF_8))
-
-        if (stream) {
-            writeHead(out, 200, "text/event-stream; charset=utf-8", null)
-            var line: String?
-            while (reader.readLine().also { line = it } != null) {
-                val l = line ?: continue
-                if (l == "data: [DONE]") break
-                if (!l.startsWith("data:")) continue
-                val delta = extractDelta(l.substring(5).trim(), sent) ?: continue
-                sent += delta
-                textOut.append(delta)
-                writeChunk(out, "data: " + OpenAiCompat.chunk(id, model, delta) + "\n\n")
-            }
-            writeChunk(out, "data: " + OpenAiCompat.chunk(id, model, "", "stop") + "\n\n")
-            writeChunk(out, "data: [DONE]\n\n")
-            out.flush()
-        } else {
-            reader.forEachLine { l ->
-                if (l.startsWith("data:")) {
-                    val d = extractDelta(l.substring(5).trim(), sent)
-                    if (d != null) { sent += d; textOut.append(d) }
+        try {
+            if (stream) {
+                writeHead(out, 200, "text/event-stream; charset=utf-8", null, responseHeaders)
+                var line: String?
+                while (reader.readLine().also { line = it } != null) {
+                    val l = line ?: continue
+                    if (l == "data: [DONE]") break
+                    if (!l.startsWith("data:")) continue
+                    val event = l.substring(5).trim()
+                    captureUpstreamState(event, caller, localId)
+                    val delta = extractDelta(event, sent) ?: continue
+                    sent += delta
+                    textOut.append(delta)
+                    writeChunk(out, "data: " + OpenAiCompat.chunk(id, model, delta) + "\n\n")
                 }
+                writeChunk(out, "data: " + OpenAiCompat.chunk(id, model, "", "stop") + "\n\n")
+                writeChunk(out, "data: [DONE]\n\n")
+                out.flush()
+            } else {
+                reader.forEachLine { l ->
+                    if (l.startsWith("data:")) {
+                        val event = l.substring(5).trim()
+                        captureUpstreamState(event, caller, localId)
+                        val delta = extractDelta(event, sent)
+                        if (delta != null) { sent += delta; textOut.append(delta) }
+                    }
+                }
+                json(out, 200, OpenAiCompat.completion(id, model, textOut.toString()), responseHeaders)
             }
-            json(out, 200, OpenAiCompat.completion(id, model, textOut.toString()))
+            if (textOut.isNotEmpty()) {
+                conversations.appendMessage(
+                    caller, localId,
+                    JSONObject().put("role", "assistant").put("content", textOut.toString())
+                        .put("created_at", System.currentTimeMillis())
+                )
+            }
+        } catch (t: Throwable) {
+            try { socketSafeFlush(out) } catch (_: Throwable) { }
+        } finally {
+            try { conn.disconnect() } catch (_: Throwable) { }
         }
-        try { conn.disconnect() } catch (_: Throwable) { }
+    }
+
+    private fun captureUpstreamState(payload: String, caller: String, localId: String) {
+        if (payload.isEmpty() || payload == "[DONE]") return
+        val obj = try { JSONObject(payload) } catch (_: Throwable) { return }
+        val conversationId = obj.optString("conversation_id").takeIf { it.isNotBlank() && it != "null" }
+        val message = obj.optJSONObject("message")
+        val parentMessageId = if (message?.optJSONObject("author")?.optString("role") == "assistant") {
+            message.optString("id").takeIf { it.isNotBlank() && it != "null" }
+        } else null
+        if (conversationId != null || parentMessageId != null) {
+            conversations.updateUpstreamState(caller, localId, conversationId, parentMessageId)
+        }
+    }
+
+    private fun socketSafeFlush(out: OutputStream) {
+        out.flush()
     }
 
     /** 上游每条 assistant 消息携带完整文本，取与已发送部分的增量。 */
@@ -266,11 +331,22 @@ class LocalApiServer(@Volatile var cfg: RelayConfig, private val conversations: 
         try { conn.disconnect() } catch (_: Throwable) { }
     }
 
-    private fun writeHead(out: OutputStream, code: Int, contentType: String, length: Long?) {
+    private fun writeHead(
+        out: OutputStream,
+        code: Int,
+        contentType: String,
+        length: Long?,
+        extraHeaders: Map<String, String> = emptyMap()
+    ) {
         val sb = StringBuilder()
         sb.append("HTTP/1.1 ").append(code).append(" X\r\n")
         sb.append("Content-Type: ").append(contentType).append("\r\n")
         if (length != null) sb.append("Content-Length: ").append(length).append("\r\n")
+        extraHeaders.forEach { (name, value) ->
+            if (name.matches(Regex("[A-Za-z0-9-]{1,64}")) && value.none { it == '\r' || it == '\n' }) {
+                sb.append(name).append(": ").append(value).append("\r\n")
+            }
+        }
         sb.append("Connection: close\r\n\r\n")
         out.write(sb.toString().toByteArray(Charsets.ISO_8859_1))
         out.flush()
@@ -281,9 +357,14 @@ class LocalApiServer(@Volatile var cfg: RelayConfig, private val conversations: 
         out.flush()
     }
 
-    private fun json(out: OutputStream, code: Int, body: String) {
+    private fun json(
+        out: OutputStream,
+        code: Int,
+        body: String,
+        extraHeaders: Map<String, String> = emptyMap()
+    ) {
         val bytes = body.toByteArray(Charsets.UTF_8)
-        writeHead(out, code, "application/json; charset=utf-8", bytes.size.toLong())
+        writeHead(out, code, "application/json; charset=utf-8", bytes.size.toLong(), extraHeaders)
         out.write(bytes)
         out.flush()
     }

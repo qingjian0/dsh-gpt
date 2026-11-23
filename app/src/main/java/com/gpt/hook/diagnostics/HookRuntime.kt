@@ -144,11 +144,14 @@ class HookRuntime(
             val signature = executable.toGenericString()
             val key = "${rule.id}:$signature"
             keys += key
-            val fingerprint = listOf(
+            val fingerprintSource = listOf(
                 rule.className, rule.methodName, rule.parameterTypes.joinToString(","),
                 rule.methodDescriptor.orEmpty(), rule.sampleEvery.toString(), rule.mode,
                 rule.result.toString(), rule.argumentOverrides.toSortedMap().toString(), rule.throwMessage
             ).joinToString("|")
+            val fingerprint = MessageDigest.getInstance("SHA-256")
+                .digest(fingerprintSource.toByteArray(Charsets.UTF_8))
+                .joinToString("") { "%02x".format(it) }
             val existing = installed[key]
             if (existing?.fingerprint == fingerprint) {
                 retained++

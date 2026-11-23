@@ -13,9 +13,11 @@ import android.os.IBinder
 class ApiService : Service() {
 
     private var server: LocalApiServer? = null
+    private lateinit var conversations: ConversationRepository
 
     override fun onCreate() {
         super.onCreate()
+        conversations = ConversationRepository(this)
         val nm = getSystemService(NotificationManager::class.java)
         if (Build.VERSION.SDK_INT >= 26) {
             nm.createNotificationChannel(
@@ -37,7 +39,7 @@ class ApiService : Service() {
             notify("缺少 access_token / oai-did")
             return
         }
-        val s = LocalApiServer(cfg)
+        val s = LocalApiServer(cfg, conversations)
         server = s
         notify(if (s.start()) "本地 API http://${if (cfg.lan) "0.0.0.0" else "127.0.0.1"}:${cfg.port}/v1" else "端口 ${cfg.port} 绑定失败")
     }
@@ -59,6 +61,7 @@ class ApiService : Service() {
     override fun onDestroy() {
         server?.stop()
         server = null
+        if (::conversations.isInitialized) conversations.closeSafely()
         stopForeground(STOP_FOREGROUND_REMOVE)
         super.onDestroy()
     }

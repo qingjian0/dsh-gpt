@@ -39,7 +39,8 @@ class ClassLoadWatcher(
                     val loaded = chain.proceed()
                     if (loaded is Class<*> && !callbackBusy.get()) {
                         if (gate.accept(name)) eventBuffer.recordClassLoaded(name, 0L)
-                        if (seenForHooks.size < MAX_DYNAMIC_CLASSES && seenForHooks.add(name)) {
+                        val loaderIdentity = "$name@${System.identityHashCode(loaded.classLoader)}"
+                        if (seenForHooks.size < MAX_DYNAMIC_CLASSES && seenForHooks.add(loaderIdentity)) {
                             callbackBusy.set(true)
                             try {
                                 onClassLoaded(loaded)

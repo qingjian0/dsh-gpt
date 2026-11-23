@@ -68,7 +68,7 @@ class MainModule : XposedModule() {
         fun applyCurrentConfig() {
             val source = prefs.getString("hook_config", null)
                 ?: RemoteConfigLoader.read(this)
-                ?: return
+                ?: DEFAULT_CONFIG
             configExecutor.execute {
                 try {
                     val config = HookConfigParser.parse(source)
@@ -171,7 +171,7 @@ class MainModule : XposedModule() {
                 PROVIDER_URI, ObservationProvider.METHOD_TARGET_CONFIG, null, null
             ) ?: return
             val version = state.getLong(ObservationProvider.KEY_CONFIG_UPDATED, 0L)
-            if (version <= 0L || version == lastProviderConfigVersion) return
+            if (version == lastProviderConfigVersion) return
             val source = state.getString(ObservationProvider.KEY_CONFIG) ?: return
             val enabled = state.getBoolean(ObservationProvider.KEY_ENABLED, true)
             lastProviderConfigVersion = version
@@ -333,6 +333,8 @@ class MainModule : XposedModule() {
 
     private companion object {
         const val TARGET_PACKAGE = "com.openai.chatgpt"
+        const val DEFAULT_CONFIG =
+            """{"schemaVersion":1,"targetPackage":"com.openai.chatgpt","rules":[],"observeClassLoads":true}"""
         const val CONFIG_POLL_SECONDS = 3L
         const val DISCOVERY_POLL_SECONDS = 1L
         const val REPORT_DEBOUNCE_MS = 1500L

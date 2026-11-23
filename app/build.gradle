@@ -1,5 +1,6 @@
 plugins {
     alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.compose)
 }
 
 android {
@@ -14,8 +15,8 @@ android {
         applicationId 'com.gpt.hook'
         minSdk 27
         targetSdk 37
-        versionCode 4
-        versionName '2.2.0'
+        versionCode 5
+        versionName '2.3.0'
     }
 
     buildTypes {
@@ -41,8 +42,6 @@ android {
     }
 }
 
-// Kotlin 2.x: keep jvmTarget aligned with compileOptions (Java 21), otherwise
-// the AGP JVM-target validation fails the build.
 kotlin {
     compilerOptions.jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21)
 }
@@ -50,5 +49,12 @@ kotlin {
 dependencies {
     compileOnly libs.libxposed
     implementation libs.libxposed.service
+    implementation platform(libs.androidx.compose.bom)
+    implementation libs.androidx.activity.compose
+    implementation libs.androidx.compose.ui
+    implementation libs.androidx.compose.ui.tooling.preview
+    implementation libs.androidx.compose.material3
+    implementation libs.androidx.compose.material.icons.extended
+    debugImplementation libs.androidx.compose.ui.tooling
     testImplementation 'junit:junit:4.13.2'
 }

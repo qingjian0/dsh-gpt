@@ -78,6 +78,11 @@ class HookRuntime(
             replaced += result.replaced
             retained += result.retained
             failed += result.failed
+            if (result.failed > 0 && result.keys.isEmpty()) {
+                val oldKeys = installed.keys.filter { it.startsWith("${rule.id}:") }
+                activeKeys.addAll(oldKeys)
+                retained += oldKeys.size
+            }
         }
 
         installed.entries.toList().forEach { (key, value) ->
@@ -124,11 +129,11 @@ class HookRuntime(
 
     private fun installRuleOnClass(type: Class<*>, rule: HookRule): InstallResult {
         val candidates: List<Executable> = try {
-            if (rule.methodName == "<init>") {
+            (if (rule.methodName == "<init>") {
                 type.declaredConstructors.filter { constructorMatches(it, rule) }
             } else {
                 type.declaredMethods.filter { methodMatches(it, rule) }
-            }.sortedBy { it.toGenericString() }.take(MAX_OVERLOADS)
+            }).sortedBy { it.toGenericString() }.take(MAX_OVERLOADS)
         } catch (t: Throwable) {
             ModuleLogger.w("rule reflection failed; id=${rule.id}; reason=${t.javaClass.simpleName}")
             return InstallResult(emptySet(), failed = 1)

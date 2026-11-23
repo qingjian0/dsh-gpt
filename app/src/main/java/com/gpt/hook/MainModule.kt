@@ -76,8 +76,8 @@ class MainModule : XposedModule() {
             configExecutor.execute {
                 try {
                     val config = HookConfigParser.parse(source)
-                    updateClassLoadWatcher(config.observeClassLoads)
                     val report = hookRuntime.applyWithReport(config)
+                    updateClassLoadWatcher(config.observeClassLoads)
                     logApplyReport(config.rules.size, report.added, report.replaced, report.retained, report.removed, report.failed)
                     scheduleReportPublish()
                 } catch (t: Throwable) {
@@ -172,8 +172,8 @@ class MainModule : XposedModule() {
                 }
                 try {
                     val config = HookConfigParser.parse(source)
-                    updateClassLoadWatcher(config.observeClassLoads)
                     val report = runtime.applyWithReport(config)
+                    updateClassLoadWatcher(config.observeClassLoads)
                     logApplyReport(config.rules.size, report.added, report.replaced, report.retained, report.removed, report.failed, version)
                     scheduleReportPublish()
                 } catch (t: Throwable) {

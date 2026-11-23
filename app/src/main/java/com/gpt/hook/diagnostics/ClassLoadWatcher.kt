@@ -39,7 +39,7 @@ class ClassLoadWatcher(
                     val loaded = chain.proceed()
                     if (loaded is Class<*> && !callbackBusy.get()) {
                         if (gate.accept(name)) eventBuffer.recordClassLoaded(name, 0L)
-                        if (seenForHooks.add(name)) {
+                        if (seenForHooks.size < MAX_DYNAMIC_CLASSES && seenForHooks.add(name)) {
                             callbackBusy.set(true)
                             try {
                                 onClassLoaded(loaded)
@@ -75,4 +75,8 @@ class ClassLoadWatcher(
     }
 
     fun isEnabled(): Boolean = enabled.get()
+
+    private companion object {
+        const val MAX_DYNAMIC_CLASSES = 2048
+    }
 }

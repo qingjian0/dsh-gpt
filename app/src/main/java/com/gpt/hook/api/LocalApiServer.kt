@@ -186,6 +186,8 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                 .put("revision", result.getLong(ObservationProvider.KEY_CONFIG_UPDATED, 0L))
                 .put("note", "Accepted by the local control plane; target-process application must be verified separately.")
                 .toString())
+        } catch (e: org.json.JSONException) {
+            json(out, 400, err("invalid_hook_config", e.message ?: "invalid Hook config"))
         } catch (e: IllegalArgumentException) {
             json(out, 400, err("invalid_hook_config", e.message ?: "invalid Hook config"))
         } catch (t: Throwable) {
@@ -211,6 +213,8 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                 .put("accepted", true)
                 .put("enabled", request.getBoolean("enabled"))
                 .toString())
+        } catch (e: org.json.JSONException) {
+            json(out, 400, err("invalid_request", e.message ?: "invalid JSON body"))
         } catch (e: IllegalArgumentException) {
             json(out, 400, err("invalid_request", e.message ?: "invalid request"))
         } catch (t: Throwable) {
@@ -254,6 +258,8 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                 .put("requestId", requestId)
                 .put("task", JSONObject(result.getString(ObservationProvider.KEY_DISCOVERY_TASK).orEmpty()))
                 .toString())
+        } catch (e: org.json.JSONException) {
+            json(out, 400, err("invalid_discovery_request", e.message ?: "invalid JSON body"))
         } catch (e: IllegalArgumentException) {
             json(out, 400, err("invalid_discovery_request", e.message ?: "invalid discovery request"))
         } catch (t: Throwable) {

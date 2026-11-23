@@ -6,7 +6,7 @@ The API is deliberately caller-scoped: every conversation request must include
 the database stores its SHA-256 digest. A conversation ID belonging to another caller
 is indistinguishable from a missing ID (404).
 
-All endpoints also require the gateway's configured Bearer API key when one is configured.
+All endpoints require the gateway's configured Bearer API key. Conversation endpoints are disabled with HTTP 503 until a non-empty API key is configured.
 
 ## Endpoints
 

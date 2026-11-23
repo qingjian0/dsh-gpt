@@ -23,7 +23,13 @@ class HookRuntime(
     private val classLoader: ClassLoader,
     private val events: EventBuffer
 ) {
-    private data class Installed(val handle: XposedInterface.HookHandle, val fingerprint: String)
+    private data class Installed(
+        val handle: XposedInterface.HookHandle,
+        val fingerprint: String,
+        val ruleId: String,
+        val signature: String,
+        val sampleEvery: Int
+    )
     private val installed = ConcurrentHashMap<String, Installed>()
     private val counters = ConcurrentHashMap<String, AtomicLong>()
     private val discoveryEngine by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
@@ -107,7 +113,7 @@ class HookRuntime(
                             }
                         }
                     // libxposed setId atomically replaces an existing hook with this ID.
-                    installed[key] = Installed(handle, fingerprint)
+                    installed[key] = Installed(handle, fingerprint, rule.id, signature, rule.sampleEvery)
                     if (existing == null) added++ else replaced++
                 } catch (t: Throwable) {
                     failed++
@@ -135,6 +141,29 @@ class HookRuntime(
     /** Bounded metadata-only class, method, constructor and field discovery. */
     fun discover(prefix: String, exactClassName: String? = null, limit: Int = 100, cursor: Int = 0): JSONObject =
         discoveryEngine.discover(prefix, exactClassName, limit, cursor)
+
+    /**
+     * A truthful inventory of Hook handles currently retained by this Runtime.
+     * This is distinct from configured rules and from discovery candidates.
+     */
+    fun runtimeSnapshot(): JSONObject {
+        val hooks = org.json.JSONArray()
+        val entries = installed.entries.toList().sortedBy { it.key }
+        entries.forEach { (key, value) ->
+            hooks.put(JSONObject()
+                .put("ruleId", value.ruleId)
+                .put("signature", value.signature.take(512))
+                .put("fingerprint", value.fingerprint.take(512))
+                .put("sampleEvery", value.sampleEvery)
+                .put("invocations", counters[key]?.get() ?: 0L)
+                .put("state", "installed"))
+        }
+        return JSONObject()
+            .put("state", "active")
+            .put("activeHookCount", entries.size)
+            .put("hooks", hooks)
+            .put("capturedAtMs", System.currentTimeMillis())
+    }
 
     @Synchronized
     fun clear(): Int {

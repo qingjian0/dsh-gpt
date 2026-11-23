@@ -290,7 +290,7 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                     json(out, 200, JSONObject()
                         .put("ok", true)
                         .put("accepted", result.getBoolean(ObservationProvider.KEY_ACCEPTED))
-                        .put("task", result.getString(ObservationProvider.KEY_DISCOVERY_TASK)?.let(::JSONObject) ?: JSONObject.NULL)
+                        .put("task", result.getString(ObservationProvider.KEY_DISCOVERY_TASK)?.let { JSONObject(it) } ?: JSONObject.NULL)
                         .toString())
                 }
                 else -> json(out, 405, err("method_not_allowed", "use GET or DELETE"))

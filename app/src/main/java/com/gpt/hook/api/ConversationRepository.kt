@@ -85,11 +85,18 @@ class ConversationRepository(context: Context) : SQLiteOpenHelper(
     }
 
     fun appendMessage(callerId: String, id: String, message: JSONObject): Conversation? {
+        val serializedMessage = message.toString()
+        require(serializedMessage.toByteArray(Charsets.UTF_8).size <= MAX_MESSAGE_BYTES) {
+            "message exceeds 256 KiB"
+        }
         val db = writableDatabase
         db.beginTransaction()
         try {
             val current = get(callerId, id) ?: return null
-            val messages = JSONArray(current.messages.toString()).put(JSONObject(message.toString()))
+            require(current.messages.length() < MAX_MESSAGES_PER_CONVERSATION) {
+                "conversation message limit reached"
+            }
+            val messages = JSONArray(current.messages.toString()).put(JSONObject(serializedMessage))
             val now = System.currentTimeMillis()
             val values = ContentValues().apply {
                 put("messages", messages.toString())
@@ -143,4 +150,9 @@ class ConversationRepository(context: Context) : SQLiteOpenHelper(
     }
 
     fun closeSafely() = close()
+
+    private companion object {
+        const val MAX_MESSAGES_PER_CONVERSATION = 500
+        const val MAX_MESSAGE_BYTES = 256 * 1024
+    }
 }

@@ -60,7 +60,7 @@ class OpenAiCompatConversationTest {
 
         assertFalse(payload.has("conversation_id"))
         assertTrue(payload.getString("parent_message_id").isNotBlank())
-        assertEquals("hello", payload.getJSONArray("messages")
+        assertEquals("User: hello", payload.getJSONArray("messages")
             .getJSONObject(0).getJSONObject("content").getJSONArray("parts").getString(0))
     }
 }

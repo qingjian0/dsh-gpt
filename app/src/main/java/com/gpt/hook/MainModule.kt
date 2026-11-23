@@ -42,6 +42,7 @@ class MainModule : XposedModule() {
     private val providerPollStarted = AtomicBoolean(false)
     private val discoveryPollStarted = AtomicBoolean(false)
     private val discoveryWorkQueued = AtomicBoolean(false)
+    private val startupDiscoveryStarted = AtomicBoolean(false)
     private val eventBuffer = EventBuffer(onChanged = ::scheduleReportPublish)
     private val classLoadWatcher = ClassLoadWatcher(this, eventBuffer)
     private var configListener: SharedPreferences.OnSharedPreferenceChangeListener? = null
@@ -111,6 +112,7 @@ class MainModule : XposedModule() {
 
     private fun startProviderPolling() {
         scheduleReportPublish()
+        startStartupDiscovery()
         if (providerPollStarted.compareAndSet(false, true)) {
             providerConfigExecutor.scheduleWithFixedDelay({
                 pollProviderConfig()
@@ -120,6 +122,45 @@ class MainModule : XposedModule() {
             discoveryPoller.scheduleWithFixedDelay({
                 pollDiscoveryRequest()
             }, 0, DISCOVERY_POLL_SECONDS, TimeUnit.SECONDS)
+        }
+    }
+
+    /** One bounded metadata-only DEX scan per target-process start; never runs on the UI thread. */
+    private fun startStartupDiscovery() {
+        if (!startupDiscoveryStarted.compareAndSet(false, true)) return
+        discoveryExecutor.execute {
+            try {
+                val result = activeRuntime?.discover(
+                    prefix = "com.openai.",
+                    exactClassName = null,
+                    limit = 100,
+                    cursor = 0
+                ) ?: JSONObject().put("ok", false).put("error", "hook_runtime_unavailable")
+                if (!result.optBoolean("ok", false)) {
+                    ModuleLogger.w("startup DEX discovery incomplete; error=${result.optString("error", "unknown")}")
+                    return@execute
+                }
+                val ctx = targetContextForIpc ?: return@execute
+                val extras = Bundle().apply {
+                    putString(ObservationProvider.KEY_STARTUP_DISCOVERY, result.toString())
+                }
+                val accepted = ctx.contentResolver.call(
+                    PROVIDER_URI,
+                    ObservationProvider.METHOD_TARGET_PUBLISH_STARTUP_DISCOVERY,
+                    null,
+                    extras
+                )?.getBoolean(ObservationProvider.KEY_ACCEPTED) == true
+                if (accepted) {
+                    ModuleLogger.i(
+                        "startup DEX discovery published; classes=${result.optInt("classesInspected")}; " +
+                            "records=${result.optInt("recordCount")}; truncated=${result.optBoolean("scanTruncated")}"
+                    )
+                } else {
+                    ModuleLogger.w("startup DEX discovery snapshot was not accepted")
+                }
+            } catch (t: Throwable) {
+                ModuleLogger.w("startup DEX discovery failed; reason=${t.javaClass.simpleName}")
+            }
         }
     }
 

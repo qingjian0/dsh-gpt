@@ -1,6 +1,6 @@
 # Session and Agent integration contract
 
-Status: architecture contract only; no persistence or Agent execution is claimed as implemented.
+Status: SQLite conversation persistence, caller-scoped CRUD, and an initial upstream continuation path are implemented in PR #9. The DSH Agent execution contract below remains architectural; no Agent engine is implemented.
 
 ## 1. Responsibilities
 
@@ -38,12 +38,17 @@ interface ConversationRepository {
 }
 ```
 
-Minimum persisted fields:
-- local ID, title, created/updated timestamps, status
-- provider ID and upstream conversation ID (sensitive identifiers should not be exposed in list responses)
-- parent conversation ID, agent run ID, assigned agent ID
-- provider cursor / parent message ID required to continue upstream conversations
-- message role, content reference, timestamps, completion/error state
+Current implementation:
+- SQLite database `dsh_conversations.db`, schema version 2, with additive migration from v1.
+- Local UUID, title, model, caller SHA-256 digest, parent ID, timestamps, ordered JSON message array.
+- Upstream conversation ID and latest assistant message ID are persisted for chat continuation.
+- Message count is capped at 500; each appended message is capped at 256 KiB.
+- Caller-scoped CRUD and chat-turn persistence are connected to `LocalApiServer`.
+
+Still required for the full Agent contract:
+- provider registry, provider status, run ID, assigned agent ID, message completion/error state.
+- encrypted provider continuation state at rest.
+- paginated message reads, retention policy, and repository interface decoupled from SQLite.
 
 Security:
 - Keep access tokens and API keys out of conversation rows and logs.
@@ -54,18 +59,19 @@ Security:
 
 ## 4. Local API contract
 
-Proposed endpoints (versioned before implementation):
+Implemented endpoints:
 - `POST /v1/conversations`: create a local conversation.
-- `GET /v1/conversations`: list metadata with pagination and filters.
-- `GET /v1/conversations/{id}`: read metadata and paginated messages.
-- `DELETE /v1/conversations/{id}`: delete local data and provider continuation state.
-- `POST /v1/chat/completions`: accepts optional `conversation_id`; when absent, create an isolated conversation.
-- `GET /health`: report listener health only; upstream readiness is a separate field.
+- `GET /v1/conversations`: list caller-scoped metadata.
+- `GET /v1/conversations/{id}`: read a caller-owned conversation and messages.
+- `POST /v1/conversations/{id}/messages`: append a message.
+- `DELETE /v1/conversations/{id}`: delete a conversation and detach children.
+- `POST /v1/chat/completions`: requires `X-DSH-Client-Id`; returns a local ID in `X-DSH-Conversation-Id`, which clients send to continue.
+- `GET /health`: public listener health only.
 
-Compatibility:
-- Keep standard OpenAI clients working when `conversation_id` is absent.
-- Accept a caller-supplied stable `user` only as a namespaced client-session hint, never as an unbounded raw database key.
-- Do not expose upstream conversation IDs in public list endpoints unless explicitly requested by a privileged local client.
+Compatibility and remaining work:
+- Standard OpenAI clients need the two DSH headers for stable local conversation continuity.
+- Upstream conversation and parent message IDs are not exposed in public conversation responses.
+- Add request-level API contract tests and authenticated device fixtures before treating upstream protocol continuity as production-verified.
 
 ## 5. Agent adapter contract
 
@@ -111,10 +117,10 @@ Keep PR #8 open as a source of selected changes only. Rebase or port individual 
 
 ## 7. Delivery sequence
 
-1. Add repository models and unit tests independent of UI.
-2. Implement app-private persistent repository and migrations.
-3. Add local conversation endpoints and API contract tests.
-4. Adapt the Compose Conversations tab to repository flows.
-5. Implement DSH Agent adapter and capability negotiation.
+1. Add repository models and unit tests independent of UI. (partially complete)
+2. Implement app-private persistent repository and additive migrations. (implemented; device migration test pending)
+3. Add local conversation endpoints and API contract tests. (endpoints implemented; HTTP integration tests pending)
+4. Adapt the Compose Conversations tab to the repository. (basic list/create/delete integration implemented)
+5. Implement DSH Agent adapter and capability negotiation. (not implemented; DSH host currently has no Agent engine)
 6. Connect Agent tab to real runs, progress, cancellation, and conversation lineage.
-7. Device-test process death, restart recovery, privacy, and concurrent requests.
+7. Device-test process death, restart recovery, privacy, upstream continuation, and concurrent requests.

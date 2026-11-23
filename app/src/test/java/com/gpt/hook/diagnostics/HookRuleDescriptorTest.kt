@@ -17,6 +17,23 @@ class HookRuleDescriptorTest {
     }
 
     @Test
+    fun parsesConstructorHookRule() {
+        val config = HookConfigParser.parse(
+            """{"rules":[{"id":"ctor","className":"com.openai.example.Client","methodName":"<init>","methodDescriptor":"(Ljava/lang/String;I)V"}]}"""
+        )
+        assertEquals("<init>", config.rules.single().methodName)
+        assertEquals("(Ljava/lang/String;I)V", config.rules.single().methodDescriptor)
+    }
+
+    @Test
+    fun rejectsInvalidConstructorDescriptorAndClassInitializer() {
+        val invalidDescriptor = """{"rules":[{"id":"ctor","className":"com.openai.example.Client","methodName":"<init>","methodDescriptor":"(I)Z"}]}"""
+        assertThrows(IllegalArgumentException::class.java) { HookConfigParser.parse(invalidDescriptor) }
+        val classInitializer = """{"rules":[{"id":"clinit","className":"com.openai.example.Client","methodName":"<clinit>"}]}"""
+        assertThrows(IllegalArgumentException::class.java) { HookConfigParser.parse(classInitializer) }
+    }
+
+    @Test
     fun rejectsMalformedOrConflictingMethodSelectors() {
         val malformed = """{"rules":[{"id":"bad","className":"com.openai.auth.Session","methodName":"isValid","methodDescriptor":"(V)Z"}]}"""
         assertThrows(IllegalArgumentException::class.java) { HookConfigParser.parse(malformed) }

@@ -1,52 +1,51 @@
-# DSH AI Dynamic Hook Workbench
+# DSH AI Dynamic Hook Runtime
 
-## Delivered control and observation loop
+## Runtime behavior
 
-1. The module app validates declarative JSON rules and writes `hook_config` through libxposed remote preferences.
-2. The scoped target process independently validates the configuration and applies/removes hooks on preference changes.
-3. Hook callbacks record only bounded method metadata: rule ID, class/method/signature, elapsed time, sequence and exception class.
-4. A debounced publisher sends a bounded JSON snapshot to the module app's exported ContentProvider.
-5. The provider accepts writes only when Binder caller UID maps to `com.openai.chatgpt`; reads and clears are restricted to the module app UID.
-6. The console can refresh, copy, or share the sanitized report to an explicitly selected AI assistant.
-7. Paste an AI-suggested configuration into the editor; it is validated again before dispatch. This completes a user-mediated analysis → revise → apply loop without a hidden hosted AI client.
+The Kotlin/libxposed API 102 runtime supports live rule application in the ChatGPT target process:
 
-## Observation IPC security
+1. Send a new complete rule snapshot to `PUT /v1/hook/config`.
+2. The module app stores it through the authenticated local API and Provider boundary.
+3. The target process picks up the new revision on its short config poll and applies it without rebuilding the APK or restarting ChatGPT.
+4. Existing Hook IDs are replaced atomically when the same target method is updated; removed rules are unhooked.
+5. If a configured class is not available yet, the rule remains active in the runtime rule set. The ClassLoader watcher attaches it when that class is loaded later.
+6. Runtime status and observation events expose the actual installed Hook handles and invocation counts.
 
-- Authority: `com.gpt.hook.observations`.
-- Target-to-module transport uses Android ContentProvider `call()`; remote preferences are not used for reverse transport.
-- The provider is exported solely because the target app has a different UID. Every publish verifies the Binder caller UID's package set contains the exact configured target package. Read/clear require the module app UID.
-- The provider accepts only the expected report schema and at most 128 KiB per report.
-- The in-process buffer holds at most 100 events. Publication is debounced to avoid Binder calls on every hooked invocation.
-- The provider exposes no query/insert/update/delete data surface.
-- The target process captures its own application Context during `Instrumentation.callApplicationOnCreate(Application)` and calls the exported provider directly; Binder therefore carries the target app UID. This bootstrap and caller-UID behavior must still be verified on-device.
+Class-load watching is enabled by default. It filters to `com.openai.*`, deduplicates class names, guards callback re-entry, and performs work only for classes with matching active rules. It does not enumerate arbitrary app data or call target methods.
 
-## Configuration schema
+## Rule schema
 
 ```json
 {
   "schemaVersion": 1,
   "targetPackage": "com.openai.chatgpt",
+  "observeClassLoads": true,
   "rules": [{
     "id": "sample-method",
     "className": "com.openai.example.Sample",
     "methodName": "run",
-    "parameterTypes": ["java.lang.String"],
+    "methodDescriptor": "(Ljava/lang/String;)V",
     "enabled": true,
     "sampleEvery": 1
   }]
 }
 ```
 
-At most 64 rules, 8 overloads per rule, 128 KiB config, and sampleEvery 1..10000. Classes must be in `com.openai.*`; prefer explicit parameter types.
+Use either `methodDescriptor` or `parameterTypes`, not both. Descriptors disambiguate overloads and include the return type. Constructor rules use `methodName: "<init>"` and a descriptor ending in `)V`. Up to eight matching overloads are attached per rule.
 
-## AI integration boundary
+## Control API
 
-The app does not embed an AI API key or silently upload reports. "Share to AI" invokes Android's chooser with the sanitized JSON; the user selects the assistant/provider. AI-generated rules must be pasted back and pass local validation before application. A fully automated hosted AI client requires provider selection, credentials, privacy disclosure and network implementation, and is intentionally not claimed by this build.
+- `GET /v1/hook/status`: actual installed Hook inventory and latest apply report.
+- `GET /v1/hook/events`: bounded metadata-only runtime observations.
+- `POST /v1/hook/discover`: bounded DEX discovery.
+- `POST /v1/hook/inspect`: exact class metadata inspection.
+- `PUT /v1/hook/config`: replace the active rule snapshot; the target runtime applies it live.
+- `PUT /v1/hook/enabled`: disable and unhook all active rules, or re-enable the current configuration.
 
-## Privacy boundary
+A successful config response means it is stored; target-process application is asynchronous. Confirm the actual result with `lastApplyReport` and `installedHooks`.
 
-Never collect or serialize method arguments, return values, HTTP headers, cookies, authorization data, request/response bodies, device identifiers, anti-abuse challenge/proof material or credentials. This project does not solve or bypass anti-abuse challenges or access controls.
+## Scope and privacy
 
-## Build and validation
+The runtime currently implements observation hooks and constructor/method interception. It does not execute arbitrary scripts or collect method arguments, return values, authorization headers, cookies, access tokens, request/response bodies, or anti-abuse proof material. Do not use Hook rules to bypass authentication, access controls, payment checks, or security enforcement.
 
-CI runs `assembleDebug`, verifies the LSPosed metadata entries and uploads the APK artifact. CI success proves compilation and packaging only. It does not prove LSPosed injection, IPC caller identity behavior, target app hook callbacks or Android-version compatibility on a physical device. Those require installation and device testing.
+The old standalone Java/Xposed implementation is not part of the APK build. Its broad behavior-mutating modes are not silently imported into this API 102 runtime.

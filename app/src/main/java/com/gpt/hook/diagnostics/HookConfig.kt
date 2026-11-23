@@ -44,7 +44,10 @@ object HookConfigParser {
             require(id.matches(Regex("[A-Za-z0-9_.-]{1,64}"))) { "Invalid rule id at index $i" }
             require(ids.add(id)) { "Duplicate rule id: $id" }
             require(className.startsWith("com.openai.") && className.length <= 240) { "Class must be in com.openai.*" }
-            require(methodName.matches(Regex("[A-Za-z_$][A-Za-z0-9_$]{0,127}"))) { "Invalid method name" }
+            require(
+                methodName == "<init>" ||
+                    methodName.matches(Regex("[A-Za-z_$][A-Za-z0-9_$]{0,127}"))
+            ) { "Invalid method name" }
             val params = item.optJSONArray("parameterTypes")
             require(params == null || params.length() <= MAX_PARAMETERS) { "Too many parameter types" }
             val parameterTypes = buildList {
@@ -63,6 +66,9 @@ object HookConfigParser {
             }
             require(descriptor == null || parameterTypes.isEmpty()) {
                 "Use methodDescriptor or parameterTypes, not both"
+            }
+            if (methodName == "<init>" && descriptor != null) {
+                require(descriptor.endsWith(")V")) { "Constructor descriptor must return void" }
             }
             val sampleEvery = item.optInt("sampleEvery", 1)
             require(sampleEvery in 1..10_000) { "sampleEvery must be between 1 and 10000" }

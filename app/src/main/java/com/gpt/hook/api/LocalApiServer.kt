@@ -100,6 +100,7 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                     target == "/v1/models" -> json(out, 200, OpenAiCompat.modelsJson(OpenAiCompat.DEFAULT_MODELS))
                     target == "/v1/hook/status" && method == "GET" -> hookStatus(out)
                     target == "/v1/hook/events" && method == "GET" -> hookEvents(out)
+                    target == "/v1/hook/startup-discovery" && method == "GET" -> hookStartupDiscovery(out)
                     target == "/v1/hook/config" -> hookConfig(out, method, body)
                     target == "/v1/hook/enabled" && method == "PUT" -> hookEnabled(out, body)
                     target == "/v1/hook/discover" && method == "POST" -> hookDiscover(out, body)
@@ -150,6 +151,25 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
             json(out, 200, result.toString())
         } catch (t: Throwable) {
             json(out, 503, err("hook_control_unavailable", t.message ?: "Hook status unavailable"))
+        }
+    }
+
+    private fun hookStartupDiscovery(out: OutputStream) {
+        try {
+            val state = providerCall(ObservationProvider.METHOD_API_SNAPSHOT)
+                ?: throw IllegalStateException("Hook control provider unavailable")
+            val raw = state.getString(ObservationProvider.KEY_STARTUP_DISCOVERY)
+            if (raw.isNullOrBlank()) {
+                json(out, 404, err("not_found", "startup discovery has not completed"))
+                return
+            }
+            json(out, 200, JSONObject()
+                .put("ok", true)
+                .put("updatedAtMs", state.getLong(ObservationProvider.KEY_STARTUP_DISCOVERY_UPDATED, 0L))
+                .put("result", JSONObject(raw))
+                .toString())
+        } catch (t: Throwable) {
+            json(out, 503, err("hook_control_unavailable", t.message ?: "Startup discovery unavailable"))
         }
     }
 

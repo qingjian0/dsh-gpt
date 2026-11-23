@@ -216,29 +216,28 @@ private fun ApiScreen() {
     var message by rememberSaveable { mutableStateOf("") }
     var runtimeStatus by rememberSaveable { mutableStateOf("等待检测") }
 
-    LaunchedEffect(config.port, config.enabled) {
+    LaunchedEffect(config.port, config.upstreamBase) {
         while (true) {
-            runtimeStatus = if (!config.enabled) {
-                "已停止（配置开关关闭）"
-            } else {
-                withContext(Dispatchers.IO) {
-                    runCatching {
-                        val connection = URL("http://127.0.0.1:${config.port}/health").openConnection() as HttpURLConnection
-                        try {
-                            connection.requestMethod = "GET"
-                            connection.connectTimeout = 1500
-                            connection.readTimeout = 1500
-                            val code = connection.responseCode
-                            if (code in 200..299) {
-                                val body = connection.inputStream.bufferedReader().use { it.readText() }
-                                val healthy = org.json.JSONObject(body).optBoolean("ok", false)
-                                if (healthy) "运行中 · HTTP $code" else "服务响应异常 · HTTP $code"
-                            } else "未正常响应 · HTTP $code"
-                        } finally {
-                            connection.disconnect()
-                        }
-                    }.getOrElse { "未检测到监听服务：${it.javaClass.simpleName}" }
-                }
+            runtimeStatus = withContext(Dispatchers.IO) {
+                runCatching {
+                    val connection = URL("http://127.0.0.1:${config.port}/health").openConnection() as HttpURLConnection
+                    try {
+                        connection.requestMethod = "GET"
+                        connection.connectTimeout = 1500
+                        connection.readTimeout = 1500
+                        val code = connection.responseCode
+                        if (code in 200..299) {
+                            val body = connection.inputStream.bufferedReader().use { it.readText() }
+                            val health = org.json.JSONObject(body)
+                            val healthy = health.optBoolean("ok", false) &&
+                                health.optInt("port", -1) == config.port &&
+                                health.optString("upstream") == config.upstreamBase
+                            if (healthy) "运行中 · HTTP $code" else "端口有响应，但不是当前网关"
+                        } else "未正常响应 · HTTP $code"
+                    } finally {
+                        connection.disconnect()
+                    }
+                }.getOrElse { "未检测到监听服务：${it.javaClass.simpleName}" }
             }
             delay(3000)
         }

@@ -149,11 +149,11 @@ class HookRuntime(
     fun runtimeSnapshot(): JSONObject {
         val hooks = org.json.JSONArray()
         val entries = installed.entries.toList().sortedBy { it.key }
-        entries.forEach { (key, value) ->
+        entries.take(MAX_STATUS_HOOKS).forEach { (key, value) ->
             hooks.put(JSONObject()
                 .put("ruleId", value.ruleId)
-                .put("signature", value.signature.take(512))
-                .put("fingerprint", value.fingerprint.take(512))
+                .put("signature", value.signature.take(256))
+                .put("fingerprint", value.fingerprint.take(256))
                 .put("sampleEvery", value.sampleEvery)
                 .put("invocations", counters[key]?.get() ?: 0L)
                 .put("state", "installed"))
@@ -161,6 +161,7 @@ class HookRuntime(
         return JSONObject()
             .put("state", "active")
             .put("activeHookCount", entries.size)
+            .put("inventoryTruncated", entries.size > MAX_STATUS_HOOKS)
             .put("hooks", hooks)
             .put("capturedAtMs", System.currentTimeMillis())
     }
@@ -178,6 +179,10 @@ class HookRuntime(
         if (method.name != rule.methodName) return false
         if (rule.parameterTypes.isEmpty()) return true
         return method.parameterTypes.map { it.name } == rule.parameterTypes
+    }
+
+    private companion object {
+        const val MAX_STATUS_HOOKS = 64
     }
 
     private fun stableHookId(ruleId: String, signature: String): String {

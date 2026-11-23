@@ -124,9 +124,18 @@ class ConversationRepository(context: Context) : SQLiteOpenHelper(
         upstreamParentMessageId: String?
     ): Boolean {
         if (upstreamConversationId == null && upstreamParentMessageId == null) return false
-        val current = get(callerId, id) ?: return false
-        if ((upstreamConversationId == null || upstreamConversationId == current.upstreamConversationId) &&
-            (upstreamParentMessageId == null || upstreamParentMessageId == current.upstreamParentMessageId)
+        val existing = readableDatabase.query(
+            "conversations",
+            arrayOf("upstream_conversation_id", "upstream_parent_message_id"),
+            "id=? AND caller_hash=?",
+            arrayOf(id, callerHash(callerId)),
+            null, null, null, "1"
+        ).use { cursor ->
+            if (!cursor.moveToFirst()) return false
+            cursor.getString(0) to cursor.getString(1)
+        }
+        if ((upstreamConversationId == null || upstreamConversationId == existing.first) &&
+            (upstreamParentMessageId == null || upstreamParentMessageId == existing.second)
         ) return false
         val values = ContentValues()
         if (upstreamConversationId != null) values.put("upstream_conversation_id", upstreamConversationId)

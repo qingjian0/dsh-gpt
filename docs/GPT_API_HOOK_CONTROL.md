@@ -63,7 +63,7 @@ The response acknowledges persistence of the requested state. Target-process app
 
 ### Automatic startup discovery
 
-When the ChatGPT target process reaches its Application context, the module starts one bounded metadata-only DEX scan in a background worker. The current budget is 16 DEX files, 2,500 class names, 1.5 seconds, 100 member records and a 64 KiB response. It does not initialize or invoke discovered app classes. The result is stored separately from the event report.
+When the ChatGPT target process reaches its Application context, the module starts one bounded metadata-only DEX scan in a background worker. Class-load observation is enabled by default when the config omits `observeClassLoads`; it records only deduplicated `com.openai.*` class names up to a fixed event budget. Set `observeClassLoads: false` to disable it. The current budget is 16 DEX files, 2,500 class names, 1.5 seconds, 100 member records and a 64 KiB response. It does not initialize or invoke discovered app classes. The result is stored separately from the event report.
 
 ```http
 GET /v1/hook/startup-discovery

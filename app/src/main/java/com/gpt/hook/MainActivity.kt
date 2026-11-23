@@ -366,11 +366,11 @@ private fun ConversationsScreen() {
             repository.get(caller, id)
         }
         if (id != null && selectedConversation == null) selectedId = null
-        status = "共 \${snapshot.size} 个本地会话"
+        status = "共 ${snapshot.size} 个本地会话"
     }
 
     LaunchedEffect(Unit) {
-        runCatching { reload() }.onFailure { status = "读取失败：\${it.message ?: "unknown"}" }
+        runCatching { reload() }.onFailure { status = "读取失败：${it.message ?: "unknown"}" }
     }
 
     PageColumn {
@@ -381,7 +381,7 @@ private fun ConversationsScreen() {
                     Text(status, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     TextButton(onClick = {
                         scope.launch {
-                            runCatching { reload() }.onFailure { status = "刷新失败：\${it.message ?: "unknown"}" }
+                            runCatching { reload() }.onFailure { status = "刷新失败：${it.message ?: "unknown"}" }
                         }
                     }) { Text("刷新") }
                 }
@@ -395,7 +395,7 @@ private fun ConversationsScreen() {
                                 selectedId = created.id
                                 selectedConversation = created
                                 status = "已创建新会话"
-                            }.onFailure { status = "创建失败：\${it.message ?: "unknown"}" }
+                            }.onFailure { status = "创建失败：${it.message ?: "unknown"}" }
                         }
                     },
                     modifier = Modifier.fillMaxWidth()
@@ -408,15 +408,15 @@ private fun ConversationsScreen() {
             } else {
                 items.forEach { item ->
                     SectionCard(item.title) {
-                        Text("模型：\${item.model} · 消息：\${item.messages.length()}")
-                        Text("更新时间：\${java.text.DateFormat.getDateTimeInstance().format(java.util.Date(item.updatedAt))}",
+                        Text("模型：${item.model} · 消息：${item.messages.length()}")
+                        Text("更新时间：${java.text.DateFormat.getDateTimeInstance().format(java.util.Date(item.updatedAt))}",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
                             TextButton(onClick = {
                                 selectedId = item.id
                                 scope.launch {
-                                    runCatching { reload() }.onFailure { status = "打开失败：\${it.message ?: "unknown"}" }
+                                    runCatching { reload() }.onFailure { status = "打开失败：${it.message ?: "unknown"}" }
                                 }
                             }) { Text("打开对话") }
                             TextButton(onClick = {
@@ -424,7 +424,7 @@ private fun ConversationsScreen() {
                                     runCatching {
                                         withContext(Dispatchers.IO) { repository.delete(caller, item.id) }
                                         reload()
-                                    }.onFailure { status = "删除失败：\${it.message ?: "unknown"}" }
+                                    }.onFailure { status = "删除失败：${it.message ?: "unknown"}" }
                                 }
                             }) { Text("删除") }
                         }
@@ -435,9 +435,9 @@ private fun ConversationsScreen() {
             val conversation = selectedConversation!!
             SectionCard("当前会话") {
                 Text(conversation.title, fontWeight = FontWeight.SemiBold)
-                Text("会话 ID：\${conversation.id}", style = MaterialTheme.typography.bodySmall,
+                Text("会话 ID：${conversation.id}", style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("上游会话：\${if (conversation.upstreamConversationId.isNullOrBlank()) "尚未建立" else "已建立并可续接"}",
+                Text("上游会话：${if (conversation.upstreamConversationId.isNullOrBlank()) "尚未建立" else "已建立并可续接"}",
                     style = MaterialTheme.typography.bodySmall)
                 TextButton(onClick = {
                     selectedId = null
@@ -490,7 +490,7 @@ private fun ConversationsScreen() {
                                     val config = RelayConfig.load(context)
                                     require(config.enabled) { "请先在 API 页面启动本地网关。" }
                                     require(config.ready) { "请先配置 ChatGPT 上游凭据。" }
-                                    val connection = URL("http://127.0.0.1:\${config.port}/v1/chat/completions")
+                                    val connection = URL("http://127.0.0.1:${config.port}/v1/chat/completions")
                                         .openConnection() as HttpURLConnection
                                     try {
                                         connection.requestMethod = "POST"
@@ -498,7 +498,7 @@ private fun ConversationsScreen() {
                                         connection.readTimeout = 120000
                                         connection.doOutput = true
                                         connection.setRequestProperty("Content-Type", "application/json")
-                                        connection.setRequestProperty("Authorization", "Bearer \${config.apiKey}")
+                                        connection.setRequestProperty("Authorization", "Bearer ${config.apiKey}")
                                         connection.setRequestProperty("X-DSH-Client-Id", caller)
                                         connection.setRequestProperty("X-DSH-Conversation-Id", target.id)
                                         val payload = org.json.JSONObject()
@@ -531,7 +531,7 @@ private fun ConversationsScreen() {
                                 reload()
                                 status = "回复完成"
                             }.onFailure {
-                                status = "发送失败：\${it.message ?: it.javaClass.simpleName}"
+                                status = "发送失败：${it.message ?: it.javaClass.simpleName}"
                             }
                             sending = false
                         }

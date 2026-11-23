@@ -28,7 +28,8 @@
 - Provider registry, capability negotiation, request history, and conversation reuse are separate follow-up integrations.
 
 ### Conversations
-- Conversation list, local creation, detail retrieval, deletion, and upstream continuation through the caller-scoped SQLite repository.
+- Compose tab: conversation list, local creation, detail view, and deletion through the caller-scoped SQLite repository.
+- Gateway API: upstream continuation using persisted provider conversation/message cursors.
 - Search, paginated history, and parent/child Agent navigation remain follow-up work.
 
 ### Hook

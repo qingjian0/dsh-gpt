@@ -561,13 +561,19 @@ private fun HookScreen() {
     }
     var reportText by rememberSaveable { mutableStateOf("尚无观察报告。") }
     var status by rememberSaveable { mutableStateOf(if (service == null) "LSPosed 服务未连接" else "LSPosed 服务已连接") }
+    var discoveryPrefix by rememberSaveable { mutableStateOf("com.openai.") }
+    var discoveryId by rememberSaveable { mutableStateOf("") }
+    var discoveryTaskText by rememberSaveable { mutableStateOf("尚未扫描") }
+    var discoveryResultText by rememberSaveable { mutableStateOf("") }
+    var discoveryActive by rememberSaveable { mutableStateOf(false) }
+    var discoveryNextCursor by remember { mutableStateOf<Int?>(null) }
     val scope = rememberCoroutineScope()
+    val providerUri = remember { Uri.parse("content://" + ObservationProvider.AUTHORITY) }
 
     suspend fun readReport() {
         val result = withContext(Dispatchers.IO) {
             runCatching {
-                context.contentResolver.call(Uri.parse("content://" + ObservationProvider.AUTHORITY),
-                    ObservationProvider.METHOD_READ, null, null)
+                context.contentResolver.call(providerUri, ObservationProvider.METHOD_READ, null, null)
             }.getOrNull()
         }
         reportText = result?.getString(ObservationProvider.KEY_REPORT) ?: "读取失败或尚无报告。"
@@ -575,13 +581,156 @@ private fun HookScreen() {
         status = if (updated == 0L) "尚无观察报告" else "报告更新时间（epoch ms）：" + updated
     }
 
+    suspend fun submitDiscovery(cursor: Int = 0) {
+        require(discoveryPrefix.startsWith("com.openai.") && discoveryPrefix.length <= 180) {
+            "扫描范围必须限定在 com.openai.*"
+        }
+        val requestId = java.util.UUID.randomUUID().toString()
+        val request = org.json.JSONObject()
+            .put("requestId", requestId)
+            .put("prefix", discoveryPrefix)
+            .put("limit", 100)
+            .put("cursor", cursor)
+        val extras = android.os.Bundle().apply {
+            putString(ObservationProvider.KEY_DISCOVERY_REQUEST, request.toString())
+        }
+        val response = withContext(Dispatchers.IO) {
+            context.contentResolver.call(providerUri, ObservationProvider.METHOD_HOST_DISCOVER, null, extras)
+        }
+        require(response?.getBoolean(ObservationProvider.KEY_ACCEPTED) == true) {
+            "扫描请求未被接受；请检查是否已有任务正在运行。"
+        }
+        discoveryId = requestId
+        discoveryTaskText = response.getString(ObservationProvider.KEY_DISCOVERY_TASK) ?: "已提交"
+        discoveryResultText = ""
+        discoveryNextCursor = null
+        discoveryActive = true
+    }
+
+    LaunchedEffect(discoveryId) {
+        val requestId = discoveryId
+        if (requestId.isBlank()) return@LaunchedEffect
+        while (true) {
+            val extras = android.os.Bundle().apply {
+                putString(ObservationProvider.KEY_DISCOVERY_ID, requestId)
+            }
+            val response = withContext(Dispatchers.IO) {
+                runCatching {
+                    context.contentResolver.call(
+                        providerUri, ObservationProvider.METHOD_HOST_DISCOVERY_RESULT, null, extras
+                    )
+                }.getOrNull()
+            }
+            val taskRaw = response?.getString(ObservationProvider.KEY_DISCOVERY_TASK)
+            val resultRaw = response?.getString(ObservationProvider.KEY_DISCOVERY_RESULT)
+            if (!taskRaw.isNullOrBlank()) {
+                val task = runCatching { org.json.JSONObject(taskRaw) }.getOrNull()
+                val taskStatus = task?.optString("status").orEmpty()
+                discoveryTaskText = if (task == null) "任务状态解析失败" else
+                    "状态：${taskStatus} · 尝试次数：${task.optInt("attempt")}"
+                if (!resultRaw.isNullOrBlank()) {
+                    val envelope = runCatching { org.json.JSONObject(resultRaw) }.getOrNull()
+                    val result = envelope?.optJSONObject("result")
+                    if (result != null) {
+                        discoveryResultText = result.toString(2)
+                        val next = result.opt("nextCursor")
+                        discoveryNextCursor = if (next is Number) next.toInt() else null
+                    } else {
+                        discoveryResultText = resultRaw
+                    }
+                }
+                if (taskStatus in setOf("SUCCEEDED", "FAILED", "EXPIRED", "CANCELLED")) {
+                    discoveryActive = false
+                    break
+                }
+            }
+            delay(1000)
+        }
+    }
+
     PageColumn {
-        PageHeading("Hook Runtime", "查看配置、运行状态与元数据观察。")
+        PageHeading("Hook Runtime", "查看配置、扫描候选方法与运行时元数据观察。")
         SectionCard("运行状态") {
             StatusLine("LSPosed 服务", if (service == null) "未连接" else service.frameworkName + " / API " + service.apiVersion,
                 service != null)
             StatusLine("目标包", "com.openai.chatgpt")
             Text(status, style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        SectionCard("类与方法扫描", "在目标进程中执行有界 DEX 元数据扫描；只读取类、方法和字段签名，不调用目标方法。") {
+            OutlinedTextField(
+                value = discoveryPrefix,
+                onValueChange = { discoveryPrefix = it.take(180) },
+                label = { Text("包名前缀") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                enabled = !discoveryActive
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = {
+                        scope.launch {
+                            runCatching { submitDiscovery(0) }
+                                .onFailure { discoveryTaskText = "提交失败：${it.message ?: it.javaClass.simpleName}" }
+                        }
+                    },
+                    enabled = !discoveryActive,
+                    modifier = Modifier.weight(1f)
+                ) { Text(if (discoveryActive) "扫描中…" else "开始扫描") }
+                OutlinedButton(
+                    onClick = {
+                        scope.launch {
+                            runCatching {
+                                val extras = android.os.Bundle().apply {
+                                    putString(ObservationProvider.KEY_DISCOVERY_ID, discoveryId)
+                                }
+                                withContext(Dispatchers.IO) {
+                                    context.contentResolver.call(
+                                        providerUri, ObservationProvider.METHOD_HOST_DISCOVERY_CANCEL, null, extras
+                                    )
+                                }
+                                discoveryTaskText = "已请求取消"
+                            }.onFailure { discoveryTaskText = "取消失败：${it.message ?: it.javaClass.simpleName}" }
+                        }
+                    },
+                    enabled = discoveryActive && discoveryId.isNotBlank(),
+                    modifier = Modifier.weight(1f)
+                ) { Text("取消") }
+            }
+            Text(discoveryTaskText, style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (discoveryResultText.isNotBlank()) {
+                Text(
+                    discoveryResultText.take(12000),
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(onClick = {
+                        context.getSystemService(android.content.ClipboardManager::class.java)
+                            ?.setPrimaryClip(android.content.ClipData.newPlainText("DSH discovery result", discoveryResultText))
+                        discoveryTaskText = "扫描结果已复制"
+                    }, modifier = Modifier.weight(1f)) { Text("复制结果") }
+                    OutlinedButton(
+                        onClick = {
+                            val cursor = discoveryNextCursor
+                            if (cursor != null) scope.launch {
+                                runCatching { submitDiscovery(cursor) }
+                                    .onFailure { discoveryTaskText = "下一页失败：${it.message ?: it.javaClass.simpleName}" }
+                            }
+                        },
+                        enabled = discoveryNextCursor != null && !discoveryActive,
+                        modifier = Modifier.weight(1f)
+                    ) { Text("下一页") }
+                }
+                if (discoveryResultText.length > 12000) {
+                    Text("界面仅显示前 12,000 个字符；复制按钮可获取完整结果。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            Text("发现的候选方法不等于已安装 Hook；请先审查候选证据，再通过规则配置提交。",
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         SectionCard("Hook 规则配置", "提交前先进行结构校验；规则是否安装成功仍以目标进程结果为准。") {

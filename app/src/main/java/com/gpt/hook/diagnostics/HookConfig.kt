@@ -8,7 +8,9 @@ data class HookRule(
     val methodName: String,
     val parameterTypes: List<String>,
     val enabled: Boolean,
-    val sampleEvery: Int
+    val sampleEvery: Int,
+    /** Exact JVM descriptor, e.g. (Ljava/lang/String;)Z. Null preserves legacy matching. */
+    val methodDescriptor: String? = null
 )
 
 data class HookConfig(
@@ -20,6 +22,7 @@ data class HookConfig(
 
 object HookConfigParser {
     private const val MAX_RULES = 64
+    private const val MAX_PARAMETERS = 32
     private const val TARGET = "com.openai.chatgpt"
 
     fun parse(source: String): HookConfig {
@@ -43,6 +46,7 @@ object HookConfigParser {
             require(className.startsWith("com.openai.") && className.length <= 240) { "Class must be in com.openai.*" }
             require(methodName.matches(Regex("[A-Za-z_$][A-Za-z0-9_$]{0,127}"))) { "Invalid method name" }
             val params = item.optJSONArray("parameterTypes")
+            require(params == null || params.length() <= MAX_PARAMETERS) { "Too many parameter types" }
             val parameterTypes = buildList {
                 if (params != null) for (p in 0 until params.length()) {
                     val type = params.optString(p)
@@ -50,9 +54,22 @@ object HookConfigParser {
                     add(type)
                 }
             }
+            val descriptor = when (val raw = item.opt("methodDescriptor")) {
+                null, JSONObject.NULL -> null
+                is String -> raw.also {
+                    require(JvmDescriptors.isValidMethodDescriptor(it)) { "Invalid methodDescriptor at index $i" }
+                }
+                else -> throw IllegalArgumentException("methodDescriptor must be a string")
+            }
+            require(descriptor == null || parameterTypes.isEmpty()) {
+                "Use methodDescriptor or parameterTypes, not both"
+            }
             val sampleEvery = item.optInt("sampleEvery", 1)
             require(sampleEvery in 1..10_000) { "sampleEvery must be between 1 and 10000" }
-            rules += HookRule(id, className, methodName, parameterTypes, item.optBoolean("enabled", true), sampleEvery)
+            rules += HookRule(
+                id, className, methodName, parameterTypes,
+                item.optBoolean("enabled", true), sampleEvery, descriptor
+            )
         }
         return HookConfig(version, target, rules, root.optBoolean("observeClassLoads", true))
     }

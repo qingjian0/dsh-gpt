@@ -85,7 +85,8 @@ class HookRuntime(
                 val signature = method.toGenericString()
                 val key = "${rule.id}:$signature"
                 activeKeys += key
-                val fingerprint = "${rule.className}|${rule.methodName}|${rule.parameterTypes.joinToString(",")}|sample=${rule.sampleEvery}"
+                val fingerprint = "${rule.className}|${rule.methodName}|${rule.parameterTypes.joinToString(",")}|" +
+                    "descriptor=${rule.methodDescriptor.orEmpty()}|sample=${rule.sampleEvery}"
                 val existing = installed[key]
                 if (existing?.fingerprint == fingerprint) {
                     retained++
@@ -112,7 +113,6 @@ class HookRuntime(
                                 }
                             }
                         }
-                    // libxposed setId atomically replaces an existing hook with this ID.
                     installed[key] = Installed(handle, fingerprint, rule.id, signature, rule.sampleEvery)
                     if (existing == null) added++ else replaced++
                 } catch (t: Throwable) {
@@ -126,7 +126,6 @@ class HookRuntime(
             }
         }
 
-        // Retain hooks for failed replacements when their stable key is still requested.
         installed.entries.toList().forEach { (key, value) ->
             if (key !in activeKeys) {
                 runCatching { value.handle.unhook() }
@@ -142,10 +141,7 @@ class HookRuntime(
     fun discover(prefix: String, exactClassName: String? = null, limit: Int = 100, cursor: Int = 0): JSONObject =
         discoveryEngine.discover(prefix, exactClassName, limit, cursor)
 
-    /**
-     * A truthful inventory of Hook handles currently retained by this Runtime.
-     * This is distinct from configured rules and from discovery candidates.
-     */
+    /** A truthful inventory of Hook handles currently retained by this Runtime. */
     fun runtimeSnapshot(): JSONObject {
         val hooks = org.json.JSONArray()
         val entries = installed.entries.toList().sortedBy { it.key }
@@ -177,6 +173,7 @@ class HookRuntime(
 
     private fun methodMatches(method: Method, rule: HookRule): Boolean {
         if (method.name != rule.methodName) return false
+        rule.methodDescriptor?.let { return JvmDescriptors.method(method) == it }
         if (rule.parameterTypes.isEmpty()) return true
         return method.parameterTypes.map { it.name } == rule.parameterTypes
     }

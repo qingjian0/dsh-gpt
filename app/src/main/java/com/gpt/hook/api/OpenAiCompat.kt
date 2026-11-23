@@ -3,6 +3,7 @@ package com.gpt.hook.api
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
+import java.util.TimeZone
 
 /** OpenAI /v1 协议 ↔ ChatGPT backend conversation 协议 转换。 */
 object OpenAiCompat {
@@ -43,7 +44,7 @@ object OpenAiCompat {
             .put("model", openAi.optString("model", "auto").ifBlank { "auto" })
             .put("conversation_mode", JSONObject().put("kind", "primary_assistant"))
             .put("parent_message_id", upstreamParentMessageId?.takeIf { it.isNotBlank() } ?: UUID.randomUUID().toString())
-            .put("timezone_offset_min", -480)
+            .put("timezone_offset_min", TimeZone.getDefault().getOffset(System.currentTimeMillis()) / 60000)
             .put("history_and_training_disabled", false)
         if (!upstreamConversationId.isNullOrBlank()) body.put("conversation_id", upstreamConversationId)
         val msg = JSONObject()

@@ -32,7 +32,7 @@ object OpenAiCompat {
                 }
             }
         }
-        val prompt = if (!upstreamConversationId.isNullOrBlank()) {
+        val prompt = if (!upstreamConversationId.isNullOrBlank() || transcript.size <= 1) {
             (systemInstructions.map { "System: $it" } + lastUser).joinToString("\n\n")
         } else {
             (systemInstructions.map { "System: $it" } + transcript).joinToString("\n\n")

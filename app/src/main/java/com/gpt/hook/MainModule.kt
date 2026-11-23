@@ -74,6 +74,7 @@ class MainModule : XposedModule() {
                     updateClassLoadWatcher(config.observeClassLoads)
                     val report = hookRuntime.applyWithReport(config)
                     logApplyReport(config.rules.size, report.added, report.replaced, report.retained, report.removed, report.failed)
+                    scheduleReportPublish()
                 } catch (t: Throwable) {
                     ModuleLogger.w("configuration rejected; reason=${t.javaClass.simpleName}")
                 }
@@ -137,7 +138,8 @@ class MainModule : XposedModule() {
                 if (!enabled) {
                     updateClassLoadWatcher(false)
                     val removed = runtime.clear()
-                    ModuleLogger.i("DSH disabled Hook runtime; removed=$removed; revision=$version")
+                    ModuleLogger.i("GPT API disabled Hook runtime; removed=$removed; revision=$version")
+                    scheduleReportPublish()
                     return@execute
                 }
                 try {
@@ -145,6 +147,7 @@ class MainModule : XposedModule() {
                     updateClassLoadWatcher(config.observeClassLoads)
                     val report = runtime.applyWithReport(config)
                     logApplyReport(config.rules.size, report.added, report.replaced, report.retained, report.removed, report.failed, version)
+                    scheduleReportPublish()
                 } catch (t: Throwable) {
                     ModuleLogger.w("DSH config rejected; revision=$version; reason=${t.javaClass.simpleName}")
                 }
@@ -263,7 +266,14 @@ class MainModule : XposedModule() {
     }
 
     private fun publishReport() {
-        val json = eventBuffer.toJson()
+        val report = JSONObject(eventBuffer.toJson())
+            .put("runtime", activeRuntime?.runtimeSnapshot() ?: JSONObject()
+                .put("state", "unavailable")
+                .put("activeHookCount", 0)
+                .put("hooks", org.json.JSONArray()))
+            .put("classLoadWatcherEnabled", classLoadWatcher.isEnabled())
+            .put("generatedAtMs", System.currentTimeMillis())
+        val json = report.toString(2)
         ModuleLogger.i("observation-report: $json")
         val ctx = targetContextForIpc ?: return
         try {

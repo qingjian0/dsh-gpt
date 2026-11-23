@@ -30,6 +30,28 @@ class OpenAiCompatConversationTest {
     }
 
     @Test
+    fun firstTurnCarriesPriorUserAndAssistantContext() {
+        val request = JSONObject()
+            .put(
+                "messages",
+                JSONArray()
+                    .put(JSONObject().put("role", "system").put("content", "Be concise"))
+                    .put(JSONObject().put("role", "user").put("content", "first question"))
+                    .put(JSONObject().put("role", "assistant").put("content", "first answer"))
+                    .put(JSONObject().put("role", "user").put("content", "follow-up"))
+            )
+
+        val payload = OpenAiCompat.toConversation(request)
+        val prompt = payload.getJSONArray("messages")
+            .getJSONObject(0).getJSONObject("content").getJSONArray("parts").getString(0)
+
+        assertTrue(prompt.contains("System: Be concise"))
+        assertTrue(prompt.contains("User: first question"))
+        assertTrue(prompt.contains("Assistant: first answer"))
+        assertTrue(prompt.endsWith("User: follow-up"))
+    }
+
+    @Test
     fun firstTurnDoesNotInventAnUpstreamConversationId() {
         val request = JSONObject()
             .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", "hello")))

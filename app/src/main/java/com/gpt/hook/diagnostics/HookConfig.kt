@@ -32,7 +32,7 @@ internal object HookActionPolicy {
         "cronet", "okhttp", "retrofit"
     )
     private val sensitiveMethods = Regex(
-        "(?i)(authenticate|authorize|isAuthenticated|isAuthorized|verify|validate|checkAccess|hasPermission|isEntitled|sign|encrypt|decrypt|refreshToken)"
+        "(?i)(authenticate|authorize|isAuthenticated|isAuthorized|isLoggedIn|isSessionValid|isValid|verify|validate|checkAccess|hasAccess|canAccess|isAllowed|checkPermission|hasPermission|isEntitled|sign|encrypt|decrypt|refreshToken)"
     )
 
     fun allowsBehaviorChange(className: String, methodName: String): Boolean {

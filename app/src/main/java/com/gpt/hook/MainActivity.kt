@@ -350,60 +350,195 @@ private fun ConversationsScreen() {
     val context = LocalContext.current
     val repository = remember { (context.applicationContext as DshApplication).conversationRepository }
     val scope = rememberCoroutineScope()
-    var items by remember { mutableStateOf(emptyList<com.gpt.hook.api.ConversationRepository.Conversation>()) }
-    var status by rememberSaveable { mutableStateOf("正在加载") }
     val caller = "dsh-local-control-ui-profile-v1"
+    var items by remember { mutableStateOf(emptyList<com.gpt.hook.api.ConversationRepository.Conversation>()) }
+    var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedConversation by remember { mutableStateOf<com.gpt.hook.api.ConversationRepository.Conversation?>(null) }
+    var draft by rememberSaveable { mutableStateOf("") }
+    var status by rememberSaveable { mutableStateOf("正在加载") }
+    var sending by rememberSaveable { mutableStateOf(false) }
 
     suspend fun reload() {
-        val result = withContext(Dispatchers.IO) { repository.list(caller) }
-        items = result
-        status = "共 ${result.size} 个本地会话"
+        val snapshot = withContext(Dispatchers.IO) { repository.list(caller) }
+        items = snapshot
+        val id = selectedId
+        selectedConversation = if (id == null) null else withContext(Dispatchers.IO) {
+            repository.get(caller, id)
+        }
+        if (id != null && selectedConversation == null) selectedId = null
+        status = "共 \${snapshot.size} 个本地会话"
     }
 
     LaunchedEffect(Unit) {
-        runCatching { reload() }.onFailure { status = "读取失败：${it.message ?: "unknown"}" }
+        runCatching { reload() }.onFailure { status = "读取失败：\${it.message ?: "unknown"}" }
     }
 
     PageColumn {
-        PageHeading("对话", "本地持久化会话；与 API 调用方按身份隔离。")
-        SectionCard("会话中心") {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(status, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                TextButton(onClick = { scope.launch { runCatching { reload() }.onFailure { status = "刷新失败" } } }) { Text("刷新") }
+        PageHeading("对话", if (selectedConversation == null) "管理本地会话，选择会话后可直接通过本地 API 网关对话。" else "当前会话通过本地网关连接已配置的 ChatGPT 上游。")
+        if (selectedConversation == null) {
+            SectionCard("会话中心") {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(status, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    TextButton(onClick = {
+                        scope.launch {
+                            runCatching { reload() }.onFailure { status = "刷新失败：\${it.message ?: "unknown"}" }
+                        }
+                    }) { Text("刷新") }
+                }
+                Button(
+                    onClick = {
+                        scope.launch {
+                            runCatching {
+                                val created = withContext(Dispatchers.IO) {
+                                    repository.create(caller, "新对话", "auto")
+                                }
+                                selectedId = created.id
+                                selectedConversation = created
+                                status = "已创建新会话"
+                            }.onFailure { status = "创建失败：\${it.message ?: "unknown"}" }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("新建对话") }
             }
-            Button(
-                onClick = {
-                    scope.launch {
-                        runCatching {
-                            withContext(Dispatchers.IO) { repository.create(caller, "新对话", "auto") }
-                            reload()
-                        }.onFailure { status = "创建失败：${it.message ?: "unknown"}" }
-                    }
-                },
-                modifier = Modifier.fillMaxWidth()
-            ) { Text("新建对话") }
-        }
-        if (items.isEmpty()) {
-            SectionCard("暂无会话") {
-                Text("创建后会保存在本机数据库，应用重启后仍可读取。")
-            }
-        } else {
-            items.forEach { item ->
-                SectionCard(item.title) {
-                    Text("ID：${item.id}", style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("模型：${item.model} · 消息：${item.messages.length()}")
-                    Text("更新时间：${java.text.DateFormat.getDateTimeInstance().format(java.util.Date(item.updatedAt))}",
-                        style = MaterialTheme.typography.bodySmall)
-                    Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
-                        TextButton(onClick = {
-                            scope.launch {
-                                withContext(Dispatchers.IO) { repository.delete(caller, item.id) }
-                                reload()
-                            }
-                        }) { Text("删除") }
+            if (items.isEmpty()) {
+                SectionCard("暂无会话") {
+                    Text("创建后会保存在本机数据库，应用重启后仍可读取。")
+                }
+            } else {
+                items.forEach { item ->
+                    SectionCard(item.title) {
+                        Text("模型：\${item.model} · 消息：\${item.messages.length()}")
+                        Text("更新时间：\${java.text.DateFormat.getDateTimeInstance().format(java.util.Date(item.updatedAt))}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                            TextButton(onClick = {
+                                selectedId = item.id
+                                scope.launch {
+                                    runCatching { reload() }.onFailure { status = "打开失败：\${it.message ?: "unknown"}" }
+                                }
+                            }) { Text("打开对话") }
+                            TextButton(onClick = {
+                                scope.launch {
+                                    runCatching {
+                                        withContext(Dispatchers.IO) { repository.delete(caller, item.id) }
+                                        reload()
+                                    }.onFailure { status = "删除失败：\${it.message ?: "unknown"}" }
+                                }
+                            }) { Text("删除") }
+                        }
                     }
                 }
+            }
+        } else {
+            val conversation = selectedConversation!!
+            SectionCard("当前会话") {
+                Text(conversation.title, fontWeight = FontWeight.SemiBold)
+                Text("会话 ID：\${conversation.id}", style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("上游会话：\${if (conversation.upstreamConversationId.isNullOrBlank()) "尚未建立" else "已建立并可续接"}",
+                    style = MaterialTheme.typography.bodySmall)
+                TextButton(onClick = {
+                    selectedId = null
+                    selectedConversation = null
+                    draft = ""
+                }) { Text("返回会话列表") }
+            }
+            SectionCard("消息记录") {
+                if (conversation.messages.length() == 0) {
+                    Text("发送第一条消息，开始此会话。", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
+                    for (index in 0 until conversation.messages.length()) {
+                        val message = conversation.messages.optJSONObject(index) ?: continue
+                        val role = message.optString("role", "unknown")
+                        val content = message.optString("content", "")
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(if (role == "assistant") "GPT" else if (role == "user") "你" else role,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary)
+                            Text(content, style = MaterialTheme.typography.bodyMedium)
+                        }
+                        if (index < conversation.messages.length() - 1) {
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        }
+                    }
+                }
+                Text(status, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            SectionCard("发送消息") {
+                OutlinedTextField(
+                    value = draft,
+                    onValueChange = { draft = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("发送消息给 GPT…") },
+                    minLines = 2,
+                    maxLines = 6,
+                    enabled = !sending
+                )
+                Button(
+                    onClick = {
+                        val prompt = draft.trim()
+                        val target = selectedConversation
+                        if (prompt.isBlank() || target == null || sending) return@Button
+                        sending = true
+                        status = "正在请求上游…"
+                        scope.launch {
+                            runCatching {
+                                withContext(Dispatchers.IO) {
+                                    val config = RelayConfig.load(context)
+                                    require(config.enabled) { "请先在 API 页面启动本地网关。" }
+                                    require(config.ready) { "请先配置 ChatGPT 上游凭据。" }
+                                    val connection = URL("http://127.0.0.1:\${config.port}/v1/chat/completions")
+                                        .openConnection() as HttpURLConnection
+                                    try {
+                                        connection.requestMethod = "POST"
+                                        connection.connectTimeout = 5000
+                                        connection.readTimeout = 120000
+                                        connection.doOutput = true
+                                        connection.setRequestProperty("Content-Type", "application/json")
+                                        connection.setRequestProperty("Authorization", "Bearer \${config.apiKey}")
+                                        connection.setRequestProperty("X-DSH-Client-Id", caller)
+                                        connection.setRequestProperty("X-DSH-Conversation-Id", target.id)
+                                        val payload = org.json.JSONObject()
+                                            .put("model", target.model)
+                                            .put("stream", false)
+                                            .put("messages", org.json.JSONArray().put(
+                                                org.json.JSONObject().put("role", "user").put("content", prompt)
+                                            ))
+                                        connection.outputStream.use {
+                                            it.write(payload.toString().toByteArray(Charsets.UTF_8))
+                                        }
+                                        val code = connection.responseCode
+                                        val response = (if (code in 200..299) connection.inputStream else connection.errorStream)
+                                            ?.bufferedReader()?.use { it.readText() }.orEmpty()
+                                        require(code in 200..299) {
+                                            val upstreamMessage = runCatching {
+                                                org.json.JSONObject(response).optJSONObject("error")?.optString("message")
+                                            }.getOrNull().orEmpty()
+                                            "本地 API 返回 HTTP $code：" + upstreamMessage.ifBlank { response.take(240) }
+                                        }
+                                        val root = org.json.JSONObject(response)
+                                        val answer = root.optJSONArray("choices")?.optJSONObject(0)
+                                            ?.optJSONObject("message")?.optString("content").orEmpty()
+                                        require(answer.isNotBlank()) { "上游没有返回可显示的回复。" }
+                                    } finally {
+                                        connection.disconnect()
+                                    }
+                                }
+                                draft = ""
+                                reload()
+                                status = "回复完成"
+                            }.onFailure {
+                                status = "发送失败：\${it.message ?: it.javaClass.simpleName}"
+                            }
+                            sending = false
+                        }
+                    },
+                    enabled = draft.isNotBlank() && !sending,
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text(if (sending) "正在发送…" else "发送") }
             }
         }
     }

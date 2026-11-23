@@ -323,20 +323,64 @@ private fun ApiScreen() {
 
 @Composable
 private fun ConversationsScreen() {
+    val context = LocalContext.current
+    val repository = remember { (context.applicationContext as DshApplication).conversationRepository }
+    val scope = rememberCoroutineScope()
+    var items by remember { mutableStateOf(emptyList<com.gpt.hook.api.ConversationRepository.Conversation>()) }
+    var status by rememberSaveable { mutableStateOf("正在加载") }
+    val caller = "dsh-local-control-ui-profile-v1"
+
+    suspend fun reload() {
+        val result = withContext(Dispatchers.IO) { repository.list(caller) }
+        items = result
+        status = "共 ${result.size} 个本地会话"
+    }
+
+    LaunchedEffect(Unit) {
+        runCatching { reload() }.onFailure { status = "读取失败：${it.message ?: "unknown"}" }
+    }
+
     PageColumn {
-        PageHeading("对话", "统一管理主对话、子对话和 API 会话。")
+        PageHeading("对话", "本地持久化会话；与 API 调用方按身份隔离。")
         SectionCard("会话中心") {
-            Text("当前 UI 分支尚未接入持久化会话列表。")
-            Text("后续接入会话存储后，这里将展示标题、Conversation ID、最后活动时间、消息数和所属智能体。",
-                color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-            OutlinedButton(onClick = {}, enabled = false, modifier = Modifier.fillMaxWidth()) {
-                Text("新建对话 · 会话引擎待接入")
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(status, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                TextButton(onClick = { scope.launch { runCatching { reload() }.onFailure { status = "刷新失败" } } }) { Text("刷新") }
             }
+            Button(
+                onClick = {
+                    scope.launch {
+                        runCatching {
+                            withContext(Dispatchers.IO) { repository.create(caller, "新对话", "auto") }
+                            reload()
+                        }.onFailure { status = "创建失败：${it.message ?: "unknown"}" }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("新建对话") }
         }
-        SectionCard("计划支持") {
-            StatusLine("主对话 / 子对话", "待接入")
-            StatusLine("搜索与筛选", "待接入")
-            StatusLine("继续会话与消息详情", "待接入")
+        if (items.isEmpty()) {
+            SectionCard("暂无会话") {
+                Text("创建后会保存在本机数据库，应用重启后仍可读取。")
+            }
+        } else {
+            items.forEach { item ->
+                SectionCard(item.title) {
+                    Text("ID：${item.id}", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("模型：${item.model} · 消息：${item.messages.length()}")
+                    Text("更新时间：${java.text.DateFormat.getDateTimeInstance().format(java.util.Date(item.updatedAt))}",
+                        style = MaterialTheme.typography.bodySmall)
+                    Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                        TextButton(onClick = {
+                            scope.launch {
+                                withContext(Dispatchers.IO) { repository.delete(caller, item.id) }
+                                reload()
+                            }
+                        }) { Text("删除") }
+                    }
+                }
+            }
         }
     }
 }

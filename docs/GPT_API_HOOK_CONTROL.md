@@ -17,7 +17,7 @@ The local GPT API controls the live Hook Runtime in the ChatGPT target process. 
 | GET | `/v1/hook/discovery/{requestId}` | Read discovery result |
 | DELETE | `/v1/hook/discovery/{requestId}` | Cancel a discovery task |
 
-## Live Hook configuration
+## Dynamic Hook example
 
 ```http
 PUT /v1/hook/config
@@ -31,22 +31,26 @@ Content-Type: application/json
   "rules": [{
     "id": "sample-method",
     "className": "com.openai.example.Sample",
-    "methodName": "run",
-    "methodDescriptor": "(Ljava/lang/String;)V",
+    "methodName": "calculate",
+    "methodDescriptor": "(I)I",
+    "mode": "return",
+    "result": 7,
     "enabled": true,
     "sampleEvery": 1
   }]
 }
 ```
 
-The target process picks up changes on its short config poll. New or changed hooks are attached live; replaced hooks use stable LibXposed IDs; removed rules are unhooked. A class that is not loaded yet is hooked automatically when its class loader later loads it. No APK rebuild or target-app restart is required.
+Modes: `observe`/`dump`, `return`, `args`, `noop`, `throw`. For `args`, use a JSON object with zero-based argument indexes and primitive/String scalar values. The runtime checks actual parameter/return types before installing a behavior-changing hook. Constructors use `methodName: "<init>"` and support observe mode only.
 
-Use `methodName: "<init>"` to hook constructors; constructor descriptors must end in `)V`. Use either `methodDescriptor` or `parameterTypes`, not both.
+Changes are picked up by the target process on its short config poll. Matching classes loaded later are hooked automatically. Existing Hook IDs are replaced; removed rules are unhooked. No APK rebuild or target-app restart is required.
 
 ## Status
 
-`activeHookCount` and `installedHooks` come from the target process's retained HookHandle registry. `lastApplyReport` distinguishes added, replaced, retained, removed and failed hooks. A config write is asynchronous; check status to confirm target-side application.
+`activeHookCount` and `installedHooks` come from the target process's retained HookHandle registry. Each entry reports the applied mode. `lastApplyReport` reports added, replaced, retained, removed and failed counts.
 
 ## Boundaries
 
-Discovery and Hook rules are restricted to `com.openai.*`. The runtime records bounded metadata only: rule ID, method signature, elapsed time, sequence and exception class. It does not capture arguments, return values, authorization headers, cookies, tokens, request/response bodies or anti-abuse proof material. Do not use rules to bypass authentication, payment checks, access controls or security enforcement. Arbitrary script execution is not supported.
+Discovery and Hook rules are restricted to `com.openai.*`. Behavior-changing modes are blocked for authentication, session, token, credential, network, payment, attestation, security and cryptographic targets, and sensitive methods such as verify/authorize/sign. Only primitive/String scalar values are accepted; arbitrary code execution and object injection are not supported.
+
+Observation reports do not contain method arguments, return values, authorization headers, cookies, tokens, request/response bodies or anti-abuse proof material. Do not use rules to bypass authentication, payment checks, access controls or security enforcement.

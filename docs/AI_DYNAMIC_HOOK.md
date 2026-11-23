@@ -7,13 +7,11 @@ The Kotlin/libxposed API 102 runtime supports live rule application in the ChatG
 1. Send a new complete rule snapshot to `PUT /v1/hook/config`.
 2. The module app stores it through the authenticated local API and Provider boundary.
 3. The target process picks up the new revision on its short config poll and applies it without rebuilding the APK or restarting ChatGPT.
-4. Existing Hook IDs are replaced atomically when the same target method is updated; removed rules are unhooked.
-5. If a configured class is not available yet, the rule remains active in the runtime rule set. The ClassLoader watcher attaches it when that class is loaded later.
-6. Runtime status and observation events expose the actual installed Hook handles and invocation counts.
+4. Existing Hook IDs are replaced when a rule changes; removed rules are unhooked.
+5. If a configured class is not available yet, the ClassLoader watcher attaches it when that class is loaded later.
+6. Runtime status exposes the actual installed Hook handles, modes and invocation counts.
 
-Class-load watching is enabled by default. It filters to `com.openai.*`, deduplicates class names, guards callback re-entry, and performs work only for classes with matching active rules. It does not enumerate arbitrary app data or call target methods.
-
-## Rule schema
+## Dynamic rule schema
 
 ```json
 {
@@ -23,17 +21,26 @@ Class-load watching is enabled by default. It filters to `com.openai.*`, dedupli
   "rules": [{
     "id": "sample-method",
     "className": "com.openai.example.Sample",
-    "methodName": "run",
-    "methodDescriptor": "(Ljava/lang/String;)V",
+    "methodName": "calculate",
+    "methodDescriptor": "(I)I",
+    "mode": "return",
+    "result": 7,
     "enabled": true,
     "sampleEvery": 1
   }]
 }
 ```
 
-Use either `methodDescriptor` or `parameterTypes`, not both. Descriptors disambiguate overloads and include the return type. Constructor rules use `methodName: "<init>"` and a descriptor ending in `)V`. Up to eight matching overloads are attached per rule.
+Modes:
+- `observe` / `dump`: call the original method and record bounded timing/exception metadata.
+- `return`: return a configured primitive or String value without calling the original method.
+- `args`: replace selected primitive/String arguments, then call the original method.
+- `noop`: skip the original method and return its default value.
+- `throw`: skip the original method and throw a configured `IllegalStateException`.
 
-## Control API
+Argument indexes are zero-based. Return/argument values are JSON scalars and are type-checked against the actual reflected method before installation. Constructors support observation only. Exact JVM descriptors distinguish overloads; constructor descriptors end in `)V`. Up to eight matching overloads are attached per rule.
+
+## Live control
 
 - `GET /v1/hook/status`: actual installed Hook inventory and latest apply report.
 - `GET /v1/hook/events`: bounded metadata-only runtime observations.
@@ -42,10 +49,10 @@ Use either `methodDescriptor` or `parameterTypes`, not both. Descriptors disambi
 - `PUT /v1/hook/config`: replace the active rule snapshot; the target runtime applies it live.
 - `PUT /v1/hook/enabled`: disable and unhook all active rules, or re-enable the current configuration.
 
-A successful config response means it is stored; target-process application is asynchronous. Confirm the actual result with `lastApplyReport` and `installedHooks`.
+A config update is picked up on the target process's short poll. It does not require an APK rebuild or app restart. A successful config response means it is stored; check `lastApplyReport` and `installedHooks` for actual runtime state.
 
-## Scope and privacy
+## Safety and privacy
 
-The runtime currently implements observation hooks and constructor/method interception. It does not execute arbitrary scripts or collect method arguments, return values, authorization headers, cookies, access tokens, request/response bodies, or anti-abuse proof material. Do not use Hook rules to bypass authentication, access controls, payment checks, or security enforcement.
+Behavior-changing modes are rejected for authentication, session, token, credential, network, payment, attestation, security and cryptographic targets, and for sensitive method names such as verify/authorize/sign. Values are restricted to primitive and String scalars; arbitrary scripts and object injection are not supported.
 
-The old standalone Java/Xposed implementation is not part of the APK build. Its broad behavior-mutating modes are not silently imported into this API 102 runtime.
+Observation payloads never serialize method arguments, return values, authorization headers, cookies, tokens, request/response bodies or anti-abuse proof material. Do not use Hook rules to bypass authentication, access controls, payment checks or security enforcement.

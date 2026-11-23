@@ -31,7 +31,7 @@ GET /v1/hook/status
 Authorization: Bearer <client apiKey>
 ```
 
-The `targetObserved` field means that a target-process observation/runtime snapshot has reached the provider. `activeHookCount` and `installedHooks` come from the target process's actual HookHandle registry, not from the configuration file or discovery candidates. Each listed entry is marked `state: installed` and includes its rule ID, exact method signature, sample interval and invocation count. `hookInventoryTruncated` indicates that more handles exist than are included in the bounded list. A missing runtime snapshot is reported as `runtimeState: unavailable`, not as a confirmed zero-Hook state.
+The `targetObserved` field means that a target-process observation/runtime snapshot has reached the provider. `lastApplyReport` reports the latest target-side application result (`applied`, `partial`, `disabled`, `not_applied` or `unavailable`) and the added/replaced/retained/removed/failed counts. `activeHookCount` and `installedHooks` come from the target process's actual HookHandle registry, not from the configuration file or discovery candidates. Each listed entry is marked `state: installed` and includes its rule ID, exact method signature, sample interval and invocation count. `hookInventoryTruncated` indicates that more handles exist than are included in the bounded list. A missing runtime snapshot is reported as `runtimeState: unavailable`, not as a confirmed zero-Hook state.
 
 ### Update rules
 
@@ -47,7 +47,7 @@ Content-Type: application/json
 }
 ```
 
-The request body is the configuration object itself, not a wrapper. A successful response means the configuration was validated and persisted. The target process polls configuration changes and applies them asynchronously; callers must inspect subsequent target-process observations before claiming runtime application.
+The request body is the configuration object itself, not a wrapper. A successful response means the configuration was validated and persisted. The target process polls configuration changes and applies them asynchronously; callers must inspect `lastApplyReport` and the actual installed-Hook inventory in subsequent status responses before claiming runtime application.
 
 ### Enable or disable
 

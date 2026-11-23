@@ -51,7 +51,7 @@ object OpenAiCompat {
             .put("author", JSONObject().put("role", "user"))
             .put(
                 "content",
-                JSONObject().put("content_type", "text").put("parts", JSONArray().put(lastUser))
+                JSONObject().put("content_type", "text").put("parts", JSONArray().put(prompt))
             )
         body.put("messages", JSONArray().put(msg))
         return body

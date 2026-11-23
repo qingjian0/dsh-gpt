@@ -16,6 +16,7 @@ The local GPT API is the control-plane entry point for the Hook Runtime. It does
 |---|---|---|
 | GET | `/v1/hook/status` | Read configured rule count, enabled state, config revision, last observation timestamp and current discovery task |
 | GET | `/v1/hook/events` | Read the bounded metadata-only observation report |
+| GET | `/v1/hook/startup-discovery` | Read the latest automatic bounded DEX scan snapshot from target-process startup |
 | GET | `/v1/hook/config` | Read the active configuration snapshot |
 | PUT | `/v1/hook/config` | Validate and save a declarative Hook configuration |
 | PUT | `/v1/hook/enabled` | Enable or disable Hook callbacks |
@@ -59,6 +60,17 @@ Content-Type: application/json
 ```
 
 The response acknowledges persistence of the requested state. Target-process application is asynchronous.
+
+### Automatic startup discovery
+
+When the ChatGPT target process reaches its Application context, the module starts one bounded metadata-only DEX scan in a background worker. The current budget is 16 DEX files, 2,500 class names, 1.5 seconds, 100 member records and a 64 KiB response. It does not initialize or invoke discovered app classes. The result is stored separately from the event report.
+
+```http
+GET /v1/hook/startup-discovery
+Authorization: Bearer <client apiKey>
+```
+
+A missing result returns HTTP 404. The result reports truncation and timing explicitly; it is a partial discovery snapshot, not a claim that every class in the app has been indexed.
 
 ### Discover classes and methods
 

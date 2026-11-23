@@ -15,20 +15,28 @@ object OpenAiCompat {
         upstreamParentMessageId: String? = null
     ): JSONObject {
         val messages = openAi.optJSONArray("messages") ?: JSONArray()
-        val parts = JSONArray()
+        val systemInstructions = ArrayList<String>()
+        val transcript = ArrayList<String>()
         var lastUser = ""
         for (i in 0 until messages.length()) {
-            val m = messages.optJSONObject(i) ?: continue
-            val role = m.optString("role", "user")
-            val text = contentText(m)
+            val message = messages.optJSONObject(i) ?: continue
+            val role = message.optString("role", "user")
+            val text = contentText(message)
             if (text.isEmpty()) continue
             when (role) {
-                "system" -> parts.put("System: $text")
-                "assistant" -> parts.put("Assistant: $text")
-                else -> lastUser = text
+                "system", "developer" -> systemInstructions += text
+                "assistant" -> transcript += "Assistant: $text"
+                else -> {
+                    lastUser = text
+                    transcript += "User: $text"
+                }
             }
         }
-        if (parts.length() > 0 && lastUser.isNotEmpty()) lastUser = parts.join("\n") + "\n\n" + lastUser
+        val prompt = if (!upstreamConversationId.isNullOrBlank()) {
+            (systemInstructions.map { "System: $it" } + lastUser).joinToString("\n\n")
+        } else {
+            (systemInstructions.map { "System: $it" } + transcript).joinToString("\n\n")
+        }
 
         val body = JSONObject()
             .put("action", "next")

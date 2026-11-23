@@ -15,7 +15,7 @@ data class HookConfig(
     val schemaVersion: Int,
     val targetPackage: String,
     val rules: List<HookRule>,
-    val observeClassLoads: Boolean = false
+    val observeClassLoads: Boolean = true
 )
 
 object HookConfigParser {
@@ -54,6 +54,6 @@ object HookConfigParser {
             require(sampleEvery in 1..10_000) { "sampleEvery must be between 1 and 10000" }
             rules += HookRule(id, className, methodName, parameterTypes, item.optBoolean("enabled", true), sampleEvery)
         }
-        return HookConfig(version, target, rules, root.optBoolean("observeClassLoads", false))
+        return HookConfig(version, target, rules, root.optBoolean("observeClassLoads", true))
     }
 }

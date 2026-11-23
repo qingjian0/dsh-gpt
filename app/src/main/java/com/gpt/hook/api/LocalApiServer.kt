@@ -53,8 +53,7 @@ class LocalApiServer(@Volatile var cfg: RelayConfig, private val conversations: 
                 s.soTimeout = 180000
                 val input = s.getInputStream()
                 val out = s.getOutputStream()
-                val reader = BufferedReader(InputStreamReader(input, Charsets.ISO_8859_1))
-                val requestLine = reader.readLine() ?: return
+                val requestLine = readHttpLine(input) ?: return
                 val parts = requestLine.split(" ")
                 if (parts.size < 2) return
                 val method = parts[0].uppercase()
@@ -63,7 +62,7 @@ class LocalApiServer(@Volatile var cfg: RelayConfig, private val conversations: 
                 var contentLength = 0
                 val headers = HashMap<String, String>()
                 while (true) {
-                    val line = reader.readLine() ?: break
+                    val line = readHttpLine(input) ?: break
                     if (line.isEmpty()) break
                     val i = line.indexOf(':')
                     if (i > 0) {
@@ -72,6 +71,10 @@ class LocalApiServer(@Volatile var cfg: RelayConfig, private val conversations: 
                         headers[k] = v
                         if (k == "content-length") contentLength = v.toIntOrNull() ?: 0
                     }
+                }
+                if (contentLength < 0 || contentLength > MAX_REQUEST_BYTES) {
+                    json(out, 413, err("request_too_large", "request body exceeds 1 MiB"))
+                    return
                 }
                 val body = if (contentLength > 0) {
                     val buf = ByteArray(contentLength)
@@ -145,6 +148,20 @@ class LocalApiServer(@Volatile var cfg: RelayConfig, private val conversations: 
             .put("parent_id", item.parentId ?: JSONObject.NULL).put("created_at", item.createdAt).put("updated_at", item.updatedAt)
         if (includeMessages) obj.put("messages", item.messages)
         return obj
+    }
+
+
+    /** Read one CRLF-delimited HTTP header line without buffering bytes from the body. */
+    private fun readHttpLine(input: java.io.InputStream): String? {
+        val bytes = java.io.ByteArrayOutputStream()
+        while (bytes.size() <= MAX_HEADER_LINE_BYTES) {
+            val value = input.read()
+            if (value < 0) return if (bytes.size() == 0) null else bytes.toString("ISO-8859-1")
+            if (value == 10) break
+            if (value != 13) bytes.write(value)
+        }
+        if (bytes.size() > MAX_HEADER_LINE_BYTES) throw IllegalArgumentException("HTTP header line too long")
+        return bytes.toString("ISO-8859-1")
     }
 
     private fun authorized(headers: Map<String, String>): Boolean {
@@ -264,4 +281,9 @@ class LocalApiServer(@Volatile var cfg: RelayConfig, private val conversations: 
 
     private fun err(type: String, message: String): String =
         JSONObject().put("error", JSONObject().put("type", type).put("message", message)).toString()
+
+    companion object {
+        private const val MAX_REQUEST_BYTES = 1024 * 1024
+        private const val MAX_HEADER_LINE_BYTES = 16 * 1024
+    }
 }

@@ -27,7 +27,8 @@ Each accepted user turn and completed assistant response is persisted locally. T
 stores the upstream ChatGPT `conversation_id` and latest assistant message ID, then reuses
 them as `conversation_id` and `parent_message_id` on the next upstream request. The
 continuation state is migrated additively from database version 1 to version 2. Streaming
-responses include the local conversation ID in the response headers.
+responses include the local conversation ID in the response headers. Clients should serialize
+requests within one conversation until server-side per-conversation queuing is implemented.
 
 Conversation IDs are generated UUIDs. Parent IDs are validated against the same caller.
 Messages are stored as JSON objects in append order. List responses omit message bodies.

@@ -1,405 +1,555 @@
 package com.gpt.hook
 
-import android.app.Activity
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import android.text.InputType
-import android.view.ViewGroup
-import android.widget.Button
-import android.widget.EditText
-import android.widget.LinearLayout
-import android.widget.ScrollView
-import android.widget.Switch
-import android.widget.TextView
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.dp
 import com.gpt.hook.api.ApiService
 import com.gpt.hook.api.RelayConfig
 import com.gpt.hook.diagnostics.HookConfigParser
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.net.HttpURLConnection
+import java.net.URL
 
-/** On-device configuration and metadata-only observation console. */
-class MainActivity : Activity() {
-    private lateinit var status: TextView
-    private lateinit var reportStatus: TextView
-    private lateinit var editor: EditText
-    private lateinit var report: EditText
-
-    // 本地 API 网关控件
-    private lateinit var relayStatus: TextView
-    private lateinit var relayEnabled: Switch
-    private lateinit var relayLan: Switch
-    private lateinit var relayPort: EditText
-    private lateinit var relayApiKey: EditText
-    private lateinit var relayDid: EditText
-    private lateinit var relayToken: EditText
-    private var relayRefreshing = false
-
+class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(24, 24, 24, 24)
-        }
-        status = TextView(this).apply { text = "Connecting to LSPosed service…" }
-        editor = EditText(this).apply {
-            setText(DEFAULT_CONFIG)
-            minLines = 10
-            gravity = android.view.Gravity.TOP
-            typeface = android.graphics.Typeface.MONOSPACE
-            setHorizontallyScrolling(true)
-        }
-        root.addView(status)
-        root.addView(TextView(this).apply { text = "Hook configuration (JSON)" })
-        root.addView(ScrollView(this).apply {
-            addView(editor)
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 0, 2f
-            )
-        })
-        root.addView(Button(this).apply {
-            text = "Validate and apply configuration"
-            setOnClickListener { saveConfig() }
-        })
-        root.addView(Button(this).apply {
-            text = "Restore empty safe configuration"
-            setOnClickListener { editor.setText(DEFAULT_CONFIG) }
-        })
-        root.addView(reportStatusText().also { reportStatus = it })
-        root.addView(TextView(this).apply { text = "Latest metadata-only observations" })
-        report = EditText(this).apply {
-            isFocusable = false
-            isFocusableInTouchMode = false
-            minLines = 6
-            typeface = android.graphics.Typeface.MONOSPACE
-            setText(EMPTY_REPORT)
-        }
-        root.addView(ScrollView(this).apply {
-            addView(report)
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 0, 2f
-            )
-        })
-        root.addView(LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            addView(Button(this@MainActivity).apply {
-                text = "Refresh"
-                setOnClickListener { refreshReport() }
-            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            addView(Button(this@MainActivity).apply {
-                text = "Copy JSON"
-                setOnClickListener { copyReport() }
-            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            addView(Button(this@MainActivity).apply {
-                text = "Share to AI"
-                setOnClickListener { shareReport() }
-            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        })
-        buildRelaySection(root)
-        setContentView(root)
-        refreshStatus()
-        refreshReport()
+        setContent { DshTheme { DshApp() } }
     }
+}
 
-    override fun onResume() {
-        super.onResume()
-        refreshStatus()
-        refreshReport()
-        if (this::relayStatus.isInitialized) renderRelayStatus(RelayConfig.load(this))
-    }
+private enum class MainTab(val label: String, val icon: ImageVector) {
+    HOME("首页", Icons.Default.Home),
+    API("API", Icons.Default.Cloud),
+    CONVERSATIONS("对话", Icons.Default.Chat),
+    HOOK("Hook", Icons.Default.Code),
+    AGENT("Agent", Icons.Default.SmartToy),
+    CUSTOMIZER("定制", Icons.Default.Tune)
+}
 
-    private fun reportStatusText() = TextView(this).apply { text = "Observation transport: waiting" }
-
-    // ---------------------------------------------------------------- 本地 API 网关
-
-    private fun buildRelaySection(root: LinearLayout) {
-        val box = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(0, 32, 0, 0)
-        }
-        box.addView(TextView(this).apply {
-            text = "本地 API 网关"
-            textSize = 18f
-            setPadding(0, 0, 0, 8)
-        })
-        relayStatus = TextView(this).apply { text = "已停止" }
-        box.addView(relayStatus)
-
-        relayEnabled = Switch(this).apply {
-            text = "启用"
-            setOnCheckedChangeListener { _, checked ->
-                if (relayRefreshing) return@setOnCheckedChangeListener
-                val cfg = RelayConfig.load(this@MainActivity)
-                if (cfg.enabled == checked) return@setOnCheckedChangeListener
-                val next = cfg.copy(enabled = checked)
-                RelayConfig.save(this@MainActivity, next)
-                if (checked) ApiService.start(this@MainActivity) else ApiService.stop(this@MainActivity)
-                renderRelayStatus(next)
-            }
-        }
-        box.addView(relayEnabled)
-
-        relayLan = Switch(this).apply {
-            text = "局域网监听（0.0.0.0）"
-            setOnCheckedChangeListener { _, checked ->
-                if (relayRefreshing) return@setOnCheckedChangeListener
-                val cfg = RelayConfig.load(this@MainActivity)
-                if (cfg.lan == checked) return@setOnCheckedChangeListener
-                val next = cfg.copy(lan = checked)
-                RelayConfig.save(this@MainActivity, next)
-                // ApiService.restart() 是实例方法，这里用 stop + start 让它按新配置重建监听
-                if (next.enabled) restartRelayService()
-                renderRelayStatus(next)
-            }
-        }
-        box.addView(relayLan)
-
-        box.addView(labelView("端口（1-65535）"))
-        relayPort = EditText(this).apply {
-            inputType = InputType.TYPE_CLASS_NUMBER
-            hint = RelayConfig().port.toString()
-        }
-        box.addView(relayPort)
-
-        box.addView(labelView("client apiKey（留空表示不校验）"))
-        relayApiKey = EditText(this).apply {
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
-            hint = "可留空"
-        }
-        box.addView(relayApiKey)
-
-        box.addView(labelView("oai-did"))
-        relayDid = EditText(this).apply {
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
-            hint = "oai-did"
-        }
-        box.addView(relayDid)
-
-        box.addView(labelView("access_token"))
-        relayToken = EditText(this).apply {
-            inputType = InputType.TYPE_CLASS_TEXT or
-                InputType.TYPE_TEXT_FLAG_MULTI_LINE or
-                InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-            isSingleLine = false
-            minLines = 3
-            maxLines = 8
-            gravity = android.view.Gravity.TOP
-            typeface = android.graphics.Typeface.MONOSPACE
-            hint = "Bearer 后面的 token"
-        }
-        box.addView(relayToken)
-
-        box.addView(
-            buttonRow(
-                "保存并重启" to { saveRelayAndRestart() },
-                "导入 kit.json（粘贴）" to { importRelayKit() },
-            )
+@Composable
+private fun DshTheme(content: @Composable () -> Unit) {
+    val dark = isSystemInDarkTheme()
+    val scheme = if (dark) {
+        darkColorScheme(
+            primary = Color(0xFF72D9CB),
+            onPrimary = Color(0xFF06201D),
+            background = Color(0xFF101418),
+            surface = Color(0xFF171D22),
+            surfaceVariant = Color(0xFF222B31),
+            onSurface = Color(0xFFE5ECEF),
+            onSurfaceVariant = Color(0xFFB4C0C5)
         )
-        box.addView(
-            buttonRow(
-                "复制启动命令" to { copyRelayCommand() },
-                "测试 /health" to { testRelayHealth() },
-            )
-        )
-
-        root.addView(ScrollView(this).apply {
-            addView(box)
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 0, 2f
-            )
-        })
-        fillRelayControls(RelayConfig.load(this))
-    }
-
-    private fun labelView(text: String) = TextView(this).apply {
-        this.text = text
-        setPadding(0, 12, 0, 0)
-    }
-
-    private fun buttonRow(vararg items: Pair<String, () -> Unit>) = LinearLayout(this).apply {
-        orientation = LinearLayout.HORIZONTAL
-        for ((label, action) in items) {
-            addView(Button(this@MainActivity).apply {
-                text = label
-                setOnClickListener { action() }
-            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        }
-    }
-
-    /** 回填控件；期间屏蔽 Switch 监听，避免写盘 + 启停服务的递归触发。 */
-    private fun fillRelayControls(cfg: RelayConfig) {
-        relayRefreshing = true
-        try {
-            relayEnabled.isChecked = cfg.enabled
-            relayLan.isChecked = cfg.lan
-            relayPort.setText(cfg.port.toString())
-            relayApiKey.setText(cfg.apiKey)
-            relayDid.setText(cfg.oaiDid)
-            relayToken.setText(cfg.accessToken)
-        } finally {
-            relayRefreshing = false
-        }
-        renderRelayStatus(cfg)
-    }
-
-    private fun relayStatusLine(cfg: RelayConfig): String {
-        val state = if (cfg.enabled) "运行中" else "已停止"
-        val host = if (cfg.lan) "0.0.0.0" else "127.0.0.1"
-        val ready = if (cfg.ready) "就绪" else "未就绪（缺 access_token / oai-did）"
-        return "$state · 端口 ${cfg.port} · $host · $ready"
-    }
-
-    private fun renderRelayStatus(cfg: RelayConfig) {
-        relayStatus.text = relayStatusLine(cfg)
-    }
-
-    /** 读控件 + 校验端口，合并到已有配置上。 */
-    private fun currentRelayConfig(base: RelayConfig): RelayConfig {
-        val typed = relayPort.text.toString().trim().toIntOrNull()
-        val port = if (typed != null && typed in 1..65535) typed else base.port
-        return base.copy(
-            port = port,
-            apiKey = relayApiKey.text.toString().trim(),
-            oaiDid = relayDid.text.toString().trim(),
-            accessToken = relayToken.text.toString().trim(),
+    } else {
+        lightColorScheme(
+            primary = Color(0xFF087F75),
+            onPrimary = Color.White,
+            background = Color(0xFFF7F9F8),
+            surface = Color.White,
+            surfaceVariant = Color(0xFFEEF3F1),
+            onSurface = Color(0xFF172321),
+            onSurfaceVariant = Color(0xFF5E6D69)
         )
     }
+    MaterialTheme(colorScheme = scheme, content = content)
+}
 
-    private fun restartRelayService() {
-        ApiService.stop(this)
-        ApiService.start(this)
-    }
-
-    private fun saveRelayAndRestart() {
-        val base = RelayConfig.load(this)
-        val next = currentRelayConfig(base)
-        RelayConfig.save(this, next)
-        if (next.enabled) restartRelayService()
-        fillRelayControls(next)
-        val hint = if (next.enabled) "已保存并重启" else "已保存（未启用，未启动服务）"
-        relayStatus.text = hint + "\n" + relayStatusLine(next)
-    }
-
-    private fun importRelayKit() {
-        val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
-        val clip = clipboard.primaryClip
-        val json = if (clip != null && clip.itemCount > 0) {
-            clip.getItemAt(0).coerceToText(this).toString()
-        } else ""
-        if (json.isBlank()) {
-            relayStatus.text = "剪贴板为空：先复制 kit.json 内容再点这里"
-            return
-        }
-        try {
-            val next = RelayConfig.importKit(this, json)
-            fillRelayControls(next)
-            relayStatus.text = "已导入 kit.json\n" + relayStatusLine(next)
-        } catch (t: Throwable) {
-            relayStatus.text = "导入失败: ${t.message ?: t.javaClass.simpleName}"
-        }
-    }
-
-    private fun copyRelayCommand() {
-        val cfg = currentRelayConfig(RelayConfig.load(this))
-        val cmd = "curl -H \"Authorization: Bearer ${cfg.apiKey}\" " +
-            "http://127.0.0.1:${cfg.port}/v1/models"
-        val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
-        clipboard.setPrimaryClip(ClipData.newPlainText("local api curl", cmd))
-        relayStatus.text = "已复制启动命令\n$cmd"
-    }
-
-    /** 后台线程请求 /health，结果回主线程写状态。 */
-    private fun testRelayHealth() {
-        val cfg = currentRelayConfig(RelayConfig.load(this))
-        val url = "http://127.0.0.1:${cfg.port}/health"
-        relayStatus.text = "测试中… $url"
-        Thread {
-            val body = try {
-                val conn = (java.net.URI(url).toURL().openConnection() as java.net.HttpURLConnection).apply {
-                    requestMethod = "GET"
-                    connectTimeout = 3000
-                    readTimeout = 3000
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DshApp() {
+    var selected by rememberSaveable { mutableStateOf(MainTab.HOME.name) }
+    val tab = MainTab.valueOf(selected)
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                        Text("DSH-GPT", fontWeight = FontWeight.SemiBold)
+                        Text(tab.label, style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                },
+                actions = {
+                    TextButton(onClick = { selected = MainTab.HOME.name }) { Text("总览") }
                 }
-                val code = conn.responseCode
-                val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-                val text = stream?.bufferedReader()?.use { it.readText() } ?: ""
-                conn.disconnect()
-                "HTTP $code\n" + text.take(600)
-            } catch (t: Throwable) {
-                "请求失败: ${t.javaClass.simpleName}: ${t.message ?: ""}"
-            }
-            runOnUiThread { relayStatus.text = "$url\n$body" }
-        }.start()
-    }
-
-    private fun refreshStatus() {
-        val service = DshApplication.currentService
-        status.text = if (service == null) {
-            "LSPosed service unavailable. Enable the module and open it again."
-        } else {
-            "Connected: ${service.frameworkName} / API ${service.apiVersion}\n" +
-                "Scope: ${service.scope.joinToString()}"
-        }
-    }
-
-    private fun saveConfig() {
-        val service = DshApplication.currentService
-        if (service == null) {
-            status.text = "Cannot save: LSPosed service is not connected."
-            return
-        }
-        try {
-            val source = editor.text.toString()
-            val parsed = HookConfigParser.parse(source)
-            service.getRemotePreferences("dsh").edit()
-                .putString("hook_config", source)
-                .apply()
-            status.text = "Saved: ${parsed.rules.size} rule(s). The target process validates and applies the update."
-        } catch (t: Throwable) {
-            status.text = "Rejected: ${t.message ?: t.javaClass.simpleName}"
-        }
-    }
-
-    private fun refreshReport() {
-        try {
-            val result = contentResolver.call(
-                Uri.parse("content://${ObservationProvider.AUTHORITY}"),
-                ObservationProvider.METHOD_READ, null, null
             )
-            val json = result?.getString(ObservationProvider.KEY_REPORT) ?: EMPTY_REPORT
-            report.setText(json)
-            val updated = result?.getLong(ObservationProvider.KEY_UPDATED) ?: 0L
-            reportStatus.text = if (updated == 0L) {
-                "No observation report received yet. Trigger a configured method in the target app."
-            } else {
-                "Report received: ${updated} (epoch ms), ${json.length} characters"
+        },
+        bottomBar = {
+            NavigationBar {
+                MainTab.entries.forEach { item ->
+                    NavigationBarItem(
+                        selected = selected == item.name,
+                        onClick = { selected = item.name },
+                        icon = { Icon(item.icon, contentDescription = item.label) },
+                        label = { Text(item.label, maxLines = 1) },
+                        alwaysShowLabel = true
+                    )
+                }
             }
-        } catch (t: Throwable) {
-            reportStatus.text = "Report read failed: ${t.javaClass.simpleName}"
+        }
+    ) { padding ->
+        Box(Modifier.fillMaxSize().padding(padding)) {
+            when (tab) {
+                MainTab.HOME -> HomeScreen(onNavigate = { selected = it.name })
+                MainTab.API -> ApiScreen()
+                MainTab.CONVERSATIONS -> ConversationsScreen()
+                MainTab.HOOK -> HookScreen()
+                MainTab.AGENT -> AgentScreen()
+                MainTab.CUSTOMIZER -> CustomizerScreen()
+            }
+        }
+    }
+}
+
+@Composable
+private fun PageColumn(content: @Composable ColumnScope.() -> Unit) {
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+        content = content
+    )
+}
+
+@Composable
+private fun PageHeading(title: String, subtitle: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
+        Text(subtitle, style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun SectionCard(title: String, subtitle: String? = null, content: @Composable ColumnScope.() -> Unit) {
+    ElevatedCard(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            if (subtitle != null) {
+                Text(subtitle, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            content()
+        }
+    }
+}
+
+@Composable
+private fun StatusLine(label: String, value: String, positive: Boolean? = null) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically) {
+        Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, fontWeight = FontWeight.Medium,
+            color = when (positive) {
+                true -> MaterialTheme.colorScheme.primary
+                false -> MaterialTheme.colorScheme.error
+                null -> MaterialTheme.colorScheme.onSurface
+            })
+    }
+}
+
+@Composable
+private fun HomeScreen(onNavigate: (MainTab) -> Unit) {
+    val context = LocalContext.current
+    val relay = remember { RelayConfig.load(context) }
+    val xposedConnected = DshApplication.currentService != null
+    PageColumn {
+        PageHeading("运行总览", "管理 AI 服务、运行时扩展与智能体工作流。")
+        SectionCard("系统状态", "仅展示当前可读取的真实状态") {
+            StatusLine("本地 API", if (relay.enabled && relay.ready) "已配置 / 已启用" else if (relay.enabled) "缺少上游凭据" else "已停止", relay.enabled && relay.ready)
+            StatusLine("LSPosed 服务", if (xposedConnected) "已连接" else "未连接", xposedConnected)
+            StatusLine("目标应用", "com.openai.chatgpt")
+        }
+        SectionCard("快捷入口") {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilledTonalButton(onClick = { onNavigate(MainTab.API) }, modifier = Modifier.weight(1f)) { Text("API 网关") }
+                FilledTonalButton(onClick = { onNavigate(MainTab.HOOK) }, modifier = Modifier.weight(1f)) { Text("Hook 控制台") }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { onNavigate(MainTab.CONVERSATIONS) }, modifier = Modifier.weight(1f)) { Text("对话管理") }
+                OutlinedButton(onClick = { onNavigate(MainTab.AGENT) }, modifier = Modifier.weight(1f)) { Text("Agent 中心") }
+            }
+        }
+        SectionCard("平台模块") {
+            StatusLine("API Gateway", "已接入")
+            StatusLine("Hook 配置与观察", "已接入")
+            StatusLine("会话持久化", "SQLite 已接入")
+            StatusLine("多智能体调度", "等待 DSH 引擎")
+            StatusLine("GPT UI 定制执行器", "待接入")
+        }
+    }
+}
+
+@Composable
+private fun ApiScreen() {
+    val context = LocalContext.current
+    var config by remember { mutableStateOf(RelayConfig.load(context)) }
+    var port by remember(config) { mutableStateOf(config.port.toString()) }
+    var apiKey by remember(config) { mutableStateOf(config.apiKey) }
+    var did by remember(config) { mutableStateOf(config.oaiDid) }
+    var token by remember(config) { mutableStateOf(config.accessToken) }
+    var message by rememberSaveable { mutableStateOf("") }
+    var runtimeStatus by rememberSaveable { mutableStateOf("等待检测") }
+
+    LaunchedEffect(config.port, config.upstreamBase) {
+        while (true) {
+            runtimeStatus = withContext(Dispatchers.IO) {
+                runCatching {
+                    val connection = URL("http://127.0.0.1:${config.port}/health").openConnection() as HttpURLConnection
+                    try {
+                        connection.requestMethod = "GET"
+                        connection.connectTimeout = 1500
+                        connection.readTimeout = 1500
+                        val code = connection.responseCode
+                        if (code in 200..299) {
+                            val body = connection.inputStream.bufferedReader().use { it.readText() }
+                            val health = org.json.JSONObject(body)
+                            val healthy = health.optBoolean("ok", false) &&
+                                health.optInt("port", -1) == config.port &&
+                                health.optString("upstream") == config.upstreamBase
+                            if (healthy) "运行中 · HTTP $code" else "端口有响应，但不是当前网关"
+                        } else "未正常响应 · HTTP $code"
+                    } finally {
+                        connection.disconnect()
+                    }
+                }.getOrElse { "未检测到监听服务：${it.javaClass.simpleName}" }
+            }
+            delay(3000)
         }
     }
 
-    private fun copyReport() {
-        val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
-        clipboard.setPrimaryClip(ClipData.newPlainText("DSH observations", report.text))
-        reportStatus.text = "Observation JSON copied to clipboard."
-    }
-
-    private fun shareReport() {
-        val send = Intent(Intent.ACTION_SEND).apply {
-            type = "application/json"
-            putExtra(Intent.EXTRA_SUBJECT, "DSH metadata-only Hook observations")
-            putExtra(Intent.EXTRA_TEXT, report.text.toString())
+    PageColumn {
+        PageHeading("API Gateway", "本地反代服务与上游连接配置。")
+        SectionCard("服务状态") {
+            StatusLine("监听地址", (if (config.lan) "0.0.0.0" else "127.0.0.1") + ":" + config.port)
+            StatusLine("上游凭据", if (config.ready) "已配置" else "未配置", config.ready)
+            StatusLine("配置开关", if (config.enabled) "已启用" else "已停止", config.enabled)
+            StatusLine("实际运行状态", runtimeStatus, runtimeStatus.startsWith("运行中"))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = {
+                        if (!config.ready) {
+                            message = "请先填写 access_token 和 oai-did。"
+                        } else {
+                            val next = config.copy(enabled = true)
+                            RelayConfig.save(context, next)
+                            ApiService.start(context)
+                            config = next
+                            message = "已请求启动 API 服务。"
+                        }
+                    },
+                    modifier = Modifier.weight(1f)
+                ) { Text("启动") }
+                OutlinedButton(
+                    onClick = {
+                        val next = config.copy(enabled = false)
+                        RelayConfig.save(context, next)
+                        ApiService.stop(context)
+                        config = next
+                        message = "已停止 API 服务。"
+                    },
+                    modifier = Modifier.weight(1f)
+                ) { Text("停止") }
+            }
         }
-        startActivity(Intent.createChooser(send, "Send sanitized report to an AI assistant"))
+        SectionCard("连接配置", "保存后按当前配置重启服务。") {
+            OutlinedTextField(value = port, onValueChange = { port = it.filter(Char::isDigit).take(5) },
+                label = { Text("监听端口") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+            OutlinedTextField(value = apiKey, onValueChange = { apiKey = it },
+                label = { Text("客户端 API Key") }, modifier = Modifier.fillMaxWidth(), singleLine = true,
+                visualTransformation = PasswordVisualTransformation())
+            OutlinedTextField(value = did, onValueChange = { did = it },
+                label = { Text("oai-did") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+            OutlinedTextField(value = token, onValueChange = { token = it },
+                label = { Text("access_token") }, modifier = Modifier.fillMaxWidth(),
+                visualTransformation = PasswordVisualTransformation(), minLines = 2, maxLines = 4)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(onClick = {
+                    val clipboard = context.getSystemService(android.content.ClipboardManager::class.java)
+                    val json = clipboard?.primaryClip?.takeIf { it.itemCount > 0 }
+                        ?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()
+                    runCatching {
+                        require(json.isNotBlank()) { "剪贴板为空，请先复制 kit.json 内容。" }
+                        RelayConfig.importKit(context, json)
+                    }.onSuccess { imported ->
+                        config = imported
+                        message = "已从剪贴板导入 kit.json。"
+                    }.onFailure { message = "导入失败：${it.message ?: it.javaClass.simpleName}" }
+                }, modifier = Modifier.weight(1f)) { Text("导入 kit.json") }
+                OutlinedButton(onClick = {
+                    if (config.apiKey.isBlank()) {
+                        message = "请先配置客户端 API Key。"
+                    } else {
+                        val command = "curl -H \"Authorization: Bearer ${config.apiKey}\" http://127.0.0.1:${config.port}/v1/models"
+                        context.getSystemService(android.content.ClipboardManager::class.java)
+                            ?.setPrimaryClip(android.content.ClipData.newPlainText("local api curl", command))
+                        message = "已复制 /v1/models 测试命令。"
+                    }
+                }, modifier = Modifier.weight(1f)) { Text("复制测试命令") }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("允许局域网访问", modifier = Modifier.weight(1f))
+                Switch(checked = config.lan, onCheckedChange = { config = config.copy(lan = it) })
+            }
+            Button(onClick = {
+                val parsedPort = port.toIntOrNull()
+                if (parsedPort == null || parsedPort !in 1..65535) {
+                    message = "端口必须在 1–65535 之间。"
+                } else {
+                    val next = config.copy(port = parsedPort, apiKey = apiKey.trim(),
+                        oaiDid = did.trim(), accessToken = token.trim())
+                    RelayConfig.save(context, next)
+                    if (next.enabled && next.ready) ApiService.start(context) else if (!next.enabled) ApiService.stop(context)
+                    config = next
+                    message = "配置已保存。"
+                }
+            }, modifier = Modifier.fillMaxWidth()) { Text("保存配置") }
+            if (message.isNotBlank()) Text(message, color = MaterialTheme.colorScheme.primary,
+                style = MaterialTheme.typography.bodySmall)
+        }
+        SectionCard("Provider") {
+            StatusLine("ChatGPT 上游", config.upstreamBase, true)
+            StatusLine("第三方 OpenAI 兼容 API", "Provider 管理器待接入")
+            StatusLine("DSH Tools", "工具路由待接入")
+        }
+        SectionCard("高级能力") {
+            StatusLine("流式响应", "沿用当前网关实现")
+            StatusLine("会话复用策略", "待接入会话存储层")
+            StatusLine("思考模式与插件路由", "待接入能力协商")
+        }
+    }
+}
+
+@Composable
+private fun ConversationsScreen() {
+    val context = LocalContext.current
+    val repository = remember { (context.applicationContext as DshApplication).conversationRepository }
+    val scope = rememberCoroutineScope()
+    var items by remember { mutableStateOf(emptyList<com.gpt.hook.api.ConversationRepository.Conversation>()) }
+    var status by rememberSaveable { mutableStateOf("正在加载") }
+    val caller = "dsh-local-control-ui-profile-v1"
+
+    suspend fun reload() {
+        val result = withContext(Dispatchers.IO) { repository.list(caller) }
+        items = result
+        status = "共 ${result.size} 个本地会话"
     }
 
-    companion object {
-        private const val EMPTY_REPORT = """{"schemaVersion":1,"kind":"dsh-hook-observations","events":[]}"""
-        private const val DEFAULT_CONFIG = """{
+    LaunchedEffect(Unit) {
+        runCatching { reload() }.onFailure { status = "读取失败：${it.message ?: "unknown"}" }
+    }
+
+    PageColumn {
+        PageHeading("对话", "本地持久化会话；与 API 调用方按身份隔离。")
+        SectionCard("会话中心") {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(status, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                TextButton(onClick = { scope.launch { runCatching { reload() }.onFailure { status = "刷新失败" } } }) { Text("刷新") }
+            }
+            Button(
+                onClick = {
+                    scope.launch {
+                        runCatching {
+                            withContext(Dispatchers.IO) { repository.create(caller, "新对话", "auto") }
+                            reload()
+                        }.onFailure { status = "创建失败：${it.message ?: "unknown"}" }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("新建对话") }
+        }
+        if (items.isEmpty()) {
+            SectionCard("暂无会话") {
+                Text("创建后会保存在本机数据库，应用重启后仍可读取。")
+            }
+        } else {
+            items.forEach { item ->
+                SectionCard(item.title) {
+                    Text("ID：${item.id}", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("模型：${item.model} · 消息：${item.messages.length()}")
+                    Text("更新时间：${java.text.DateFormat.getDateTimeInstance().format(java.util.Date(item.updatedAt))}",
+                        style = MaterialTheme.typography.bodySmall)
+                    Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                        TextButton(onClick = {
+                            scope.launch {
+                                withContext(Dispatchers.IO) { repository.delete(caller, item.id) }
+                                reload()
+                            }
+                        }) { Text("删除") }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HookScreen() {
+    val context = LocalContext.current
+    val service = DshApplication.currentService
+    val defaultConfig = """{
   "schemaVersion": 1,
   "targetPackage": "com.openai.chatgpt",
   "rules": []
 }"""
+    var configText by remember {
+        mutableStateOf(runCatching {
+            service?.getRemotePreferences("dsh")?.getString("hook_config", defaultConfig) ?: defaultConfig
+        }.getOrDefault(defaultConfig))
+    }
+    var reportText by rememberSaveable { mutableStateOf("尚无观察报告。") }
+    var status by rememberSaveable { mutableStateOf(if (service == null) "LSPosed 服务未连接" else "LSPosed 服务已连接") }
+    val scope = rememberCoroutineScope()
+
+    suspend fun readReport() {
+        val result = withContext(Dispatchers.IO) {
+            runCatching {
+                context.contentResolver.call(Uri.parse("content://" + ObservationProvider.AUTHORITY),
+                    ObservationProvider.METHOD_READ, null, null)
+            }.getOrNull()
+        }
+        reportText = result?.getString(ObservationProvider.KEY_REPORT) ?: "读取失败或尚无报告。"
+        val updated = result?.getLong(ObservationProvider.KEY_UPDATED) ?: 0L
+        status = if (updated == 0L) "尚无观察报告" else "报告更新时间（epoch ms）：" + updated
+    }
+
+    PageColumn {
+        PageHeading("Hook Runtime", "查看配置、运行状态与元数据观察。")
+        SectionCard("运行状态") {
+            StatusLine("LSPosed 服务", if (service == null) "未连接" else service.frameworkName + " / API " + service.apiVersion,
+                service != null)
+            StatusLine("目标包", "com.openai.chatgpt")
+            Text(status, style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        SectionCard("Hook 规则配置", "提交前先进行结构校验；规则是否安装成功仍以目标进程结果为准。") {
+            OutlinedTextField(value = configText, onValueChange = { configText = it },
+                modifier = Modifier.fillMaxWidth(), minLines = 8, maxLines = 16,
+                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace))
+            Button(onClick = {
+                val current = DshApplication.currentService
+                if (current == null) {
+                    status = "LSPosed 服务未连接，无法提交。"
+                } else {
+                    runCatching {
+                        val parsed = HookConfigParser.parse(configText)
+                        current.getRemotePreferences("dsh").edit().putString("hook_config", configText).apply()
+                        status = "配置已提交：" + parsed.rules.size + " 条规则；等待目标进程验证。"
+                    }.onFailure { status = "配置被拒绝：" + (it.message ?: it.javaClass.simpleName) }
+                }
+            }, modifier = Modifier.fillMaxWidth()) { Text("验证并提交规则") }
+        }
+        SectionCard("运行时观察", "这里只展示真实收到的元数据报告，不把发现的类算作已 Hook。") {
+            Text(reportText, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(onClick = {
+                    context.getSystemService(android.content.ClipboardManager::class.java)
+                        ?.setPrimaryClip(android.content.ClipData.newPlainText("DSH observations", reportText))
+                    status = "观察报告已复制到剪贴板。"
+                }, modifier = Modifier.weight(1f)) { Text("复制报告") }
+                OutlinedButton(onClick = {
+                    val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                        type = "application/json"
+                        putExtra(android.content.Intent.EXTRA_SUBJECT, "DSH metadata-only Hook observations")
+                        putExtra(android.content.Intent.EXTRA_TEXT, reportText)
+                    }
+                    context.startActivity(android.content.Intent.createChooser(send, "分享脱敏观察报告"))
+                }, modifier = Modifier.weight(1f)) { Text("分享给 AI") }
+            }
+            LaunchedEffect(Unit) { readReport() }
+            OutlinedButton(onClick = { scope.launch { readReport() } },
+                modifier = Modifier.fillMaxWidth()) { Text("刷新观察报告") }
+        }
+    }
+}
+
+@Composable
+private fun AgentScreen() {
+    var depth by rememberSaveable { mutableIntStateOf(3) }
+    var mainMode by rememberSaveable { mutableStateOf("AI 自动选择或创建") }
+    PageColumn {
+        PageHeading("Agent 中心", "主对话调度子智能体，支持多层任务协作。")
+        SectionCard("主智能体") {
+            Text("主对话来源")
+            listOf("选择已有对话", "创建新对话", "AI 自动选择或创建").forEach { option ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(selected = mainMode == option, onClick = { mainMode = option })
+                    Text(option)
+                }
+            }
+            StatusLine("当前策略", mainMode)
+            Text("对话选择器和创建动作将在会话存储接入后启用。",
+                color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+        }
+        SectionCard("层级与规模") {
+            Text("最大层数：" + depth + " 层", fontWeight = FontWeight.SemiBold)
+            Slider(value = depth.toFloat(), onValueChange = { depth = it.toInt().coerceIn(1, 6) },
+                valueRange = 1f..6f, steps = 4)
+            StatusLine("最大并发数", "待配置")
+            StatusLine("最大子智能体数", "待配置")
+        }
+        SectionCard("协作模式") {
+            StatusLine("层级委派", "计划支持")
+            StatusLine("并行执行", "计划支持")
+            StatusLine("交叉审查", "计划支持")
+            StatusLine("动态创建与复用", "计划支持")
+        }
+        SectionCard("执行引擎") {
+            Text("当前分支尚未接入 Agent 调度执行器。UI 与数据结构先行，接入 DSH 原生 subagent/workflow 能力后再启用执行操作。",
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Button(onClick = {}, enabled = false, modifier = Modifier.fillMaxWidth()) {
+                Text("创建智能体团队 · 待接入")
+            }
+        }
+    }
+}
+
+@Composable
+private fun CustomizerScreen() {
+    PageColumn {
+        PageHeading("GPT UI 定制", "管理客户端菜单、按钮、布局和事件绑定。")
+        SectionCard("菜单管理") {
+            StatusLine("菜单结构识别", "待接入")
+            StatusLine("显示 / 隐藏项目", "待接入")
+            StatusLine("拖动排序", "待接入")
+        }
+        SectionCard("自定义按钮") {
+            Text("添加名称、图标、插入位置和点击动作；动作可关联 DSH 页面或已授权工具。",
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            OutlinedButton(onClick = {}, enabled = false, modifier = Modifier.fillMaxWidth()) {
+                Text("添加按钮 · Hook 绑定待接入")
+            }
+        }
+        SectionCard("兼容性与安全") {
+            StatusLine("Hook 绑定状态", "未扫描")
+            StatusLine("客户端版本兼容性", "未验证")
+            StatusLine("恢复默认布局", "待接入")
+        }
     }
 }

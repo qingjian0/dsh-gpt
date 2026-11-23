@@ -3,11 +3,21 @@ agp = "9.3.0"
 kotlin = "2.2.10"
 libxposed = "102.0.0"
 libxposed-service = "102.0.0"
+compose-bom = "2025.08.01"
+activity-compose = "1.10.1"
 
 [libraries]
 libxposed = { group = "io.github.libxposed", name = "api", version.ref = "libxposed" }
 libxposed-service = { group = "io.github.libxposed", name = "service", version.ref = "libxposed-service" }
+androidx-compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "compose-bom" }
+androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activity-compose" }
+androidx-compose-ui = { group = "androidx.compose.ui", name = "ui" }
+androidx-compose-ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling" }
+androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
+androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
+androidx-compose-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }

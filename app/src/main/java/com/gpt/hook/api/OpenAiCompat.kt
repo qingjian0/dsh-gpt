@@ -3,45 +3,70 @@ package com.gpt.hook.api
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
+import java.util.TimeZone
 
 /** OpenAI /v1 协议 ↔ ChatGPT backend conversation 协议 转换。 */
 object OpenAiCompat {
 
     val DEFAULT_MODELS = listOf("auto", "gpt-6", "gpt-6-mini", "gpt-5-6-mini", "research")
 
-    fun toConversation(openAi: JSONObject): JSONObject {
+    fun toConversation(
+        openAi: JSONObject,
+        upstreamConversationId: String? = null,
+        upstreamParentMessageId: String? = null
+    ): JSONObject {
         val messages = openAi.optJSONArray("messages") ?: JSONArray()
-        val parts = JSONArray()
+        val systemInstructions = ArrayList<String>()
+        val transcript = ArrayList<String>()
         var lastUser = ""
         for (i in 0 until messages.length()) {
-            val m = messages.optJSONObject(i) ?: continue
-            val role = m.optString("role", "user")
-            val text = contentText(m)
+            val message = messages.optJSONObject(i) ?: continue
+            val role = message.optString("role", "user")
+            val text = contentText(message)
             if (text.isEmpty()) continue
             when (role) {
-                "system" -> parts.put("System: $text")
-                "assistant" -> parts.put("Assistant: $text")
-                else -> lastUser = text
+                "system", "developer" -> systemInstructions += text
+                "assistant" -> transcript += "Assistant: $text"
+                else -> {
+                    lastUser = text
+                    transcript += "User: $text"
+                }
             }
         }
-        if (parts.length() > 0 && lastUser.isNotEmpty()) lastUser = parts.join("\n") + "\n\n" + lastUser
+        val prompt = if (!upstreamConversationId.isNullOrBlank() || transcript.size <= 1) {
+            (systemInstructions.map { "System: $it" } + lastUser).joinToString("\n\n")
+        } else {
+            (systemInstructions.map { "System: $it" } + transcript).joinToString("\n\n")
+        }
 
         val body = JSONObject()
             .put("action", "next")
             .put("model", openAi.optString("model", "auto").ifBlank { "auto" })
             .put("conversation_mode", JSONObject().put("kind", "primary_assistant"))
-            .put("parent_message_id", UUID.randomUUID().toString())
-            .put("timezone_offset_min", -480)
+            .put("parent_message_id", upstreamParentMessageId?.takeIf { it.isNotBlank() } ?: UUID.randomUUID().toString())
+            .put("timezone_offset_min", TimeZone.getDefault().getOffset(System.currentTimeMillis()) / 60000)
             .put("history_and_training_disabled", false)
+        if (!upstreamConversationId.isNullOrBlank()) body.put("conversation_id", upstreamConversationId)
         val msg = JSONObject()
             .put("id", UUID.randomUUID().toString())
             .put("author", JSONObject().put("role", "user"))
             .put(
                 "content",
-                JSONObject().put("content_type", "text").put("parts", JSONArray().put(lastUser))
+                JSONObject().put("content_type", "text").put("parts", JSONArray().put(prompt))
             )
         body.put("messages", JSONArray().put(msg))
         return body
+    }
+
+    fun lastUserText(openAi: JSONObject): String {
+        val messages = openAi.optJSONArray("messages") ?: return ""
+        for (i in messages.length() - 1 downTo 0) {
+            val message = messages.optJSONObject(i) ?: continue
+            if (message.optString("role", "user") == "user") {
+                return contentText(message)
+            }
+        }
+        return ""
     }
 
     private fun contentText(m: JSONObject): String {

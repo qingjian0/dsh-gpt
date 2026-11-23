@@ -8,14 +8,17 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import com.gpt.hook.DshApplication
 
 /** 承载本地 API 网关的前台服务。 */
 class ApiService : Service() {
 
     private var server: LocalApiServer? = null
+    private lateinit var conversations: ConversationRepository
 
     override fun onCreate() {
         super.onCreate()
+        conversations = (application as? DshApplication)?.conversationRepository ?: ConversationRepository(this)
         val nm = getSystemService(NotificationManager::class.java)
         if (Build.VERSION.SDK_INT >= 26) {
             nm.createNotificationChannel(
@@ -37,7 +40,7 @@ class ApiService : Service() {
             notify("缺少 access_token / oai-did")
             return
         }
-        val s = LocalApiServer(cfg)
+        val s = LocalApiServer(cfg, conversations)
         server = s
         notify(if (s.start()) "本地 API http://${if (cfg.lan) "0.0.0.0" else "127.0.0.1"}:${cfg.port}/v1" else "端口 ${cfg.port} 绑定失败")
     }

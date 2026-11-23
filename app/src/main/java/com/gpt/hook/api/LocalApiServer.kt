@@ -89,6 +89,7 @@ class LocalApiServer(@Volatile var cfg: RelayConfig, private val conversations: 
 
                 when {
                     target == "/health" -> json(out, 200, health())
+                    cfg.apiKey.isBlank() -> json(out, 503, err("configuration_required", "configure a gateway API key before using protected API routes"))
                     !authorized(headers) -> json(out, 401, err("invalid_api_key", "missing or bad Authorization"))
                     target == "/v1/models" -> json(out, 200, OpenAiCompat.modelsJson(OpenAiCompat.DEFAULT_MODELS))
                     target == "/v1/conversations" || target.startsWith("/v1/conversations/") ->
@@ -169,9 +170,13 @@ class LocalApiServer(@Volatile var cfg: RelayConfig, private val conversations: 
     }
 
     private fun authorized(headers: Map<String, String>): Boolean {
-        if (cfg.apiKey.isBlank()) return true
-        val h = headers["authorization"] ?: return false
-        return h.removePrefix("Bearer ").trim() == cfg.apiKey
+        val expected = cfg.apiKey
+        if (expected.isBlank()) return false
+        val value = headers["authorization"] ?: return false
+        val prefix = "Bearer "
+        if (!value.startsWith(prefix, ignoreCase = true)) return false
+        val supplied = value.substring(prefix.length).trim()
+        return supplied.isNotEmpty() && supplied == expected
     }
 
     private fun health(): String = JSONObject()

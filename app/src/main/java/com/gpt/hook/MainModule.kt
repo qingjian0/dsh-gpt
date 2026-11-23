@@ -49,6 +49,8 @@ class MainModule : XposedModule() {
     @Volatile private var targetContextForIpc: Context? = null
     @Volatile private var activeRuntime: HookRuntime? = null
     @Volatile private var lastProviderConfigVersion: Long = -1L
+    @Volatile private var lastApplyReportJson: String =
+        JSONObject().put("state", "not_applied").put("updatedAtMs", 0L).toString()
 
     override fun onModuleLoaded(param: ModuleLoadedParam) {
         super.onModuleLoaded(param)
@@ -180,6 +182,13 @@ class MainModule : XposedModule() {
                 if (!enabled) {
                     updateClassLoadWatcher(false)
                     val removed = runtime.clear()
+                    lastApplyReportJson = JSONObject()
+                        .put("state", "disabled")
+                        .put("removed", removed)
+                        .put("failed", 0)
+                        .put("revision", version)
+                        .put("updatedAtMs", System.currentTimeMillis())
+                        .toString()
                     ModuleLogger.i("GPT API disabled Hook runtime; removed=$removed; revision=$version")
                     scheduleReportPublish()
                     return@execute
@@ -292,6 +301,17 @@ class MainModule : XposedModule() {
         failed: Int,
         revision: Long? = null
     ) {
+        lastApplyReportJson = JSONObject()
+            .put("state", if (failed == 0) "applied" else "partial")
+            .put("requestedRules", rules)
+            .put("added", added)
+            .put("replaced", replaced)
+            .put("retained", retained)
+            .put("removed", removed)
+            .put("failed", failed)
+            .put("revision", revision ?: JSONObject.NULL)
+            .put("updatedAtMs", System.currentTimeMillis())
+            .toString()
         ModuleLogger.i(
             "Hook config applied; rules=$rules; added=$added; replaced=$replaced; " +
                 "retained=$retained; removed=$removed; failed=$failed" +
@@ -314,6 +334,7 @@ class MainModule : XposedModule() {
                 .put("activeHookCount", 0)
                 .put("hooks", org.json.JSONArray()))
             .put("classLoadWatcherEnabled", classLoadWatcher.isEnabled())
+            .put("lastApplyReport", JSONObject(lastApplyReportJson))
             .put("generatedAtMs", System.currentTimeMillis())
         val json = report.toString(2)
         ModuleLogger.i("observation-report: $json")

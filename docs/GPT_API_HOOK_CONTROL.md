@@ -20,6 +20,7 @@ The local GPT API is the control-plane entry point for the Hook Runtime. It auth
 | GET | `/v1/hook/config` | Read the active configuration snapshot |
 | PUT | `/v1/hook/config` | Validate and save a declarative Hook configuration |
 | PUT | `/v1/hook/enabled` | Enable or disable Hook callbacks |
+| POST | `/v1/hook/inspect` | Inspect one exact class and return bounded method/field metadata |
 | POST | `/v1/hook/discover` | Queue an explicit bounded DEX discovery request |
 | GET | `/v1/hook/discovery/{requestId}` | Read discovery task and result |
 | DELETE | `/v1/hook/discovery/{requestId}` | Request cancellation of a discovery task |

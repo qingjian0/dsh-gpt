@@ -28,8 +28,8 @@
 - Provider registry, capability negotiation, request history, and conversation reuse are separate follow-up integrations.
 
 ### Conversations
-- Conversation list, search, detail, continuation, and parent/child agent links.
-- Empty state must explain when the persistent session store is not yet connected.
+- Conversation list, local creation, detail retrieval, deletion, and upstream continuation through the caller-scoped SQLite repository.
+- Search, paginated history, and parent/child Agent navigation remain follow-up work.
 
 ### Hook
 - Existing declarative Hook config validation/submission.
@@ -72,4 +72,4 @@
 
 ## Current implementation boundary
 
-The first UI pass implements the shell and connects only the relay and Hook configuration/report capabilities that already exist in this branch. Conversation persistence, provider registry, Agent orchestration, Hook class inventory, and GPT menu mutation are explicitly marked as not yet integrated.
+The current branch implements the shell, relay, Hook configuration/report, and basic local conversation CRUD/continuation. Provider registry, DSH Agent orchestration, Hook class inventory, and verified GPT menu mutation remain unimplemented.

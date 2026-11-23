@@ -147,6 +147,8 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                 .put("hookInventoryTruncated", runtime.optBoolean("inventoryTruncated", false))
                 .put("installedHooks", installedHooks)
                 .put("classLoadWatcherEnabled", report.optBoolean("classLoadWatcherEnabled", false))
+                .put("lastApplyReport", report.optJSONObject("lastApplyReport") ?: JSONObject()
+                    .put("state", "unavailable"))
                 .put("discoveryTask", taskRaw?.let { JSONObject(it) } ?: JSONObject.NULL)
             json(out, 200, result.toString())
         } catch (t: Throwable) {

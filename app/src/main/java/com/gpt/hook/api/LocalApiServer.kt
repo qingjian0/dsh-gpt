@@ -18,6 +18,7 @@ class LocalApiServer(@Volatile var cfg: RelayConfig, private val conversations: 
 
     private var server: ServerSocket? = null
     private val pool = Executors.newFixedThreadPool(8)
+    private val conversationLocks = Array(64) { Any() }
     @Volatile private var running = false
 
     val port: Int get() = cfg.port
@@ -209,6 +210,11 @@ class LocalApiServer(@Volatile var cfg: RelayConfig, private val conversations: 
             json(out, 400, err("invalid_request", e.message ?: "invalid conversation identity")); return
         }
         val localId = localConversation.id
+        val lock = conversationLocks[(localId.hashCode() and Int.MAX_VALUE) % conversationLocks.size]
+        synchronized(lock) {
+        val conversationForTurn = conversations.get(caller, localId) ?: run {
+            json(out, 404, err("not_found", "conversation not found")); return
+        }
         val responseHeaders = mapOf("X-DSH-Conversation-Id" to localId)
         try {
             conversations.appendMessage(
@@ -223,7 +229,7 @@ class LocalApiServer(@Volatile var cfg: RelayConfig, private val conversations: 
         val id = "chatcmpl-" + UUID.randomUUID().toString().replace("-", "").take(24)
         val client = ChatGptClient(cfg)
         val payload = OpenAiCompat.toConversation(
-            req, localConversation.upstreamConversationId, localConversation.upstreamParentMessageId
+            req, conversationForTurn.upstreamConversationId, conversationForTurn.upstreamParentMessageId
         ).toString().toByteArray(Charsets.UTF_8)
 
         val conn = try {
@@ -282,6 +288,7 @@ class LocalApiServer(@Volatile var cfg: RelayConfig, private val conversations: 
             try { socketSafeFlush(out) } catch (_: Throwable) { }
         } finally {
             try { conn.disconnect() } catch (_: Throwable) { }
+        }
         }
     }
 

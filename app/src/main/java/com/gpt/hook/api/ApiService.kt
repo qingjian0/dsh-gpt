@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import com.gpt.hook.DshApplication
 
 /** 承载本地 API 网关的前台服务。 */
 class ApiService : Service() {
@@ -17,7 +18,7 @@ class ApiService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        conversations = ConversationRepository(this)
+        conversations = (application as? DshApplication)?.conversationRepository ?: ConversationRepository(this)
         val nm = getSystemService(NotificationManager::class.java)
         if (Build.VERSION.SDK_INT >= 26) {
             nm.createNotificationChannel(
@@ -61,7 +62,6 @@ class ApiService : Service() {
     override fun onDestroy() {
         server?.stop()
         server = null
-        if (::conversations.isInitialized) conversations.closeSafely()
         stopForeground(STOP_FOREGROUND_REMOVE)
         super.onDestroy()
     }

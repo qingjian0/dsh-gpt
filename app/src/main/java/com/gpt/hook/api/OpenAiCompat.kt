@@ -9,7 +9,11 @@ object OpenAiCompat {
 
     val DEFAULT_MODELS = listOf("auto", "gpt-6", "gpt-6-mini", "gpt-5-6-mini", "research")
 
-    fun toConversation(openAi: JSONObject): JSONObject {
+    fun toConversation(
+        openAi: JSONObject,
+        upstreamConversationId: String? = null,
+        upstreamParentMessageId: String? = null
+    ): JSONObject {
         val messages = openAi.optJSONArray("messages") ?: JSONArray()
         val parts = JSONArray()
         var lastUser = ""
@@ -30,9 +34,10 @@ object OpenAiCompat {
             .put("action", "next")
             .put("model", openAi.optString("model", "auto").ifBlank { "auto" })
             .put("conversation_mode", JSONObject().put("kind", "primary_assistant"))
-            .put("parent_message_id", UUID.randomUUID().toString())
+            .put("parent_message_id", upstreamParentMessageId?.takeIf { it.isNotBlank() } ?: UUID.randomUUID().toString())
             .put("timezone_offset_min", -480)
             .put("history_and_training_disabled", false)
+        if (!upstreamConversationId.isNullOrBlank()) body.put("conversation_id", upstreamConversationId)
         val msg = JSONObject()
             .put("id", UUID.randomUUID().toString())
             .put("author", JSONObject().put("role", "user"))
@@ -42,6 +47,17 @@ object OpenAiCompat {
             )
         body.put("messages", JSONArray().put(msg))
         return body
+    }
+
+    fun lastUserText(openAi: JSONObject): String {
+        val messages = openAi.optJSONArray("messages") ?: return ""
+        for (i in messages.length() - 1 downTo 0) {
+            val message = messages.optJSONObject(i) ?: continue
+            if (message.optString("role", "user") == "user") {
+                return contentText(message)
+            }
+        }
+        return ""
     }
 
     private fun contentText(m: JSONObject): String {

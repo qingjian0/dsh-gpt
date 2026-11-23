@@ -52,7 +52,7 @@ Rules may use either the legacy `parameterTypes` selector or the exact JVM `meth
 }
 ```
 
-Descriptors follow JVM syntax: primitive types use single-letter codes, object types use `Lpackage/Class;`, arrays use `[`, and the return type follows `) ` with no whitespace (for example `(I)Z`). Exact descriptors are validated before persistence and compared against the reflected method signature in the target process. If omitted, existing `parameterTypes` behavior is preserved; an empty list remains a wildcard for legacy compatibility, so prefer descriptors for overloaded methods.
+Descriptors follow JVM syntax: primitive types use single-letter codes, object types use `Lpackage/Class;`, arrays use `[`, and the return type immediately follows `)` with no whitespace (for example `(I)Z`). Exact descriptors are validated before persistence and compared against the reflected method signature in the target process. If omitted, existing `parameterTypes` behavior is preserved; an empty list remains a wildcard for legacy compatibility, so prefer descriptors for overloaded methods.
 
 A successful `PUT /v1/hook/config` means only that the configuration was validated and persisted. The target process applies it asynchronously; verify `lastApplyReport` and the installed-Hook inventory before claiming it is active.
 

@@ -394,6 +394,7 @@ private fun ConversationsScreen() {
                                 }
                                 selectedId = created.id
                                 selectedConversation = created
+                                reload()
                                 status = "已创建新会话"
                             }.onFailure { status = "创建失败：${it.message ?: "unknown"}" }
                         }

@@ -30,7 +30,7 @@ GET /v1/hook/status
 Authorization: Bearer <client apiKey>
 ```
 
-The `targetObserved` field means that at least one target-process observation report has reached the provider. It does **not** mean that a specific Hook is currently installed or running. Configured rule count is not an installed-Hook count.
+The `targetObserved` field means that a target-process observation/runtime snapshot has reached the provider. `activeHookCount` and `installedHooks` come from the target process's actual HookHandle registry, not from the configuration file or discovery candidates. Each listed entry is marked `state: installed` and includes its rule ID, exact method signature, sample interval and invocation count. `hookInventoryTruncated` indicates that more handles exist than are included in the bounded list. A missing runtime snapshot is reported as `runtimeState: unavailable`, not as a confirmed zero-Hook state.
 
 ### Update rules
 
@@ -74,8 +74,8 @@ The prefix and optional exact class must remain within `com.openai.*`. The reque
 
 ### Observation boundary
 
-The current report contains bounded metadata such as rule ID, method signature, elapsed time, sequence and exception type. It does not contain method arguments, return values, HTTP headers, cookies, access tokens, request/response bodies, or challenge/proof material.
+The current report contains bounded metadata such as rule ID, method signature, elapsed time, sequence, exception type and a bounded snapshot of actually installed Hook handles. It does not contain method arguments, return values, HTTP headers, cookies, access tokens, request/response bodies, or challenge/proof material.
 
 ## Current capability boundary
 
-This first control-plane increment exposes the existing configuration, observation and bounded discovery capabilities through the local GPT API. It does not yet implement the legacy mutation actions `return`, `noop`, `args` or `throw`, nor does it claim an installed-hook inventory. Those require a separately validated rule schema, explicit authorization, type checks, reliable hook-handle lifecycle, rollback and target-device tests.
+This control-plane increment exposes configuration, observation, a target-process installed-Hook inventory and bounded discovery through the local GPT API. It does not yet implement the legacy mutation actions `return`, `noop`, `args` or `throw`, nor does it claim an installed-hook inventory. Those require a separately validated rule schema, explicit authorization, type checks, reliable hook-handle lifecycle, rollback and target-device tests.

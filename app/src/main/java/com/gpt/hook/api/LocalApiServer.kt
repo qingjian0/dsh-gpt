@@ -104,6 +104,7 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                     target == "/v1/hook/config" -> hookConfig(out, method, body)
                     target == "/v1/hook/enabled" && method == "PUT" -> hookEnabled(out, body)
                     target == "/v1/hook/discover" && method == "POST" -> hookDiscover(out, body)
+                    target == "/v1/hook/inspect" && method == "POST" -> hookDiscover(out, body, requireExactClass = true)
                     target.startsWith("/v1/hook/discovery/") -> hookDiscovery(out, method, target)
                     target == "/v1/conversations" || target.startsWith("/v1/conversations/") ->
                         conversationRoute(out, method, target, body, headers)
@@ -253,13 +254,14 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         }
     }
 
-    private fun hookDiscover(out: OutputStream, body: ByteArray?) {
+    private fun hookDiscover(out: OutputStream, body: ByteArray?, requireExactClass: Boolean = false) {
         try {
             val request = JSONObject(String(body ?: ByteArray(0), Charsets.UTF_8))
             val prefix = request.optString("prefix", "com.openai.")
             val className = request.optString("className").takeIf { it.isNotBlank() && it != "null" }
             val limit = request.optInt("limit", 100)
             val cursor = request.optInt("cursor", 0)
+            require(!requireExactClass || className != null) { "className is required for exact inspection" }
             require(prefix.startsWith("com.openai.") && prefix.length <= 180) { "prefix must be within com.openai.*" }
             require(className == null || (className.startsWith("com.openai.") && className.length <= 240)) {
                 "className must be within com.openai.*"

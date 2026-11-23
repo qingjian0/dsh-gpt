@@ -72,6 +72,20 @@ The response acknowledges persistence. Target-process application is asynchronou
 
 When the ChatGPT target process reaches its Application context, the module starts one bounded metadata-only DEX scan in a background worker. Class-load observation is enabled by default when omitted from config; it records deduplicated `com.openai.*` class names up to a fixed budget. Set `observeClassLoads: false` to disable it. Current scan limits: 16 DEX files, 2,500 class names, 1.5 seconds, 100 member records and a 64 KiB response. It does not initialize or invoke discovered app classes. Results are partial when truncation is reported.
 
+## Inspect one exact class
+
+Use exact inspection to retrieve declared and inherited method signatures, constructors and field metadata for one class. This is a metadata-only operation; it does not initialize the class or invoke methods.
+
+```http
+POST /v1/hook/inspect
+Authorization: Bearer <client apiKey>
+Content-Type: application/json
+
+{"className":"com.openai.auth.Session","limit":200,"cursor":0}
+```
+
+The endpoint requires an exact `className` under `com.openai.*` and returns HTTP 202 with a request ID. Poll `/v1/hook/discovery/{requestId}` for the result. Method records include signatures suitable for deriving exact JVM descriptors; generated candidate proposals remain suggestions and are not installed automatically.
+
 ## Discover classes and methods
 
 ```http

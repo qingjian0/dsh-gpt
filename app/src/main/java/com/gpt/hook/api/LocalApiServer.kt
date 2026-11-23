@@ -14,7 +14,7 @@ import java.util.concurrent.Executors
  * 本地 OpenAI 兼容 API + backend-api 透传网关。
  * 无第三方依赖，手写 HTTP/1.1，SSE 用 Connection: close 定界。
  */
-class LocalApiServer(@Volatile var cfg: RelayConfig) {
+class LocalApiServer(@Volatile var cfg: RelayConfig, private val conversations: ConversationRepository) {
 
     private var server: ServerSocket? = null
     private val pool = Executors.newFixedThreadPool(8)
@@ -88,6 +88,8 @@ class LocalApiServer(@Volatile var cfg: RelayConfig) {
                     target == "/health" -> json(out, 200, health())
                     !authorized(headers) -> json(out, 401, err("invalid_api_key", "missing or bad Authorization"))
                     target == "/v1/models" -> json(out, 200, OpenAiCompat.modelsJson(OpenAiCompat.DEFAULT_MODELS))
+                    target == "/v1/conversations" || target.startsWith("/v1/conversations/") ->
+                        conversationRoute(out, method, target, body, headers)
                     method == "POST" && target.startsWith("/v1/chat/completions") ->
                         chat(out, body ?: ByteArray(0), headers)
                     target.startsWith("/backend-api") -> passthrough(out, method, target, body, headers)
@@ -97,6 +99,52 @@ class LocalApiServer(@Volatile var cfg: RelayConfig) {
                 try { socket.close() } catch (_: Throwable) { }
             }
         }
+    }
+
+
+    private fun conversationRoute(out: OutputStream, method: String, target: String, body: ByteArray?, headers: Map<String, String>) {
+        val caller = headers["x-dsh-client-id"]
+        if (caller.isNullOrBlank()) { json(out, 400, err("invalid_request", "X-DSH-Client-Id is required")); return }
+        try {
+            val base = "/v1/conversations"
+            if (target == base && method == "GET") {
+                val arr = org.json.JSONArray()
+                conversations.list(caller).forEach { arr.put(conversationJson(it, false)) }
+                json(out, 200, JSONObject().put("object", "list").put("data", arr).toString()); return
+            }
+            if (target == base && method == "POST") {
+                val req = JSONObject(String(body ?: ByteArray(0), Charsets.UTF_8))
+                val item = conversations.create(caller, req.optString("title", "New conversation"), req.optString("model", "auto"), req.optString("parent_id").takeIf { it.isNotBlank() })
+                json(out, 201, conversationJson(item).toString()); return
+            }
+            val parts = target.removePrefix(base).removePrefix("/").split("/")
+            val id = parts.firstOrNull().orEmpty()
+            if (id.isBlank() || id.length > 64) { json(out, 404, err("not_found", "conversation not found")); return }
+            if (parts.size == 1 && method == "GET") {
+                val item = conversations.get(caller, id)
+                if (item == null) json(out, 404, err("not_found", "conversation not found")) else json(out, 200, conversationJson(item).toString())
+                return
+            }
+            if (parts.size == 1 && method == "DELETE") {
+                val deleted = conversations.delete(caller, id)
+                if (deleted) json(out, 200, JSONObject().put("deleted", true).put("id", id).toString()) else json(out, 404, err("not_found", "conversation not found"))
+                return
+            }
+            if (parts.size == 2 && parts[1] == "messages" && method == "POST") {
+                val item = conversations.appendMessage(caller, id, JSONObject(String(body ?: ByteArray(0), Charsets.UTF_8)))
+                if (item == null) json(out, 404, err("not_found", "conversation not found")) else json(out, 200, conversationJson(item).toString())
+                return
+            }
+            json(out, 404, err("not_found", "route not found"))
+        } catch (e: IllegalArgumentException) { json(out, 400, err("invalid_request", e.message ?: "invalid request")) }
+          catch (t: Throwable) { json(out, 500, err("internal_error", "conversation operation failed")) }
+    }
+
+    private fun conversationJson(item: ConversationRepository.Conversation, includeMessages: Boolean = true): JSONObject {
+        val obj = JSONObject().put("id", item.id).put("object", "conversation").put("title", item.title).put("model", item.model)
+            .put("parent_id", item.parentId ?: JSONObject.NULL).put("created_at", item.createdAt).put("updated_at", item.updatedAt)
+        if (includeMessages) obj.put("messages", item.messages)
+        return obj
     }
 
     private fun authorized(headers: Map<String, String>): Boolean {

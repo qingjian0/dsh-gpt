@@ -5,10 +5,12 @@ on:
     branches: [ main, 'feat/**', 'refactor/**' ]
     paths:
       - 'integration/dsh-agent-hook-extension/**'
+      - 'integration/dsh-agent-runtime/**'
       - '.github/workflows/agent-plugin.yml'
   pull_request:
     paths:
       - 'integration/dsh-agent-hook-extension/**'
+      - 'integration/dsh-agent-runtime/**'
       - '.github/workflows/agent-plugin.yml'
   workflow_dispatch:
 
@@ -22,8 +24,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
       - name: Validate plugin syntax
         run: node --check integration/dsh-agent-hook-extension/index.mjs
       - name: Validate package metadata
         run: node -e "const p=require('./integration/dsh-agent-hook-extension/package.json'); if(p.type!=='module'||p.main!=='index.mjs') process.exit(1)"
+      - name: Run DSH-GPT Agent runtime contract tests
+        run: npm test --prefix integration/dsh-agent-runtime

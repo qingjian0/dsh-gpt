@@ -91,7 +91,7 @@ class ObservationProvider : ContentProvider() {
                 }
             }
             METHOD_HOST_DISCOVER -> {
-                enforceDshHostCaller(uid)
+                enforceModuleOrDshHostCaller(uid)
                 val raw = extras?.getString(KEY_DISCOVERY_REQUEST).orEmpty()
                 require(raw.toByteArray(Charsets.UTF_8).size <= MAX_DISCOVERY_REQUEST_BYTES) {
                     "Discovery request exceeds size limit"
@@ -192,7 +192,7 @@ class ObservationProvider : ContentProvider() {
                 }
             }
             METHOD_HOST_DISCOVERY_RESULT -> {
-                enforceDshHostCaller(uid)
+                enforceModuleOrDshHostCaller(uid)
                 val requestId = extras?.getString(KEY_DISCOVERY_ID).orEmpty()
                 val task = prefs.getString(KEY_DISCOVERY_TASK, null)?.let(::decodeTask) ?: return Bundle()
                 if (task.requestId != requestId) return Bundle()
@@ -202,7 +202,7 @@ class ObservationProvider : ContentProvider() {
                 }
             }
             METHOD_HOST_DISCOVERY_CANCEL -> {
-                enforceDshHostCaller(uid)
+                enforceModuleOrDshHostCaller(uid)
                 val requestId = extras?.getString(KEY_DISCOVERY_ID).orEmpty()
                 val task = prefs.getString(KEY_DISCOVERY_TASK, null)?.let(::decodeTask)
                     ?: throw IllegalStateException("Discovery task is unavailable")
@@ -258,6 +258,12 @@ class ObservationProvider : ContentProvider() {
         if (DSH_HOST_PACKAGE !in packages) {
             throw SecurityException("Only the configured DSH host package may manage Hook controls")
         }
+    }
+
+    /** The module control UI and the configured DSH host may submit/read/cancel discovery jobs. */
+    private fun enforceModuleOrDshHostCaller(uid: Int) {
+        if (uid == requireNotNull(context).applicationInfo.uid) return
+        enforceDshHostCaller(uid)
     }
 
     override fun query(uri: Uri, projection: Array<out String>?, selection: String?,

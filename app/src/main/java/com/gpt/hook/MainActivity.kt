@@ -288,6 +288,30 @@ private fun ApiScreen() {
             OutlinedTextField(value = token, onValueChange = { token = it },
                 label = { Text("access_token") }, modifier = Modifier.fillMaxWidth(),
                 visualTransformation = PasswordVisualTransformation(), minLines = 2, maxLines = 4)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(onClick = {
+                    val clipboard = context.getSystemService(android.content.ClipboardManager::class.java)
+                    val json = clipboard?.primaryClip?.takeIf { it.itemCount > 0 }
+                        ?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()
+                    runCatching {
+                        require(json.isNotBlank()) { "剪贴板为空，请先复制 kit.json 内容。" }
+                        RelayConfig.importKit(context, json)
+                    }.onSuccess { imported ->
+                        config = imported
+                        message = "已从剪贴板导入 kit.json。"
+                    }.onFailure { message = "导入失败：${it.message ?: it.javaClass.simpleName}" }
+                }, modifier = Modifier.weight(1f)) { Text("导入 kit.json") }
+                OutlinedButton(onClick = {
+                    if (config.apiKey.isBlank()) {
+                        message = "请先配置客户端 API Key。"
+                    } else {
+                        val command = "curl -H \"Authorization: Bearer ${config.apiKey}\" http://127.0.0.1:${config.port}/v1/models"
+                        context.getSystemService(android.content.ClipboardManager::class.java)
+                            ?.setPrimaryClip(android.content.ClipData.newPlainText("local api curl", command))
+                        message = "已复制 /v1/models 测试命令。"
+                    }
+                }, modifier = Modifier.weight(1f)) { Text("复制测试命令") }
+            }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("允许局域网访问", modifier = Modifier.weight(1f))
                 Switch(checked = config.lan, onCheckedChange = { config = config.copy(lan = it) })
@@ -443,6 +467,21 @@ private fun HookScreen() {
         }
         SectionCard("运行时观察", "这里只展示真实收到的元数据报告，不把发现的类算作已 Hook。") {
             Text(reportText, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(onClick = {
+                    context.getSystemService(android.content.ClipboardManager::class.java)
+                        ?.setPrimaryClip(android.content.ClipData.newPlainText("DSH observations", reportText))
+                    status = "观察报告已复制到剪贴板。"
+                }, modifier = Modifier.weight(1f)) { Text("复制报告") }
+                OutlinedButton(onClick = {
+                    val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                        type = "application/json"
+                        putExtra(android.content.Intent.EXTRA_SUBJECT, "DSH metadata-only Hook observations")
+                        putExtra(android.content.Intent.EXTRA_TEXT, reportText)
+                    }
+                    context.startActivity(android.content.Intent.createChooser(send, "分享脱敏观察报告"))
+                }, modifier = Modifier.weight(1f)) { Text("分享给 AI") }
+            }
             LaunchedEffect(Unit) { readReport() }
             OutlinedButton(onClick = { scope.launch { readReport() } },
                 modifier = Modifier.fillMaxWidth()) { Text("刷新观察报告") }

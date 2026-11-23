@@ -142,7 +142,8 @@ class HookRuntime(
         var failed = 0
         for (executable in candidates) {
             val signature = executable.toGenericString()
-            val key = "${rule.id}:$signature"
+            val loaderId = System.identityHashCode(executable.declaringClass.classLoader)
+            val key = "${rule.id}:$loaderId:$signature"
             keys += key
             val fingerprintSource = listOf(
                 rule.className, rule.methodName, rule.parameterTypes.joinToString(","),
@@ -167,7 +168,7 @@ class HookRuntime(
             }
 
             try {
-                val hookId = stableHookId(rule.id, signature)
+                val hookId = stableHookId(rule.id, "$loaderId|$signature")
                 val handle = framework.hook(executable)
                     .setId(hookId)
                     .intercept { chain ->

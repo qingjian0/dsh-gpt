@@ -51,6 +51,37 @@ class ObservationProvider : ContentProvider() {
                 prefs.edit().remove(KEY_REPORT).remove(KEY_UPDATED).commit()
                 Bundle().apply { putBoolean(KEY_ACCEPTED, true) }
             }
+            METHOD_API_SNAPSHOT -> {
+                enforceModuleCaller(uid)
+                Bundle().apply {
+                    putString(KEY_REPORT, prefs.getString(KEY_REPORT, EMPTY_REPORT))
+                    putString(KEY_CONFIG, prefs.getString(KEY_CONFIG, EMPTY_CONFIG))
+                    putBoolean(KEY_ENABLED, prefs.getBoolean(KEY_ENABLED, true))
+                    putLong(KEY_CONFIG_UPDATED, prefs.getLong(KEY_CONFIG_UPDATED, 0L))
+                    putLong(KEY_UPDATED, prefs.getLong(KEY_UPDATED, 0L))
+                    putString(KEY_DISCOVERY_TASK, prefs.getString(KEY_DISCOVERY_TASK, null))
+                    putString(KEY_DISCOVERY_RESULT, prefs.getString(KEY_DISCOVERY_RESULT, null))
+                }
+            }
+            METHOD_API_SET_CONFIG -> {
+                enforceModuleCaller(uid)
+                val json = extras?.getString(KEY_CONFIG).orEmpty()
+                require(json.toByteArray(Charsets.UTF_8).size <= MAX_REPORT_BYTES) { "Configuration exceeds size limit" }
+                HookConfigParser.parse(json)
+                val now = System.currentTimeMillis()
+                val saved = prefs.edit().putString(KEY_CONFIG, json).putLong(KEY_CONFIG_UPDATED, now).commit()
+                Bundle().apply { putBoolean(KEY_ACCEPTED, saved); putLong(KEY_CONFIG_UPDATED, now) }
+            }
+            METHOD_API_SET_ENABLED -> {
+                enforceModuleCaller(uid)
+                val enabled = extras?.getBoolean(KEY_ENABLED)
+                    ?: throw IllegalArgumentException("enabled is required")
+                val saved = prefs.edit()
+                    .putBoolean(KEY_ENABLED, enabled)
+                    .putLong(KEY_CONFIG_UPDATED, System.currentTimeMillis())
+                    .commit()
+                Bundle().apply { putBoolean(KEY_ACCEPTED, saved) }
+            }
             METHOD_HOST_SNAPSHOT -> {
                 enforceDshHostCaller(uid)
                 Bundle().apply {
@@ -282,6 +313,9 @@ class ObservationProvider : ContentProvider() {
         const val METHOD_PUBLISH = "publish"
         const val METHOD_READ = "read"
         const val METHOD_CLEAR = "clear"
+        const val METHOD_API_SNAPSHOT = "api_snapshot"
+        const val METHOD_API_SET_CONFIG = "api_set_config"
+        const val METHOD_API_SET_ENABLED = "api_set_enabled"
         const val METHOD_HOST_SNAPSHOT = "host_snapshot"
         const val METHOD_HOST_SET_CONFIG = "host_set_config"
         const val METHOD_HOST_SET_ENABLED = "host_set_enabled"

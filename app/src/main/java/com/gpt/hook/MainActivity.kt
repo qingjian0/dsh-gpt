@@ -28,6 +28,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.gpt.hook.api.ApiService
+import com.gpt.hook.api.OpenAiCompat
 import com.gpt.hook.api.RelayConfig
 import com.gpt.hook.diagnostics.HookConfigParser
 import kotlinx.coroutines.Dispatchers
@@ -199,7 +200,7 @@ private fun StatusLine(label: String, value: String, positive: Boolean? = null) 
 private fun HomeScreen(onNavigate: (MainTab) -> Unit) {
     val context = LocalContext.current
     val relay = remember { RelayConfig.load(context) }
-    val xposedConnected = DshApplication.currentService != null
+    val xposedConnected = DshApplication.currentServiceState.value != null
     PageColumn {
         PageHeading("运行总览", "管理 AI 服务、运行时扩展与智能体工作流。")
         SectionCard("系统状态", "仅展示当前可读取的真实状态") {
@@ -276,15 +277,12 @@ private fun ApiScreen() {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
                     onClick = {
-                        if (!config.ready) {
-                            message = "请先填写 access_token 和 oai-did。"
-                        } else {
-                            val next = config.copy(enabled = true)
-                            RelayConfig.save(context, next)
-                            ApiService.start(context)
-                            config = next
-                            message = "已请求启动 API 服务。"
-                        }
+                        val next = config.copy(enabled = true)
+                        RelayConfig.save(context, next)
+                        ApiService.start(context)
+                        config = next
+                        message = if (next.ready) "已请求启动本地 API 服务。" else
+                            "本地 API 已启动；配置上游凭据后即可处理对话请求。"
                     },
                     modifier = Modifier.weight(1f)
                 ) { Text("启动") }
@@ -347,7 +345,7 @@ private fun ApiScreen() {
                     val next = config.copy(port = parsedPort, apiKey = apiKey.trim(),
                         oaiDid = did.trim(), accessToken = token.trim())
                     RelayConfig.save(context, next)
-                    if (next.enabled && next.ready) ApiService.start(context) else if (!next.enabled) ApiService.stop(context)
+                    if (next.enabled) ApiService.start(context) else ApiService.stop(context)
                     config = next
                     message = "配置已保存。"
                 }
@@ -360,7 +358,7 @@ private fun ApiScreen() {
             StatusLine("电脑连接地址", if (config.lan && lanIp != "未连接")
                 "http://${lanIp}:${config.port}/v1" else "请开启局域网访问并保存")
             StatusLine("认证方式", "Bearer API Key")
-            StatusLine("模型列表", "auto · gpt-6 · gpt-6-mini · research")
+            StatusLine("模型列表", OpenAiCompat.DEFAULT_MODELS.joinToString(" · "))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 OutlinedButton(onClick = {
                     val value = "http://127.0.0.1:${config.port}/v1"
@@ -581,7 +579,11 @@ private fun ConversationsScreen() {
                                 reload()
                                 status = "回复完成"
                             }.onFailure {
-                                status = "发送失败：${it.message ?: it.javaClass.simpleName}"
+                                val failure = "发送失败：${it.message ?: it.javaClass.simpleName}"
+                                // The gateway persists the user message before contacting upstream.
+                                // Reload even on failure so the local transcript never stays stale.
+                                runCatching { reload() }
+                                status = failure
                             }
                             sending = false
                         }
@@ -603,10 +605,17 @@ private fun HookScreen() {
   "targetPackage": "com.openai.chatgpt",
   "rules": []
 }"""
-    var configText by remember {
-        mutableStateOf(runCatching {
-            service?.getRemotePreferences("dsh")?.getString("hook_config", defaultConfig) ?: defaultConfig
-        }.getOrDefault(defaultConfig))
+    var configText by remember { mutableStateOf(defaultConfig) }
+    var configLoaded by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(service) {
+        if (service != null && !configLoaded) {
+            configText = runCatching {
+                service.getRemotePreferences("dsh").getString("hook_config", defaultConfig) ?: defaultConfig
+            }.getOrDefault(defaultConfig)
+            configLoaded = true
+        }
+        status = if (service == null) "LSPosed 服务未连接" else
+            service.frameworkName + " / API " + service.apiVersion
     }
     var reportText by rememberSaveable { mutableStateOf("尚无观察报告。") }
     var status by rememberSaveable { mutableStateOf(if (service == null) "LSPosed 服务未连接" else "LSPosed 服务已连接") }
@@ -660,7 +669,8 @@ private fun HookScreen() {
     LaunchedEffect(discoveryId) {
         val requestId = discoveryId
         if (requestId.isBlank()) return@LaunchedEffect
-        while (true) {
+        var pollCount = 0
+        while (pollCount++ < 180) {
             val extras = android.os.Bundle().apply {
                 putString(ObservationProvider.KEY_DISCOVERY_ID, requestId)
             }
@@ -695,6 +705,10 @@ private fun HookScreen() {
                 }
             }
             delay(1000)
+        }
+        if (discoveryActive && pollCount >= 180) {
+            discoveryActive = false
+            discoveryTaskText = "扫描状态查询超时；可刷新或重新发起扫描。"
         }
     }
 

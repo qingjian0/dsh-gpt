@@ -6,6 +6,8 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.net.Uri
 import android.os.Bundle
+import com.gpt.hook.hardening.Hardening
+import com.gpt.hook.hardening.RequestDump
 import com.gpt.hook.diagnostics.EventBuffer
 import com.gpt.hook.diagnostics.ClassLoadWatcher
 import com.gpt.hook.diagnostics.HookConfigParser
@@ -74,8 +76,14 @@ class MainModule : XposedModule() {
                 ?: RemoteConfigLoader.read(this)
                 ?: DEFAULT_CONFIG
             configExecutor.execute {
+                val config = runCatching { HookConfigParser.parse(source) }.getOrElse { e ->
+                    ModuleLogger.w("configuration rejected; reason=${e.javaClass.simpleName}; falling back to defaults")
+                    runCatching { HookConfigParser.parse(DEFAULT_CONFIG) }.getOrNull()
+                } ?: return@execute
+                // 硬化能力不依赖配置解析结果：解析失败时按默认开关（开启）安装
+                if (config.hardening) runCatching { Hardening.install(this@MainModule, param.classLoader) }
+                if (config.dumpRequests) runCatching { RequestDump.install(this@MainModule, param.classLoader) }
                 try {
-                    val config = HookConfigParser.parse(source)
                     val report = hookRuntime.applyWithReport(config)
                     updateClassLoadWatcher(config.observeClassLoads)
                     logApplyReport(config.rules.size, report.added, report.replaced, report.retained, report.removed, report.failed)

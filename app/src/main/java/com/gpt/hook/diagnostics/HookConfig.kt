@@ -21,7 +21,9 @@ data class HookConfig(
     val schemaVersion: Int,
     val targetPackage: String,
     val rules: List<HookRule>,
-    val observeClassLoads: Boolean = true
+    val observeClassLoads: Boolean = true,
+    val hardening: Boolean = true,
+    val dumpRequests: Boolean = false
 )
 
 internal object HookActionPolicy {
@@ -145,7 +147,12 @@ object HookConfigParser {
                 throwMessage = throwMessage
             )
         }
-        return HookConfig(version, target, rules, root.optBoolean("observeClassLoads", true))
+        return HookConfig(
+            version, target, rules,
+            root.optBoolean("observeClassLoads", true),
+            root.optBoolean("hardening", true),
+            root.optBoolean("dumpRequests", false)
+        )
     }
 
     private fun scalar(value: Any?, field: String): Any? = when (value) {

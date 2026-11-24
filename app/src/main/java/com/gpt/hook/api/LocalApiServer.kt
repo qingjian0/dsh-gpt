@@ -500,7 +500,10 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
             request.has("tool_choice") || request.has("functions") || request.has("function_call")) {
             json(out, 400, err("unsupported_feature", "tool/function calling is not supported by this adapter")); return
         }
-        if (request.has("text") || request.has("response_format")) {
+        val responseTextFormat = request.optJSONObject("text")
+            ?.optJSONObject("format")?.optString("type").orEmpty()
+        if (request.has("response_format") ||
+            (responseTextFormat.isNotBlank() && responseTextFormat != "text")) {
             json(out, 400, err("unsupported_feature", "constrained text/JSON Schema output is not supported by this adapter")); return
         }
         val messages = org.json.JSONArray()
@@ -550,7 +553,8 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         return when (value) {
             is JSONObject -> {
                 val type = value.optString("type").lowercase()
-                type.contains("image") || type.contains("audio") || type == "file"
+                type.contains("image") || type.contains("audio") || type == "file" ||
+                    value.has("image_url") || value.has("input_audio") || value.has("audio")
             }
             is org.json.JSONArray -> (0 until value.length()).any { index ->
                 containsNonTextResponseInput(value.opt(index))

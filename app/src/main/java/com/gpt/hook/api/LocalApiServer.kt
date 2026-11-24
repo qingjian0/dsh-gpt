@@ -613,7 +613,7 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                 writeHead(out, 200, "text/event-stream; charset=utf-8", null, responseHeaders)
                 if (responsesMode) {
                     writeResponseEvent(out, "response.created", JSONObject()
-                        .put("response", OpenAiCompat.responseObject(id, model, "", "in_progress")))
+                        .put("response", OpenAiCompat.responseObject(id, model, "", "in_progress", responseItemId)))
                     writeResponseEvent(out, "response.output_item.added", JSONObject()
                         .put("output_index", 0)
                         .put("item", JSONObject().put("id", responseItemId).put("type", "message")
@@ -654,7 +654,7 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                             .put("content", org.json.JSONArray().put(JSONObject().put("type", "output_text")
                                 .put("text", full).put("annotations", org.json.JSONArray())))))
                     writeResponseEvent(out, "response.completed", JSONObject()
-                        .put("response", OpenAiCompat.responseObject(id, model, full)))
+                        .put("response", OpenAiCompat.responseObject(id, model, full, itemId = responseItemId)))
                 } else {
                     writeChunk(out, "data: " + OpenAiCompat.chunk(id, model, "", "stop") + "\n\n")
                     writeChunk(out, "data: [DONE]\n\n")
@@ -743,7 +743,24 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         extraHeaders: Map<String, String> = emptyMap()
     ) {
         val sb = StringBuilder()
-        sb.append("HTTP/1.1 ").append(code).append(if (code == 204) " No Content\r\n" else " OK\r\n")
+        val reason = when (code) {
+            200 -> "OK"
+            201 -> "Created"
+            202 -> "Accepted"
+            204 -> "No Content"
+            400 -> "Bad Request"
+            401 -> "Unauthorized"
+            403 -> "Forbidden"
+            404 -> "Not Found"
+            405 -> "Method Not Allowed"
+            413 -> "Payload Too Large"
+            429 -> "Too Many Requests"
+            500 -> "Internal Server Error"
+            502 -> "Bad Gateway"
+            503 -> "Service Unavailable"
+            else -> "Response"
+        }
+        sb.append("HTTP/1.1 ").append(code).append(" ").append(reason).append("\r\n")
         sb.append("Content-Type: ").append(contentType).append("\r\n")
         sb.append("Access-Control-Allow-Origin: *\r\n")
         sb.append("Access-Control-Allow-Headers: Authorization, Content-Type, X-DSH-Client-Id, X-DSH-Conversation-Id\r\n")

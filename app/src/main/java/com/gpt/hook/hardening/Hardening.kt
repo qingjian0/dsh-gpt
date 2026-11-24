@@ -211,9 +211,8 @@ object Hardening {
             val pinner = Class.forName("okhttp3.CertificatePinner", false, cl)
             for (m in pinner.declaredMethods) {
                 if (m.name != "check") continue
-                framework.hook(m).setId("dsh.pin.okhttp.${m.parameterCount}").intercept { chain ->
-                    chain.setResult(null)
-                    chain.proceed()
+                framework.hook(m).setId("dsh.pin.okhttp.${m.parameterCount}").intercept {
+                    null
                 }
                 n++
                 break
@@ -241,9 +240,8 @@ object Hardening {
             try {
                 val c = Class.forName(cls, false, cl)
                 val m = c.declaredMethods.firstOrNull { it.name == method } ?: continue
-                framework.hook(m).setId("dsh.tlm.$cls.$method").intercept { chain ->
-                    chain.setResult(null)
-                    chain.proceed()
+                framework.hook(m).setId("dsh.tlm.$cls.$method").intercept {
+                    null
                 }
                 n++
             } catch (_: Throwable) {

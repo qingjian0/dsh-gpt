@@ -13,6 +13,7 @@ import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.util.UUID
+import java.security.MessageDigest
 import java.util.concurrent.Executors
 
 /**
@@ -82,18 +83,28 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                     json(out, 413, err("request_too_large", "request body exceeds 1 MiB"))
                     return
                 }
-                val body = if (contentLength > 0) {
-                    val buf = ByteArray(contentLength)
-                    var off = 0
-                    while (off < contentLength) {
-                        val n = input.read(buf, off, contentLength - off)
-                        if (n < 0) break
-                        off += n
+                if (headers["expect"]?.equals("100-continue", ignoreCase = true) == true) {
+                    out.write("HTTP/1.1 100 Continue\r\n\r\n".toByteArray(Charsets.ISO_8859_1))
+                    out.flush()
+                }
+                val body = when {
+                    headers["transfer-encoding"]?.contains("chunked", ignoreCase = true) == true ->
+                        readChunkedBody(input)
+                    contentLength > 0 -> {
+                        val buf = ByteArray(contentLength)
+                        var off = 0
+                        while (off < contentLength) {
+                            val n = input.read(buf, off, contentLength - off)
+                            if (n < 0) throw java.io.EOFException("incomplete request body")
+                            off += n
+                        }
+                        buf
                     }
-                    buf
-                } else null
+                    else -> null
+                }
 
                 when {
+                    method == "OPTIONS" -> corsPreflight(out)
                     target == "/health" -> json(out, 200, health())
                     cfg.apiKey.isBlank() -> json(out, 503, err("configuration_required", "configure a gateway API key before using protected API routes"))
                     !authorized(headers) -> json(out, 401, err("invalid_api_key", "missing or bad Authorization"))
@@ -110,6 +121,8 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                         conversationRoute(out, method, target, body, headers)
                     method == "POST" && target == "/v1/chat/completions" ->
                         chat(out, body ?: ByteArray(0), headers)
+                    method == "POST" && target == "/v1/responses" ->
+                        responses(out, body ?: ByteArray(0), headers)
                     target.startsWith("/backend-api") -> passthrough(out, method, target, body, headers)
                     else -> json(out, 404, err("not_found", "route not found"))
                 }
@@ -347,8 +360,7 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
             json(out, 503, err("configuration_required", "configure a gateway API key before using conversation endpoints"))
             return
         }
-        val caller = headers["x-dsh-client-id"]
-        if (caller.isNullOrBlank()) { json(out, 400, err("invalid_request", "X-DSH-Client-Id is required")); return }
+        val caller = callerId(headers)
         try {
             val base = "/v1/conversations"
             if (target == base && method == "GET") {
@@ -405,6 +417,52 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         return bytes.toString("ISO-8859-1")
     }
 
+    /** Standard OpenAI clients only send Authorization; the DSH header remains optional. */
+    private fun callerId(headers: Map<String, String>): String {
+        val supplied = headers["x-dsh-client-id"]?.trim()
+        if (!supplied.isNullOrBlank() && supplied.length <= 96 &&
+            supplied.matches(Regex("[A-Za-z0-9._:-]+"))) return supplied
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest(cfg.apiKey.toByteArray(Charsets.UTF_8))
+            .take(8).joinToString("") { "%02x".format(it) }
+        return "openai-$digest"
+    }
+
+    private fun corsPreflight(out: OutputStream) {
+        writeHead(out, 204, "text/plain; charset=utf-8", 0L)
+    }
+
+    private fun readChunkedBody(input: java.io.InputStream): ByteArray {
+        val output = java.io.ByteArrayOutputStream()
+        while (true) {
+            val sizeLine = readHttpLine(input) ?: throw java.io.EOFException("missing chunk size")
+            val size = sizeLine.substringBefore(";").trim().toLongOrNull(16)
+                ?: throw IllegalArgumentException("invalid chunk size")
+            if (size < 0 || size > MAX_REQUEST_BYTES || output.size().toLong() + size > MAX_REQUEST_BYTES) {
+                throw IllegalArgumentException("request body exceeds 1 MiB")
+            }
+            if (size == 0L) {
+                while (true) {
+                    val trailer = readHttpLine(input) ?: break
+                    if (trailer.isEmpty()) break
+                }
+                break
+            }
+            var remaining = size.toInt()
+            val buffer = ByteArray(minOf(8192, remaining))
+            while (remaining > 0) {
+                val count = input.read(buffer, 0, minOf(buffer.size, remaining))
+                if (count < 0) throw java.io.EOFException("incomplete chunk")
+                output.write(buffer, 0, count)
+                remaining -= count
+            }
+            if (input.read() != 13 || input.read() != 10) {
+                throw IllegalArgumentException("invalid chunk terminator")
+            }
+        }
+        return output.toByteArray()
+    }
+
     private fun authorized(headers: Map<String, String>): Boolean {
         val expected = cfg.apiKey
         if (expected.isBlank()) return false
@@ -424,10 +482,7 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         val req = try { JSONObject(String(body, Charsets.UTF_8)) } catch (t: Throwable) {
             json(out, 400, err("invalid_request", "body is not JSON")); return
         }
-        val caller = headers["x-dsh-client-id"]
-        if (caller.isNullOrBlank()) {
-            json(out, 400, err("invalid_request", "X-DSH-Client-Id is required for chat completions")); return
-        }
+        val caller = callerId(headers)
         val model = req.optString("model", "auto").ifBlank { "auto" }
         val userText = OpenAiCompat.lastUserText(req)
         if (userText.isBlank()) {
@@ -581,8 +636,13 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         extraHeaders: Map<String, String> = emptyMap()
     ) {
         val sb = StringBuilder()
-        sb.append("HTTP/1.1 ").append(code).append(" X\r\n")
+        sb.append("HTTP/1.1 ").append(code).append(if (code == 204) " No Content\r\n" else " OK\r\n")
         sb.append("Content-Type: ").append(contentType).append("\r\n")
+        sb.append("Access-Control-Allow-Origin: *\r\n")
+        sb.append("Access-Control-Allow-Headers: Authorization, Content-Type, X-DSH-Client-Id, X-DSH-Conversation-Id\r\n")
+        sb.append("Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n")
+        sb.append("Access-Control-Max-Age: 86400\r\n")
+        sb.append("Vary: Origin\r\n")
         if (length != null) sb.append("Content-Length: ").append(length).append("\r\n")
         extraHeaders.forEach { (name, value) ->
             if (name.matches(Regex("[A-Za-z0-9-]{1,64}")) && value.none { it == '\r' || it == '\n' }) {

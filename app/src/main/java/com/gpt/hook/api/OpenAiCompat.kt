@@ -10,6 +10,57 @@ object OpenAiCompat {
 
     val DEFAULT_MODELS = listOf("auto", "gpt-6", "gpt-6-mini", "gpt-5-6-mini", "research")
 
+    /**
+     * Rejects OpenAI features that this ChatGPT Android upstream adapter cannot execute.
+     * This prevents image/audio/tool payloads from being silently flattened into empty text.
+     */
+    fun unsupportedChatFeature(request: JSONObject): String? {
+        val tools = request.optJSONArray("tools")
+        if (tools != null && tools.length() > 0) return "tool/function calling is not supported by the configured ChatGPT Android upstream"
+        if (request.has("functions") || request.has("function_call") || request.has("tool_choice")) {
+            return "tool/function calling is not supported by the configured ChatGPT Android upstream"
+        }
+        if (request.has("response_format")) {
+            return "response_format / JSON Schema constrained output is not supported by this adapter"
+        }
+        if (request.optInt("n", 1) != 1) return "only n=1 is supported"
+        val messages = request.optJSONArray("messages") ?: return null
+        for (i in 0 until messages.length()) {
+            val message = messages.optJSONObject(i) ?: continue
+            val content = message.opt("content")
+            if (content is JSONArray) {
+                for (j in 0 until content.length()) {
+                    val part = content.optJSONObject(j) ?: continue
+                    val type = part.optString("type").lowercase()
+                    if (type.contains("image") || type.contains("audio") || type == "file") {
+                        return "multimodal image/audio/file input is not supported by this text-only adapter"
+                    }
+                }
+            } else if (content is JSONObject) {
+                val type = content.optString("type").lowercase()
+                if (type.contains("image") || type.contains("audio") || type == "file") {
+                    return "multimodal image/audio/file input is not supported by this text-only adapter"
+                }
+            }
+        }
+        return null
+    }
+
+    fun capabilitiesJson(): String = JSONObject()
+        .put("object", "dsh.capabilities")
+        .put("chat_completions", true)
+        .put("responses", true)
+        .put("streaming", true)
+        .put("conversations", true)
+        .put("hook_control", true)
+        .put("modalities", JSONArray().put("text"))
+        .put("unsupported", JSONArray()
+            .put("image_input").put("audio_input").put("audio_output")
+            .put("tool_calling").put("function_calling")
+            .put("json_schema_constrained_output"))
+        .put("upstream", "ChatGPT Android conversation backend")
+        .toString()
+
     fun toConversation(
         openAi: JSONObject,
         upstreamConversationId: String? = null,

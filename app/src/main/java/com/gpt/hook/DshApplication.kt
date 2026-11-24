@@ -1,6 +1,7 @@
 package com.gpt.hook
 
 import android.app.Application
+import androidx.compose.runtime.mutableStateOf
 import com.gpt.hook.api.ApiService
 import com.gpt.hook.api.ConversationRepository
 import com.gpt.hook.api.RelayConfig
@@ -22,16 +23,14 @@ class DshApplication : Application(), XposedServiceHelper.OnServiceListener {
     }
 
     override fun onServiceBind(service: XposedService) {
-        currentService = service
+        currentServiceState.value = service
     }
 
     override fun onServiceDied(service: XposedService) {
-        if (currentService === service) currentService = null
+        if (currentServiceState.value === service) currentServiceState.value = null
     }
 
     companion object {
-        @Volatile
-        var currentService: XposedService? = null
-            private set
+        val currentServiceState = mutableStateOf<XposedService?>(null)
     }
 }

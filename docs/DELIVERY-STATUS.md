@@ -45,3 +45,21 @@ This is the delivery truth source. Source presence and CI success are not substi
 ## Release gate
 
 DSH-GPT is now **mainline-integrated and buildable at the PR level, but not yet a complete device-accepted release**. Do not claim full completion until the post-merge build, DSH host integration, UI Customizer, live upstream checks and physical-device acceptance have recorded evidence.
+
+
+## Follow-up implementation batch: API, sessions and Hook console
+
+Branch: `feat/api-sessions-hook-console` (implementation submitted for CI review).
+
+- Added authenticated `GET /v1/capabilities` so clients can discover the adapter's actual text-only surface.
+- Added explicit HTTP 400 `unsupported_feature` responses for multimodal image/audio/file input, tool/function calling, and constrained JSON output. Unsupported payloads are no longer silently flattened into text.
+- Added caller-scoped `PATCH /v1/conversations/{id}` to update a conversation title and/or model without deleting its history.
+- Added model selection when creating a session and editable title/model controls for an existing session in the Android console.
+- Added a Hook dashboard that displays the target-reported runtime state, configured rule count, actual installed Hook inventory, invocation counters and apply accounting. It does not count saved rules or discovery candidates as installed hooks.
+- Added JVM tests for capability discovery metadata and unsupported-feature rejection.
+
+Limitations retained deliberately:
+- Image/audio transport, tool execution and JSON-Schema constrained generation are still not implemented because the configured ChatGPT Android upstream adapter does not yet provide verified end-to-end semantics for them.
+- Conversation persistence remains local and caller-scoped; this is not cloud synchronization.
+- Hook dashboard values depend on the target process publishing a fresh runtime report.
+- Physical-device acceptance remains pending; CI cannot verify LSPosed injection, Binder identity or live upstream behavior.

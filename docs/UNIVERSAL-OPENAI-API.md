@@ -39,6 +39,7 @@ The `deep_research` and `web_search` hints are not implied by these aliases. A r
 ## Endpoints
 
 - `GET /v1/models`
+- `GET /v1/capabilities` — machine-readable list of implemented and unsupported adapter capabilities.
 - `POST /v1/chat/completions` — text messages, normal JSON response or SSE chunks.
 - `POST /v1/responses` — text input/instructions, normal JSON response or Responses-style SSE events.
 - Existing `/v1/hook/*` routes remain available and use the same Bearer authentication.
@@ -80,3 +81,17 @@ curl -s http://127.0.0.1:8766/v1/responses \\
 ## Network security
 
 The LAN listener binds to `0.0.0.0` when enabled. Keep the generated API key private and use the gateway only on trusted networks. Do not expose this session-backed gateway directly to the public internet. The key is generated and persisted locally when the configuration is first loaded.
+
+
+## Capability discovery and explicit rejection
+
+Call `GET /v1/capabilities` with the gateway Bearer key before selecting advanced client features.
+The current adapter advertises text input/output, Chat Completions, Responses, SSE, conversation
+persistence and Hook control. It explicitly lists image/audio, tool/function calling and
+JSON-Schema constrained output as unsupported.
+
+Requests containing unsupported multimodal parts, tool/function definitions, or constrained
+output declarations return HTTP 400 with error type `unsupported_feature`. They are rejected
+rather than silently flattened into text or reported as successful. This does not add upstream
+image, audio or tool execution; those require protocol support and execution semantics in the
+ChatGPT Android backend adapter.

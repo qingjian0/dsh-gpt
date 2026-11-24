@@ -36,10 +36,6 @@ class ApiService : Service() {
     fun restart() {
         server?.stop()
         val cfg = RelayConfig.load(this)
-        if (!cfg.ready) {
-            notify("缺少 access_token / oai-did")
-            return
-        }
         val s = LocalApiServer(this, cfg, conversations)
         server = s
         notify(if (s.start()) "本地 API http://${if (cfg.lan) "0.0.0.0" else "127.0.0.1"}:${cfg.port}/v1" else "端口 ${cfg.port} 绑定失败")

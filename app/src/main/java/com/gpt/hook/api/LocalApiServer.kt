@@ -803,7 +803,9 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
 
     companion object {
         private val HOOK_PROVIDER_URI: Uri = Uri.parse("content://com.gpt.hook.observations")
-        private const val MAX_REQUEST_BYTES = 1024 * 1024
+        // 客户端（DSH）每轮会重发完整历史；这里必须能收下，再由 conversation_id 增量转发给上游。
+        // 上游本身限制约 1 MiB，但那是转发出去的 payload，与被接收的请求体不是一回事。
+        private const val MAX_REQUEST_BYTES = 8 * 1024 * 1024
         private const val MAX_HEADER_LINE_BYTES = 16 * 1024
     }
 }

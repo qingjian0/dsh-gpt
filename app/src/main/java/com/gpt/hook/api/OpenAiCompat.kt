@@ -8,7 +8,24 @@ import java.util.TimeZone
 /** OpenAI /v1 协议 ↔ ChatGPT backend conversation 协议 转换。 */
 object OpenAiCompat {
 
-    val DEFAULT_MODELS = listOf("auto", "gpt-6", "gpt-6-mini", "gpt-5-6-mini", "research")
+    /**
+     * 实测通过的能力档位（2026-11-24）。
+     * 每个别名对应一组 system_hints，客户端选模型即获得对应能力。
+     * 未列出的档位（search / image_gen / computer_use / thinking_effort）在免费号上无效，不暴露。
+     */
+    val MODEL_PROFILES: Map<String, List<String>> = linkedMapOf(
+        "gpt-6" to emptyList(),
+        "gpt-6-think" to listOf("reason"),
+        "gpt-6-deep" to listOf("deep_research"),
+        "gpt-6-search" to listOf("reason", "web_search")
+    )
+    val DEFAULT_MODELS = listOf("auto") + MODEL_PROFILES.keys.toList()
+
+    /** 把客户端请求的 model 映射成上游 slug + hints */
+    fun resolveProfile(model: String): Pair<String, List<String>> {
+        val hints = MODEL_PROFILES[model]
+        return if (hints != null) "auto" to hints else model to emptyList()
+    }
 
     fun toConversation(
         openAi: JSONObject,
@@ -39,7 +56,8 @@ object OpenAiCompat {
             (systemInstructions.map { "System: $it" } + transcript).joinToString("\n\n")
         }
 
-        val requestedModel = openAi.optString("model", "auto").ifBlank { "auto" }
+        val rawModel = openAi.optString("model", "auto").ifBlank { "auto" }
+        val (requestedModel, profileHints) = resolveProfile(rawModel)
         val body = JSONObject()
             .put("action", "next")
             .put("model", requestedModel)
@@ -52,19 +70,18 @@ object OpenAiCompat {
         // return an empty response. The measured working path is the same
         // request with system_hints=["reason"], which resolves to the
         // available gpt-6-t-mini-mini reasoning model.
-        if (requestedModel == "gpt-6") {
-            val hints = openAi.optJSONArray("system_hints") ?: JSONArray()
-            val normalizedHints = JSONArray()
-            for (i in 0 until hints.length()) normalizedHints.put(hints.opt(i))
-            var hasReason = false
-            for (i in 0 until normalizedHints.length()) {
-                if (normalizedHints.optString(i) == "reason") hasReason = true
+        val finalHints = JSONArray()
+        for (h in profileHints) finalHints.put(h)
+        val clientHints = openAi.optJSONArray("system_hints")
+        if (clientHints != null) {
+            for (i in 0 until clientHints.length()) {
+                val v = clientHints.optString(i)
+                var dup = false
+                for (j in 0 until finalHints.length()) if (finalHints.optString(j) == v) dup = true
+                if (!dup) finalHints.put(v)
             }
-            if (!hasReason) normalizedHints.put("reason")
-            body.put("system_hints", normalizedHints)
-        } else if (openAi.has("system_hints") && openAi.opt("system_hints") is JSONArray) {
-            body.put("system_hints", openAi.optJSONArray("system_hints"))
         }
+        if (finalHints.length() > 0) body.put("system_hints", finalHints)
 
         if (!upstreamConversationId.isNullOrBlank()) body.put("conversation_id", upstreamConversationId)
         val msg = JSONObject()

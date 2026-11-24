@@ -26,36 +26,32 @@ object ToolBridge {
     fun instructions(req: JSONObject): String {
         val tools = req.optJSONArray("tools") ?: return ""
         val sb = StringBuilder()
-        sb.append("你可以调用下列工具来完成任务。需要调用时，只输出一个 JSON 对象，包在 ")
-        sb.append(OPEN).append(" 与 ").append(CLOSE).append(" 之间，不要输出其它内容：\n")
-        sb.append(OPEN)
-        sb.append("{\"name\":\"工具名\",\"arguments\":{...}}")
-        sb.append(CLOSE).append("\n\n可用工具：\n")
+        // 实测：TTFB 与请求体近似线性（每 1 KB 约 +700 ms），所以这里用最省的写法。
+        sb.append("需要工具时只输出：").append(OPEN)
+        sb.append("{\"name\":\"..\",\"arguments\":{}}").append(CLOSE).append("\n")
+        sb.append("可用：\n")
         for (i in 0 until tools.length()) {
             val t = tools.optJSONObject(i) ?: continue
             val fn = t.optJSONObject("function") ?: t
             val name = fn.optString("name")
             if (name.isBlank()) continue
-            sb.append("- ").append(name).append(": ")
-            sb.append(fn.optString("description").replace("\n", " ").take(160))
+            sb.append(name)
+            val desc = fn.optString("description").replace("\n", " ").trim()
+            if (desc.isNotEmpty()) sb.append(": ").append(desc.take(40))
             val props = fn.optJSONObject("parameters")?.optJSONObject("properties")
             if (props != null && props.length() > 0) {
                 val keys = props.keys()
                 val names = ArrayList<String>()
                 while (keys.hasNext()) {
                     val k = keys.next()
-                    names += k + ":" + (props.optJSONObject(k)?.optString("type") ?: "any")
+                    names += k
                 }
-                sb.append(" 参数(").append(names.joinToString(", ")).append(")")
+                sb.append(" (").append(names.joinToString(",")).append(")")
             }
             sb.append("\n")
         }
-        sb.append("\n规则：\n")
-        sb.append("1. 需要工具时，整条回复只能由 ").append(OPEN).append("...").append(CLOSE).append(" 组成，前后不加文字。\n")
-        sb.append("   可以一次输出多个 ").append(OPEN).append(" 块来并行调用多个工具，减少往返。\n")
-        sb.append("2. arguments 必须是合法 JSON 对象，键名与参数 schema 一致。\n")
-        sb.append("3. 如果不需要工具，直接正常回答，不要输出 tool_call。\n")
-        sb.append("4. 工具结果会以「工具返回：」前缀提供给你，据此继续。\n")
+        sb.append("规则：整条回复只能是多个 ").append(OPEN)
+            .append(" 块（可并行），不要加文字；不需要工具就直接回答。\n")
         return sb.toString()
     }
 

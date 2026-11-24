@@ -406,8 +406,13 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                 return
             }
             json(out, 404, err("not_found", "route not found"))
-        } catch (e: IllegalArgumentException) { json(out, 400, err("invalid_request", e.message ?: "invalid request")) }
-          catch (t: Throwable) { json(out, 500, err("internal_error", "conversation operation failed")) }
+        } catch (e: org.json.JSONException) {
+            json(out, 400, err("invalid_request", e.message ?: "invalid JSON body"))
+        } catch (e: IllegalArgumentException) {
+            json(out, 400, err("invalid_request", e.message ?: "invalid request"))
+        } catch (t: Throwable) {
+            json(out, 500, err("internal_error", "conversation operation failed"))
+        }
     }
 
     private fun conversationJson(item: ConversationRepository.Conversation, includeMessages: Boolean = true): JSONObject {
@@ -499,6 +504,12 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         if ((request.optJSONArray("tools")?.length() ?: 0) > 0 ||
             request.has("tool_choice") || request.has("functions") || request.has("function_call")) {
             json(out, 400, err("unsupported_feature", "tool/function calling is not supported by this adapter")); return
+        }
+        val requestedModalities = request.optJSONArray("modalities")
+        if (request.has("audio") || request.has("input_audio") ||
+            (requestedModalities != null &&
+                (0 until requestedModalities.length()).any { requestedModalities.optString(it) != "text" })) {
+            json(out, 400, err("unsupported_feature", "only text input/output is supported by this adapter")); return
         }
         val responseTextFormat = request.optJSONObject("text")
             ?.optJSONObject("format")?.optString("type").orEmpty()

@@ -17,7 +17,7 @@ object OpenAiCompat {
         "gpt-6" to emptyList(),
         "gpt-6-think" to listOf("reason"),
         "gpt-6-deep" to listOf("deep_research"),
-        "gpt-6-max" to listOf("reason", "web_search")
+        "gpt-6-search" to listOf("reason", "web_search")
     )
     val DEFAULT_MODELS = listOf("auto") + MODEL_PROFILES.keys.toList()
 

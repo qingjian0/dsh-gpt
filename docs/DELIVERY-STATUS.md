@@ -1,7 +1,7 @@
 # DSH-GPT Delivery Status
 
 Last reviewed: 2026-11-24
-Baseline: `main` at `bc8a92803b9f80e1e16717f3a072319a9073f43f`
+Baseline: `main` at `5aa6397b1189da4cfd3e238c881e61722e27e90a`
 
 This is the delivery truth source. Source presence and CI success are not substitutes for live upstream, DSH-host, or physical-device acceptance.
 
@@ -10,13 +10,13 @@ This is the delivery truth source. Source presence and CI success are not substi
 | Area | Evidence | Status |
 |---|---|---|
 | Six-tab Compose console | PR #9 merged | Shell and navigation present; Agent and Customizer remain incomplete |
-| Android build | PR #14 head CI run [45209578307](https://github.com/qingjian0/dsh-gpt/actions/runs/45209578307) passed build, JVM tests, LSPosed metadata verification and artifact upload | PR CI passed; post-merge main run [45357004687](https://github.com/qingjian0/dsh-gpt/actions/runs/45357004687) must be checked for final result |
+| Android build | PR #14 head CI run [45209578307](https://github.com/qingjian0/dsh-gpt/actions/runs/45209578307) passed build, JVM tests, LSPosed metadata verification and artifact upload | PR CI and post-merge main run [45357004687](https://github.com/qingjian0/dsh-gpt/actions/runs/45357004687) both passed |
 | Conversations | PR #11 merged; persistent local records, chat UI and gateway continuation path | Code present; live upstream multi-turn/device acceptance pending |
 | Agent runtime package | PR #12 merged; 9 modes, task-state tools, 7 Skills | Plugin contract CI passed; DSH Profile installation, tool visibility and real subagent execution unverified |
 | Hook discovery | PR #13 merged; bounded DEX metadata discovery, pagination, cancellation and task state | Source and CI present; target-process device execution unverified |
 | R1/R2/R3 discovery | Bounded discovery, ClassLoader observation, inherited method metadata and stable candidate proposals on main | Source and JVM CI present; device acceptance pending |
 | GPT API dynamic Hook Runtime | PR #14 merged as `bc8a9280`; authenticated `/v1/hook/*` routes, live rule snapshots, dynamic ClassLoader attachment, typed scalar actions, HookHandle inventory and apply reports | PR CI passed; physical-device behavior and full feedback loop remain unverified |
-| DSH host bridge | Host implementation exists on `qingjian0/Deepseek-Harness-Local-Android:refactor/dsh-gpt-hook-bridge-hardening` | Branch is 38 commits ahead and 12 behind host main; do not merge wholesale before conflict review and porting |
+| DSH host bridge | Host implementation exists on `qingjian0/Deepseek-Harness-Local-Android:refactor/dsh-gpt-hook-bridge-hardening` | Draft host PR [#35](https://github.com/qingjian0/Deepseek-Harness-Local-Android/pull/35); branch is 38 commits ahead and 12 behind host main, and GitHub currently reports it non-mergeable. Resolve conflicts and review before any merge |
 | Agent UI/orchestration | Agent page exists; controls are not connected to the DSH host coordinator | Not complete |
 | GPT UI Customizer | Tab exists as a placeholder; no confirmed target-side menu binding | Not implemented |
 | Physical device | See `docs/DEVICE-ACCEPTANCE.md` | Not run/recorded for this delivery |

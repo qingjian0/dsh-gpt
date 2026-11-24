@@ -406,6 +406,11 @@ private fun ConversationsScreen() {
     var draft by rememberSaveable { mutableStateOf("") }
     var status by rememberSaveable { mutableStateOf("正在加载") }
     var sending by rememberSaveable { mutableStateOf(false) }
+    var selectedModel by rememberSaveable { mutableStateOf("auto") }
+    var modelMenuExpanded by remember { mutableStateOf(false) }
+    var titleDraft by rememberSaveable { mutableStateOf("") }
+    var metadataSaving by rememberSaveable { mutableStateOf(false) }
+    val availableModels = listOf("auto", "gpt-6", "gpt-6-mini", "gpt-5-6-mini", "research")
 
     suspend fun reload() {
         val snapshot = withContext(Dispatchers.IO) { repository.list(caller) }
@@ -434,14 +439,29 @@ private fun ConversationsScreen() {
                         }
                     }) { Text("刷新") }
                 }
+                Box(Modifier.fillMaxWidth()) {
+                    OutlinedButton(onClick = { modelMenuExpanded = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text("新会话模型：$selectedModel")
+                    }
+                    DropdownMenu(expanded = modelMenuExpanded, onDismissRequest = { modelMenuExpanded = false }) {
+                        availableModels.forEach { model ->
+                            DropdownMenuItem(text = { Text(model) }, onClick = {
+                                selectedModel = model
+                                modelMenuExpanded = false
+                            })
+                        }
+                    }
+                }
                 Button(
                     onClick = {
                         scope.launch {
                             runCatching {
                                 val created = withContext(Dispatchers.IO) {
-                                    repository.create(caller, "新对话", "auto")
+                                    repository.create(caller, "新对话", selectedModel)
                                 }
                                 selectedId = created.id
+                                selectedModel = created.model
+                                titleDraft = created.title
                                 selectedConversation = created
                                 reload()
                                 status = "已创建新会话"
@@ -465,6 +485,8 @@ private fun ConversationsScreen() {
                         Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
                             TextButton(onClick = {
                                 selectedId = item.id
+                                selectedModel = item.model
+                                titleDraft = item.title
                                 scope.launch {
                                     runCatching { reload() }.onFailure { status = "打开失败：${it.message ?: "unknown"}" }
                                 }
@@ -484,7 +506,43 @@ private fun ConversationsScreen() {
         } else {
             val conversation = selectedConversation!!
             SectionCard("当前会话") {
-                Text(conversation.title, fontWeight = FontWeight.SemiBold)
+                OutlinedTextField(
+                    value = titleDraft,
+                    onValueChange = { titleDraft = it.take(160) },
+                    label = { Text("会话名称") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+                Box(Modifier.fillMaxWidth()) {
+                    OutlinedButton(onClick = { modelMenuExpanded = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text("模型：$selectedModel")
+                    }
+                    DropdownMenu(expanded = modelMenuExpanded, onDismissRequest = { modelMenuExpanded = false }) {
+                        availableModels.forEach { model ->
+                            DropdownMenuItem(text = { Text(model) }, onClick = {
+                                selectedModel = model
+                                modelMenuExpanded = false
+                            })
+                        }
+                    }
+                }
+                Button(
+                    enabled = !metadataSaving,
+                    onClick = {
+                        metadataSaving = true
+                        scope.launch {
+                            runCatching {
+                                withContext(Dispatchers.IO) {
+                                    repository.updateDetails(caller, conversation.id, titleDraft, selectedModel)
+                                } ?: throw IllegalStateException("会话不存在")
+                                reload()
+                                status = "会话名称和模型已更新"
+                            }.onFailure { status = "更新失败：${it.message ?: it.javaClass.simpleName}" }
+                            metadataSaving = false
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text(if (metadataSaving) "保存中…" else "保存会话设置") }
                 Text("会话 ID：${conversation.id}", style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text("上游会话：${if (conversation.upstreamConversationId.isNullOrBlank()) "尚未建立" else "已建立并可续接"}",
@@ -492,6 +550,7 @@ private fun ConversationsScreen() {
                 TextButton(onClick = {
                     selectedId = null
                     selectedConversation = null
+                    titleDraft = ""
                     draft = ""
                 }) { Text("返回会话列表") }
             }
@@ -618,6 +677,17 @@ private fun HookScreen() {
     var discoveryNextCursor by remember { mutableStateOf<Int?>(null) }
     val scope = rememberCoroutineScope()
     val providerUri = remember { Uri.parse("content://" + ObservationProvider.AUTHORITY) }
+    val reportObject = remember(reportText) {
+        runCatching { org.json.JSONObject(reportText) }.getOrNull()
+    }
+    val runtimeObject = reportObject?.optJSONObject("runtime") ?: org.json.JSONObject()
+    val installedHooks = runtimeObject.optJSONArray("hooks") ?: org.json.JSONArray()
+    val activeHookCount = runtimeObject.optInt("activeHookCount", installedHooks.length())
+    val applyReport = runtimeObject.optJSONObject("lastApplyReport")
+        ?: reportObject?.optJSONObject("lastApplyReport") ?: org.json.JSONObject()
+    val configuredRuleCount = remember(configText) {
+        runCatching { org.json.JSONObject(configText).optJSONArray("rules")?.length() ?: 0 }.getOrDefault(0)
+    }
 
     suspend fun readReport() {
         val result = withContext(Dispatchers.IO) {
@@ -700,6 +770,50 @@ private fun HookScreen() {
 
     PageColumn {
         PageHeading("Hook Runtime", "查看配置、扫描候选方法与运行时元数据观察。")
+        SectionCard("Hook 实时仪表盘", "只统计目标进程已确认安装的 Hook，不把已保存规则或扫描候选误报为已安装。") {
+            StatusLine("目标运行时", runtimeObject.optString("state", "等待目标进程报告"),
+                runtimeObject.optString("state") == "active")
+            StatusLine("已配置规则", configuredRuleCount.toString())
+            StatusLine("实际安装 Hook", activeHookCount.toString(), activeHookCount > 0)
+            StatusLine("观察报告", if ((reportObject?.optLong("updatedAtMs") ?: 0L) > 0L) "已收到" else "等待中")
+            Text("最近应用结果", style = MaterialTheme.typography.labelMedium)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                StatusLine("新增", applyReport.optInt("added").toString())
+                StatusLine("替换", applyReport.optInt("replaced").toString())
+                StatusLine("保留", applyReport.optInt("retained").toString())
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                StatusLine("移除", applyReport.optInt("removed").toString())
+                StatusLine("失败", applyReport.optInt("failed").toString(), applyReport.optInt("failed") == 0)
+            }
+            if (installedHooks.length() == 0) {
+                Text("目标进程尚未报告已安装 Hook。先应用规则，再刷新观察报告。",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall)
+            } else {
+                Text("已安装 Hook 明细", style = MaterialTheme.typography.labelMedium)
+                for (index in 0 until minOf(installedHooks.length(), 24)) {
+                    val hook = installedHooks.optJSONObject(index) ?: continue
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(hook.optString("ruleId", "unnamed"), fontWeight = FontWeight.SemiBold)
+                        Text(hook.optString("signature", "签名不可用"),
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace)
+                        Text("模式 ${hook.optString("mode", "observe")} · 调用 ${hook.optLong("invocations", 0L)} · ${hook.optString("state", "unknown")}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    if (index < minOf(installedHooks.length(), 24) - 1) {
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    }
+                }
+                if (installedHooks.length() > 24) {
+                    Text("共 ${installedHooks.length()} 条，当前显示前 24 条。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
         SectionCard("运行状态") {
             StatusLine("LSPosed 服务", if (service == null) "未连接" else service.frameworkName + " / API " + service.apiVersion,
                 service != null)

@@ -13,6 +13,7 @@ All protected endpoints require the gateway's configured Bearer API key. Only `/
 - `GET /v1/conversations` — list the caller's conversations, newest activity first.
 - `POST /v1/conversations` — create with JSON `{"title":"…","model":"…","parent_id":null}`.
 - `GET /v1/conversations/{id}` — fetch one conversation and its message array.
+- `PATCH /v1/conversations/{id}` — update `title` and/or `model`; omitted fields are preserved.
 - `POST /v1/conversations/{id}/messages` — append one JSON message object.
 - `DELETE /v1/conversations/{id}` — delete one conversation. Children are retained and detached.
 
@@ -46,3 +47,17 @@ Messages are stored as JSON objects in append order. List responses omit message
   fields, a later turn may fail upstream; local message history remains available.
 - Token usage is not yet calculated from authoritative upstream usage data.
 - SQLite migrations must be additive. Do not drop the database to upgrade schema.
+
+
+## Editing a conversation
+
+Send an authenticated `PATCH /v1/conversations/{id}` request with the caller's
+`X-DSH-Client-Id`:
+
+```json
+{"title":"Research notes","model":"gpt-6"}
+```
+
+The update is caller-scoped, persists locally, and advances `updated_at`. Supported model
+values are client-facing aliases returned by `GET /v1/models`; they are not a promise that
+every upstream account exposes every named model.

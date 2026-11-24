@@ -38,7 +38,8 @@ object OpenAiCompat {
         openAi: JSONObject,
         upstreamConversationId: String? = null,
         upstreamParentMessageId: String? = null,
-        connectorId: String = ""
+        connectorId: String = "",
+        temporary: Boolean = false
     ): JSONObject {
         val messages = openAi.optJSONArray("messages") ?: JSONArray()
         val systemInstructions = ArrayList<String>()
@@ -72,7 +73,7 @@ object OpenAiCompat {
             .put("conversation_mode", JSONObject().put("kind", "primary_assistant"))
             .put("parent_message_id", upstreamParentMessageId?.takeIf { it.isNotBlank() } ?: UUID.randomUUID().toString())
             .put("timezone_offset_min", TimeZone.getDefault().getOffset(System.currentTimeMillis()) / 60000)
-            .put("history_and_training_disabled", false)
+            .put("history_and_training_disabled", temporary)
 
         // On the free ChatGPT Android backend, the bare "gpt-6" slug can
         // return an empty response. The measured working path is the same

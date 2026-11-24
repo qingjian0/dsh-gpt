@@ -104,13 +104,19 @@ object OpenAiCompat {
     }
 
 
-    fun responseObject(id: String, model: String, text: String, status: String = "completed"): JSONObject {
+    fun responseObject(
+        id: String,
+        model: String,
+        text: String,
+        status: String = "completed",
+        itemId: String = "msg_" + id.removePrefix("resp-")
+    ): JSONObject {
         val part = JSONObject()
             .put("type", "output_text")
             .put("text", text)
             .put("annotations", JSONArray())
         val item = JSONObject()
-            .put("id", "msg_" + id.removePrefix("resp-"))
+            .put("id", itemId)
             .put("type", "message")
             .put("status", status)
             .put("role", "assistant")

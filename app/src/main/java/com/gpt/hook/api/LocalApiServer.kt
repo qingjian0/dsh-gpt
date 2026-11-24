@@ -25,6 +25,12 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
     private var server: ServerSocket? = null
     private val pool = Executors.newFixedThreadPool(8)
     private val conversationLocks = Array(64) { Any() }
+    /**
+     * 标准 OpenAI 客户端不会带 X-DSH-Conversation-Id，每轮都发全量 messages。
+     * 这里用「会话起点的指纹」把多轮请求绑到同一个 localConversation，
+     * 从而复用 upstreamConversationId，只向上游发增量。
+     */
+    private val signatureIndex = java.util.concurrent.ConcurrentHashMap<String, String>()
     @Volatile private var running = false
 
     val port: Int get() = cfg.port
@@ -557,12 +563,24 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
             json(out, 400, err("invalid_request", "messages must contain a non-empty user message")); return
         }
         val requestedConversationId = headers["x-dsh-conversation-id"]?.takeIf { it.isNotBlank() }
+        // 隐式会话绑定：显式头 > 客户端 user 字段 > 首条 user 消息指纹
+        val implicitSignature = run {
+            val explicit = req.optString("user").takeIf { it.isNotBlank() }
+            if (explicit != null) return@run "u:" + sha256(explicit)
+            val firstUser = firstUserText(req)
+            if (firstUser.isNullOrBlank()) null else "m:" + sha256(firstUser)
+        }
         val localConversation = try {
-            if (requestedConversationId == null) {
-                conversations.create(caller, userText.take(160), model)
-            } else {
+            if (requestedConversationId != null) {
                 conversations.get(caller, requestedConversationId)
                     ?: run { json(out, 404, err("not_found", "conversation not found")); return }
+            } else {
+                val boundId = implicitSignature?.let { signatureIndex[caller + "|" + it] }
+                val bound = boundId?.let { runCatching { conversations.get(caller, it) }.getOrNull() }
+                if (bound != null) bound
+                else conversations.create(caller, userText.take(160), model).also { created ->
+                    if (implicitSignature != null) signatureIndex[caller + "|" + implicitSignature] = created.id
+                }
             }
         } catch (e: IllegalArgumentException) {
             json(out, 400, err("invalid_request", e.message ?: "invalid conversation identity")); return
@@ -589,7 +607,7 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         val responseItemId = "msg_" + UUID.randomUUID().toString().replace("-", "").take(24)
         val client = ChatGptClient(cfg)
         val payload = OpenAiCompat.toConversation(
-            req, conversationForTurn.upstreamConversationId, conversationForTurn.upstreamParentMessageId
+            req, conversationForTurn.upstreamConversationId, conversationForTurn.upstreamParentMessageId, cfg.connectorId
         ).toString().toByteArray(Charsets.UTF_8)
 
         val conn = try {
@@ -658,7 +676,29 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                     writeResponseEvent(out, "response.completed", JSONObject()
                         .put("response", OpenAiCompat.responseObject(id, model, full, itemId = responseItemId)))
                 } else {
-                    writeChunk(out, "data: " + OpenAiCompat.chunk(id, model, "", "stop") + "\n\n")
+                    val full = textOut.toString()
+                    val calls = if (ToolBridge.hasTools(req)) ToolBridge.parseAll(full) else emptyList()
+                    if (calls.isNotEmpty()) {
+                        // 工具调用：一次可带多个，DSH 侧并行执行
+                        val deltas = org.json.JSONArray()
+                        calls.forEachIndexed { i, c ->
+                            deltas.put(JSONObject()
+                                .put("index", i).put("id", c.id).put("type", "function")
+                                .put("function", JSONObject().put("name", c.name)
+                                    .put("arguments", c.arguments)))
+                        }
+                        val frame = JSONObject()
+                            .put("id", id).put("object", "chat.completion.chunk")
+                            .put("created", System.currentTimeMillis() / 1000).put("model", model)
+                            .put("choices", org.json.JSONArray().put(JSONObject().put("index", 0)
+                                .put("delta", JSONObject().put("role", "assistant")
+                                    .put("content", JSONObject.NULL)
+                                    .put("tool_calls", deltas))
+                                .put("finish_reason", "tool_calls")))
+                        writeChunk(out, "data: " + frame + "\n\n")
+                    } else {
+                        writeChunk(out, "data: " + OpenAiCompat.chunk(id, model, "", "stop") + "\n\n")
+                    }
                     writeChunk(out, "data: [DONE]\n\n")
                 }
                 out.flush()
@@ -671,9 +711,11 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                         if (delta != null) { sent += delta; textOut.append(delta) }
                     }
                 }
+                val full = textOut.toString()
+                val calls = if (ToolBridge.hasTools(req)) ToolBridge.parseAll(full) else emptyList()
                 json(out, 200,
-                    if (responsesMode) OpenAiCompat.responseObject(id, model, textOut.toString()).toString()
-                    else OpenAiCompat.completion(id, model, textOut.toString()),
+                    if (responsesMode) OpenAiCompat.responseObject(id, model, full).toString()
+                    else OpenAiCompat.completion(id, model, full, 0, calls),
                     responseHeaders)
             }
             if (textOut.isNotEmpty()) {
@@ -686,7 +728,8 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         } catch (t: Throwable) {
             try { socketSafeFlush(out) } catch (_: Throwable) { }
         } finally {
-            try { conn.disconnect() } catch (_: Throwable) { }
+            // 不主动 disconnect：正常读完响应后 JDK 会把连接放回 keep-alive 池，
+            // 下个请求可复用 TLS，省 200-500ms。异常路径由连接自身回收。
         }
         }
     }
@@ -702,6 +745,25 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         if (conversationId != null || parentMessageId != null) {
             conversations.updateUpstreamState(caller, localId, conversationId, parentMessageId)
         }
+    }
+
+    private fun sha256(value: String): String {
+        val d = MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))
+        val sb = StringBuilder(d.size * 2)
+        for (b in d) sb.append("%02x".format(b))
+        return sb.toString()
+    }
+
+    /** 取 messages 里第一条 user 文本，作为会话起点指纹的来源 */
+    private fun firstUserText(req: JSONObject): String? {
+        val messages = req.optJSONArray("messages") ?: return null
+        for (i in 0 until messages.length()) {
+            val m = messages.optJSONObject(i) ?: continue
+            if (m.optString("role") != "user") continue
+            val text = OpenAiCompat.contentText(m)
+            if (text.isNotBlank()) return text
+        }
+        return null
     }
 
     private fun socketSafeFlush(out: OutputStream) {

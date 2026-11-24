@@ -13,6 +13,8 @@ data class RelayConfig(
     val accessToken: String = "",
     val oaiDid: String = "",
     val sessionId: String = "",
+    /** ChatGPT 已授权应用的 connector id，用于 system_hints: ["plugin:connector_<id>"] */
+    val connectorId: String = "",
     val userAgent: String = "ChatGPT/1.2026.321 (Android 15; 22081212C)",
 ) {
     val ready: Boolean get() = accessToken.isNotBlank() && oaiDid.isNotBlank()
@@ -37,6 +39,7 @@ data class RelayConfig(
                 accessToken = p.getString("accessToken", "") ?: "",
                 oaiDid = p.getString("oaiDid", "") ?: "",
                 sessionId = p.getString("sessionId", "") ?: "",
+                connectorId = p.getString("connectorId", "") ?: "",
                 userAgent = p.getString("userAgent", defaults.userAgent) ?: defaults.userAgent,
             )
         }
@@ -51,6 +54,7 @@ data class RelayConfig(
                 .putString("accessToken", cfg.accessToken)
                 .putString("oaiDid", cfg.oaiDid)
                 .putString("sessionId", cfg.sessionId)
+                .putString("connectorId", cfg.connectorId)
                 .putString("userAgent", cfg.userAgent)
                 .apply()
         }
@@ -63,6 +67,7 @@ data class RelayConfig(
                 accessToken = o.optString("access_token", cur.accessToken),
                 oaiDid = o.optString("oai_did", o.optString("oai-did", cur.oaiDid)),
                 sessionId = o.optString("session_id", o.optString("sessionId", cur.sessionId)),
+                connectorId = o.optString("connectorId", cur.connectorId),
             )
             save(ctx, next)
             return next

@@ -42,13 +42,19 @@ class OpenAiCompatConversationTest {
             )
 
         val payload = OpenAiCompat.toConversation(request)
-        val prompt = payload.getJSONArray("messages")
-            .getJSONObject(0).getJSONObject("content").getJSONArray("parts").getString(0)
+        val messages = payload.getJSONArray("messages")
+        // 工具协议/系统指令必须是独立的 system 消息，拼进 user 文本模型会拒绝
+        val systemRole = messages.getJSONObject(0).getJSONObject("author").getString("role")
+        val systemText = messages.getJSONObject(0).getJSONObject("content")
+            .getJSONArray("parts").getString(0)
+        val userText = messages.getJSONObject(1).getJSONObject("content")
+            .getJSONArray("parts").getString(0)
 
-        assertTrue(prompt.contains("System: Be concise"))
-        assertTrue(prompt.contains("User: first question"))
-        assertTrue(prompt.contains("Assistant: first answer"))
-        assertTrue(prompt.endsWith("User: follow-up"))
+        assertEquals("system", systemRole)
+        assertTrue(systemText.contains("Be concise"))
+        assertTrue(userText.contains("User: first question"))
+        assertTrue(userText.contains("Assistant: first answer"))
+        assertTrue(userText.endsWith("follow-up"))
     }
 
     @Test

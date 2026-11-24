@@ -17,8 +17,15 @@ object OpenAiCompat {
         "gpt-6" to emptyList(),
         "gpt-6-think" to listOf("reason"),
         "gpt-6-deep" to listOf("deep_research"),
-        "gpt-6-search" to listOf("reason", "web_search")
+        "gpt-6-search" to listOf("reason", "web_search"),
+        // 需要 RelayConfig.connectorId；为空时自动降级为 gpt-6-think 的行为
+        "gpt-6-tools" to listOf("reason")
     )
+
+    /** gpt-6-tools 的 hints 依赖已授权 connector id */
+    fun toolHints(connectorId: String): List<String> =
+        if (connectorId.isBlank()) listOf("reason")
+        else listOf("reason", "plugin:connector_" + connectorId)
     val DEFAULT_MODELS = listOf("auto") + MODEL_PROFILES.keys.toList()
 
     /** 把客户端请求的 model 映射成上游 slug + hints */
@@ -30,7 +37,8 @@ object OpenAiCompat {
     fun toConversation(
         openAi: JSONObject,
         upstreamConversationId: String? = null,
-        upstreamParentMessageId: String? = null
+        upstreamParentMessageId: String? = null,
+        connectorId: String = ""
     ): JSONObject {
         val messages = openAi.optJSONArray("messages") ?: JSONArray()
         val systemInstructions = ArrayList<String>()
@@ -50,14 +58,14 @@ object OpenAiCompat {
                 }
             }
         }
-        val prompt = if (!upstreamConversationId.isNullOrBlank() || transcript.size <= 1) {
-            (systemInstructions.map { "System: $it" } + lastUser).joinToString("\n\n")
-        } else {
-            (systemInstructions.map { "System: $it" } + transcript).joinToString("\n\n")
+        // function calling 模拟：把 tools 定义与工具结果并入 system 段
+        if (ToolBridge.hasTools(openAi)) {
+            systemInstructions += ToolBridge.instructions(openAi)
         }
-
+        val toolResults = ToolBridge.toolResultsTranscript(openAi)
         val rawModel = openAi.optString("model", "auto").ifBlank { "auto" }
-        val (requestedModel, profileHints) = resolveProfile(rawModel)
+        val (requestedModel, baseHints) = resolveProfile(rawModel)
+        val profileHints = if (rawModel == "gpt-6-tools") toolHints(connectorId) else baseHints
         val body = JSONObject()
             .put("action", "next")
             .put("model", requestedModel)
@@ -84,14 +92,32 @@ object OpenAiCompat {
         if (finalHints.length() > 0) body.put("system_hints", finalHints)
 
         if (!upstreamConversationId.isNullOrBlank()) body.put("conversation_id", upstreamConversationId)
-        val msg = JSONObject()
-            .put("id", UUID.randomUUID().toString())
-            .put("author", JSONObject().put("role", "user"))
-            .put(
-                "content",
-                JSONObject().put("content_type", "text").put("parts", JSONArray().put(prompt))
+        val messagesOut = JSONArray()
+        // 实测：工具调用协议必须放在独立的 system 消息里，拼进 user 文本模型会拒绝。
+        if (systemInstructions.isNotEmpty()) {
+            messagesOut.put(
+                JSONObject()
+                    .put("id", UUID.randomUUID().toString())
+                    .put("author", JSONObject().put("role", "system"))
+                    .put(
+                        "content",
+                        JSONObject().put("content_type", "text")
+                            .put("parts", JSONArray().put(systemInstructions.joinToString("\n\n")))
+                    )
             )
-        body.put("messages", JSONArray().put(msg))
+        }
+        val userParts = (toolResults + if (upstreamConversationId.isNullOrBlank() && transcript.size > 1) transcript else listOf(lastUser))
+        messagesOut.put(
+            JSONObject()
+                .put("id", UUID.randomUUID().toString())
+                .put("author", JSONObject().put("role", "user"))
+                .put(
+                    "content",
+                    JSONObject().put("content_type", "text")
+                        .put("parts", JSONArray().put(userParts.filter { it.isNotBlank() }.joinToString("\n\n")))
+                )
+        )
+        body.put("messages", messagesOut)
         return body
     }
 
@@ -106,7 +132,7 @@ object OpenAiCompat {
         return ""
     }
 
-    private fun contentText(m: JSONObject): String {
+    fun contentText(m: JSONObject): String {
         val c = m.opt("content") ?: return ""
         if (c is String) return c
         if (c is JSONArray) {
@@ -184,9 +210,16 @@ object OpenAiCompat {
         return obj.toString()
     }
 
-    fun completion(id: String, model: String, text: String, promptTokens: Int = 0): String {
-        val msg = JSONObject().put("role", "assistant").put("content", text)
-        val choice = JSONObject().put("index", 0).put("message", msg).put("finish_reason", "stop")
+    fun completion(id: String, model: String, text: String, promptTokens: Int = 0, toolCalls: List<ToolBridge.ParsedCall> = emptyList()): String {
+        val msg = JSONObject().put("role", "assistant")
+        val choice = JSONObject().put("index", 0)
+        if (toolCalls.isNotEmpty()) {
+            msg.put("content", JSONObject.NULL).put("tool_calls", ToolBridge.toolCallsJson(toolCalls))
+            choice.put("message", msg).put("finish_reason", "tool_calls")
+        } else {
+            msg.put("content", text)
+            choice.put("message", msg).put("finish_reason", "stop")
+        }
         return JSONObject()
             .put("id", id).put("object", "chat.completion")
             .put("created", System.currentTimeMillis() / 1000)

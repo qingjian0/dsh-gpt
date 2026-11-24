@@ -63,12 +63,6 @@ object OpenAiCompat {
             systemInstructions += ToolBridge.instructions(openAi)
         }
         val toolResults = ToolBridge.toolResultsTranscript(openAi)
-        val prompt = if (!upstreamConversationId.isNullOrBlank() || transcript.size <= 1) {
-            (systemInstructions.map { "System: $it" } + toolResults + lastUser).joinToString("\n\n")
-        } else {
-            (systemInstructions.map { "System: $it" } + toolResults + transcript).joinToString("\n\n")
-        }
-
         val rawModel = openAi.optString("model", "auto").ifBlank { "auto" }
         val (requestedModel, baseHints) = resolveProfile(rawModel)
         val profileHints = if (rawModel == "gpt-6-tools") toolHints(connectorId) else baseHints

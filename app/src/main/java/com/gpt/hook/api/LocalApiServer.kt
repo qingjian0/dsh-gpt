@@ -1,5 +1,10 @@
 package com.gpt.hook.api
 
+import android.content.Context
+import android.net.Uri
+import android.os.Bundle
+import com.gpt.hook.ObservationProvider
+import com.gpt.hook.diagnostics.HookConfigParser
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -14,7 +19,7 @@ import java.util.concurrent.Executors
  * 本地 OpenAI 兼容 API + backend-api 透传网关。
  * 无第三方依赖，手写 HTTP/1.1，SSE 用 Connection: close 定界。
  */
-class LocalApiServer(@Volatile var cfg: RelayConfig, private val conversations: ConversationRepository) {
+class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfig, private val conversations: ConversationRepository) {
 
     private var server: ServerSocket? = null
     private val pool = Executors.newFixedThreadPool(8)
@@ -93,6 +98,14 @@ class LocalApiServer(@Volatile var cfg: RelayConfig, private val conversations: 
                     cfg.apiKey.isBlank() -> json(out, 503, err("configuration_required", "configure a gateway API key before using protected API routes"))
                     !authorized(headers) -> json(out, 401, err("invalid_api_key", "missing or bad Authorization"))
                     target == "/v1/models" -> json(out, 200, OpenAiCompat.modelsJson(OpenAiCompat.DEFAULT_MODELS))
+                    target == "/v1/hook/status" && method == "GET" -> hookStatus(out)
+                    target == "/v1/hook/events" && method == "GET" -> hookEvents(out)
+                    target == "/v1/hook/startup-discovery" && method == "GET" -> hookStartupDiscovery(out)
+                    target == "/v1/hook/config" -> hookConfig(out, method, body)
+                    target == "/v1/hook/enabled" && method == "PUT" -> hookEnabled(out, body)
+                    target == "/v1/hook/discover" && method == "POST" -> hookDiscover(out, body)
+                    target == "/v1/hook/inspect" && method == "POST" -> hookDiscover(out, body, requireExactClass = true)
+                    target.startsWith("/v1/hook/discovery/") -> hookDiscovery(out, method, target)
                     target == "/v1/conversations" || target.startsWith("/v1/conversations/") ->
                         conversationRoute(out, method, target, body, headers)
                     method == "POST" && target == "/v1/chat/completions" ->
@@ -103,6 +116,228 @@ class LocalApiServer(@Volatile var cfg: RelayConfig, private val conversations: 
             } catch (t: Throwable) {
                 try { socket.close() } catch (_: Throwable) { }
             }
+        }
+    }
+
+
+    private fun providerCall(method: String, extras: Bundle? = null): Bundle? =
+        context.contentResolver.call(HOOK_PROVIDER_URI, method, null, extras)
+
+    private fun hookStatus(out: OutputStream) {
+        try {
+            val state = providerCall(ObservationProvider.METHOD_API_SNAPSHOT)
+                ?: throw IllegalStateException("Hook control provider unavailable")
+            val config = JSONObject(state.getString(ObservationProvider.KEY_CONFIG).orEmpty())
+            val reportUpdatedAt = state.getLong(ObservationProvider.KEY_UPDATED, 0L)
+            val report = JSONObject(state.getString(ObservationProvider.KEY_REPORT).orEmpty())
+            val runtime = report.optJSONObject("runtime") ?: JSONObject()
+            val installedHooks = runtime.optJSONArray("hooks") ?: org.json.JSONArray()
+            val taskRaw = state.getString(ObservationProvider.KEY_DISCOVERY_TASK)
+            val result = JSONObject()
+                .put("ok", true)
+                .put("controlPlane", "local-gpt-api")
+                .put("targetPackage", "com.openai.chatgpt")
+                .put("enabled", state.getBoolean(ObservationProvider.KEY_ENABLED, true))
+                .put("configRevision", state.getLong(ObservationProvider.KEY_CONFIG_UPDATED, 0L))
+                .put("configuredRuleCount", config.optJSONArray("rules")?.length() ?: 0)
+                .put("targetReportUpdatedAtMs", reportUpdatedAt)
+                .put("targetObserved", reportUpdatedAt > 0L)
+                .put("runtimeState", runtime.optString("state", "unavailable"))
+                .put("runtimeSnapshotAtMs", runtime.optLong("capturedAtMs", 0L))
+                .put("activeHookCount", runtime.optInt("activeHookCount", 0))
+                .put("hookInventoryTruncated", runtime.optBoolean("inventoryTruncated", false))
+                .put("installedHooks", installedHooks)
+                .put("classLoadWatcherEnabled", report.optBoolean("classLoadWatcherEnabled", false))
+                .put("lastApplyReport", report.optJSONObject("lastApplyReport") ?: JSONObject()
+                    .put("state", "unavailable"))
+                .put("discoveryTask", taskRaw?.let { JSONObject(it) } ?: JSONObject.NULL)
+            json(out, 200, result.toString())
+        } catch (t: Throwable) {
+            json(out, 503, err("hook_control_unavailable", t.message ?: "Hook status unavailable"))
+        }
+    }
+
+    private fun hookStartupDiscovery(out: OutputStream) {
+        try {
+            val state = providerCall(ObservationProvider.METHOD_API_SNAPSHOT)
+                ?: throw IllegalStateException("Hook control provider unavailable")
+            val raw = state.getString(ObservationProvider.KEY_STARTUP_DISCOVERY)
+            if (raw.isNullOrBlank()) {
+                json(out, 404, err("not_found", "startup discovery has not completed"))
+                return
+            }
+            json(out, 200, JSONObject()
+                .put("ok", true)
+                .put("updatedAtMs", state.getLong(ObservationProvider.KEY_STARTUP_DISCOVERY_UPDATED, 0L))
+                .put("result", JSONObject(raw))
+                .toString())
+        } catch (t: Throwable) {
+            json(out, 503, err("hook_control_unavailable", t.message ?: "Startup discovery unavailable"))
+        }
+    }
+
+    private fun hookEvents(out: OutputStream) {
+        try {
+            val state = providerCall(ObservationProvider.METHOD_API_SNAPSHOT)
+                ?: throw IllegalStateException("Hook control provider unavailable")
+            val report = JSONObject(state.getString(ObservationProvider.KEY_REPORT).orEmpty())
+            json(out, 200, JSONObject().put("ok", true).put("report", report).toString())
+        } catch (t: Throwable) {
+            json(out, 503, err("hook_control_unavailable", t.message ?: "Hook events unavailable"))
+        }
+    }
+
+    private fun hookConfig(out: OutputStream, method: String, body: ByteArray?) {
+        try {
+            if (method == "GET") {
+                val state = providerCall(ObservationProvider.METHOD_API_SNAPSHOT)
+                    ?: throw IllegalStateException("Hook control provider unavailable")
+                json(out, 200, JSONObject()
+                    .put("ok", true)
+                    .put("config", JSONObject(state.getString(ObservationProvider.KEY_CONFIG).orEmpty()))
+                    .put("revision", state.getLong(ObservationProvider.KEY_CONFIG_UPDATED, 0L))
+                    .toString())
+                return
+            }
+            if (method != "PUT") {
+                json(out, 405, err("method_not_allowed", "use GET or PUT"))
+                return
+            }
+            val source = String(body ?: ByteArray(0), Charsets.UTF_8)
+            HookConfigParser.parse(source)
+            val extras = Bundle().apply { putString(ObservationProvider.KEY_CONFIG, source) }
+            val result = providerCall(ObservationProvider.METHOD_API_SET_CONFIG, extras)
+                ?: throw IllegalStateException("Hook config update was not acknowledged")
+            if (!result.getBoolean(ObservationProvider.KEY_ACCEPTED)) {
+                json(out, 500, err("storage_failed", "Hook config was not saved"))
+                return
+            }
+            json(out, 200, JSONObject()
+                .put("ok", true)
+                .put("accepted", true)
+                .put("revision", result.getLong(ObservationProvider.KEY_CONFIG_UPDATED, 0L))
+                .put("note", "Accepted by the local control plane; target-process application must be verified separately.")
+                .toString())
+        } catch (e: org.json.JSONException) {
+            json(out, 400, err("invalid_hook_config", e.message ?: "invalid Hook config"))
+        } catch (e: IllegalArgumentException) {
+            json(out, 400, err("invalid_hook_config", e.message ?: "invalid Hook config"))
+        } catch (t: Throwable) {
+            json(out, 503, err("hook_control_unavailable", t.message ?: "Hook config unavailable"))
+        }
+    }
+
+    private fun hookEnabled(out: OutputStream, body: ByteArray?) {
+        try {
+            val request = JSONObject(String(body ?: ByteArray(0), Charsets.UTF_8))
+            require(request.has("enabled")) { "enabled is required" }
+            val extras = Bundle().apply {
+                putBoolean(ObservationProvider.KEY_ENABLED, request.getBoolean("enabled"))
+            }
+            val result = providerCall(ObservationProvider.METHOD_API_SET_ENABLED, extras)
+                ?: throw IllegalStateException("Hook enable state was not acknowledged")
+            if (!result.getBoolean(ObservationProvider.KEY_ACCEPTED)) {
+                json(out, 500, err("storage_failed", "Hook enable state was not saved"))
+                return
+            }
+            json(out, 200, JSONObject()
+                .put("ok", true)
+                .put("accepted", true)
+                .put("enabled", request.getBoolean("enabled"))
+                .toString())
+        } catch (e: org.json.JSONException) {
+            json(out, 400, err("invalid_request", e.message ?: "invalid JSON body"))
+        } catch (e: IllegalArgumentException) {
+            json(out, 400, err("invalid_request", e.message ?: "invalid request"))
+        } catch (t: Throwable) {
+            json(out, 503, err("hook_control_unavailable", t.message ?: "Hook control unavailable"))
+        }
+    }
+
+    private fun hookDiscover(out: OutputStream, body: ByteArray?, requireExactClass: Boolean = false) {
+        try {
+            val request = JSONObject(String(body ?: ByteArray(0), Charsets.UTF_8))
+            val prefix = request.optString("prefix", "com.openai.")
+            val className = request.optString("className").takeIf { it.isNotBlank() && it != "null" }
+            val limit = request.optInt("limit", 100)
+            val cursor = request.optInt("cursor", 0)
+            require(!requireExactClass || className != null) { "className is required for exact inspection" }
+            require(prefix.startsWith("com.openai.") && prefix.length <= 180) { "prefix must be within com.openai.*" }
+            require(className == null || (className.startsWith("com.openai.") && className.length <= 240)) {
+                "className must be within com.openai.*"
+            }
+            require(limit in 1..500 && cursor >= 0) { "invalid discovery page bounds" }
+            val requestId = request.optString("requestId")
+                .takeIf { it.matches(Regex("[A-Fa-f0-9-]{16,64}")) }
+                ?: UUID.randomUUID().toString()
+            val payload = JSONObject()
+                .put("requestId", requestId)
+                .put("prefix", prefix)
+                .put("className", className ?: JSONObject.NULL)
+                .put("limit", limit)
+                .put("cursor", cursor)
+                .toString()
+            val extras = Bundle().apply {
+                putString(ObservationProvider.KEY_DISCOVERY_REQUEST, payload)
+            }
+            val result = providerCall(ObservationProvider.METHOD_HOST_DISCOVER, extras)
+                ?: throw IllegalStateException("Discovery request was not acknowledged")
+            if (!result.getBoolean(ObservationProvider.KEY_ACCEPTED)) {
+                json(out, 500, err("discovery_rejected", "Discovery request was not accepted"))
+                return
+            }
+            json(out, 202, JSONObject()
+                .put("ok", true)
+                .put("requestId", requestId)
+                .put("task", JSONObject(result.getString(ObservationProvider.KEY_DISCOVERY_TASK).orEmpty()))
+                .toString())
+        } catch (e: org.json.JSONException) {
+            json(out, 400, err("invalid_discovery_request", e.message ?: "invalid JSON body"))
+        } catch (e: IllegalArgumentException) {
+            json(out, 400, err("invalid_discovery_request", e.message ?: "invalid discovery request"))
+        } catch (t: Throwable) {
+            json(out, 503, err("hook_control_unavailable", t.message ?: "Discovery unavailable"))
+        }
+    }
+
+    private fun hookDiscovery(out: OutputStream, method: String, target: String) {
+        val requestId = target.removePrefix("/v1/hook/discovery/").substringBefore("/")
+        if (!requestId.matches(Regex("[A-Fa-f0-9-]{16,64}"))) {
+            json(out, 400, err("invalid_request", "invalid discovery request ID"))
+            return
+        }
+        try {
+            val extras = Bundle().apply { putString(ObservationProvider.KEY_DISCOVERY_ID, requestId) }
+            when (method) {
+                "GET" -> {
+                    val result = providerCall(ObservationProvider.METHOD_HOST_DISCOVERY_RESULT, extras)
+                        ?: throw IllegalStateException("Discovery status unavailable")
+                    val task = result.getString(ObservationProvider.KEY_DISCOVERY_TASK)
+                    if (task == null) {
+                        json(out, 404, err("not_found", "discovery request not found"))
+                    } else {
+                        val response = JSONObject().put("ok", true).put("task", JSONObject(task))
+                        result.getString(ObservationProvider.KEY_DISCOVERY_RESULT)?.let {
+                            response.put("result", JSONObject(it))
+                        }
+                        json(out, 200, response.toString())
+                    }
+                }
+                "DELETE" -> {
+                    val result = providerCall(ObservationProvider.METHOD_HOST_DISCOVERY_CANCEL, extras)
+                        ?: throw IllegalStateException("Discovery cancellation unavailable")
+                    json(out, 200, JSONObject()
+                        .put("ok", true)
+                        .put("accepted", result.getBoolean(ObservationProvider.KEY_ACCEPTED))
+                        .put("task", result.getString(ObservationProvider.KEY_DISCOVERY_TASK)?.let { JSONObject(it) } ?: JSONObject.NULL)
+                        .toString())
+                }
+                else -> json(out, 405, err("method_not_allowed", "use GET or DELETE"))
+            }
+        } catch (e: IllegalArgumentException) {
+            json(out, 400, err("invalid_request", e.message ?: "invalid request"))
+        } catch (t: Throwable) {
+            json(out, 503, err("hook_control_unavailable", t.message ?: "Discovery control unavailable"))
         }
     }
 
@@ -380,6 +615,7 @@ class LocalApiServer(@Volatile var cfg: RelayConfig, private val conversations: 
         JSONObject().put("error", JSONObject().put("type", type).put("message", message)).toString()
 
     companion object {
+        private val HOOK_PROVIDER_URI: Uri = Uri.parse("content://com.gpt.hook.observations")
         private const val MAX_REQUEST_BYTES = 1024 * 1024
         private const val MAX_HEADER_LINE_BYTES = 16 * 1024
     }

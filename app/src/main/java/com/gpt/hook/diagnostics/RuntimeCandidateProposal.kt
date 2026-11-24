@@ -2,14 +2,11 @@ package com.gpt.hook.diagnostics
 
 import org.json.JSONArray
 import org.json.JSONObject
+import java.lang.reflect.Constructor
 import java.lang.reflect.Method
 import java.security.MessageDigest
 
-/**
- * Stable identity and review-gated proposal lifecycle for runtime method observations.
- *
- * A proposal is data only: it never resolves a method, installs a Hook, or executes app code.
- */
+/** Stable identity for an observed runtime method candidate. */
 data class RuntimeCandidateProposal private constructor(
     val schemaVersion: Int,
     val candidateId: String,
@@ -127,6 +124,44 @@ internal object JvmDescriptors {
     fun method(method: Method): String =
         method.parameterTypes.joinToString(prefix = "(", postfix = ")") { type(it) } +
             type(method.returnType)
+
+    fun constructor(constructor: Constructor<*>): String =
+        constructor.parameterTypes.joinToString(prefix = "(", postfix = ")") { type(it) } + "V"
+
+    fun isValidMethodDescriptor(value: String): Boolean {
+        if (value.length !in 3..512 || value[0] != '(') return false
+        var index = 1
+        while (index < value.length && value[index] != ')') {
+            val next = parseType(value, index, allowVoid = false) ?: return false
+            index = next
+        }
+        if (index >= value.length || value[index] != ')') return false
+        index++
+        val end = parseType(value, index, allowVoid = true) ?: return false
+        return end == value.length
+    }
+
+    private fun parseType(value: String, start: Int, allowVoid: Boolean): Int? {
+        var index = start
+        var dimensions = 0
+        while (index < value.length && value[index] == '[') {
+            dimensions++
+            if (dimensions > 255) return null
+            index++
+        }
+        if (index >= value.length) return null
+        return when (value[index]) {
+            'B', 'C', 'D', 'F', 'I', 'J', 'S', 'Z' -> index + 1
+            'V' -> if (allowVoid && dimensions == 0) index + 1 else null
+            'L' -> {
+                val end = value.indexOf(';', index + 1)
+                if (end <= index + 1) return null
+                val name = value.substring(index + 1, end)
+                if (!name.matches(Regex("[A-Za-z0-9_$/]+"))) null else end + 1
+            }
+            else -> null
+        }
+    }
 
     private fun type(type: Class<*>): String = when (type) {
         java.lang.Void.TYPE -> "V"

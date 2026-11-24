@@ -21,7 +21,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
-/** libxposed entry point for the DSH declarative diagnostics runtime. */
+/** libxposed entry point for the DSH dynamic Hook runtime. */
 class MainModule : XposedModule() {
     private val configExecutor = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "dsh-config-apply").apply { isDaemon = true }
@@ -42,12 +42,17 @@ class MainModule : XposedModule() {
     private val providerPollStarted = AtomicBoolean(false)
     private val discoveryPollStarted = AtomicBoolean(false)
     private val discoveryWorkQueued = AtomicBoolean(false)
+    private val startupDiscoveryStarted = AtomicBoolean(false)
     private val eventBuffer = EventBuffer(onChanged = ::scheduleReportPublish)
-    private val classLoadWatcher = ClassLoadWatcher(this, eventBuffer)
+    private val classLoadWatcher = ClassLoadWatcher(this, eventBuffer, { type ->
+        activeRuntime?.onClassLoaded(type)
+    })
     private var configListener: SharedPreferences.OnSharedPreferenceChangeListener? = null
     @Volatile private var targetContextForIpc: Context? = null
     @Volatile private var activeRuntime: HookRuntime? = null
     @Volatile private var lastProviderConfigVersion: Long = -1L
+    @Volatile private var lastApplyReportJson: String =
+        JSONObject().put("state", "not_applied").put("updatedAtMs", 0L).toString()
 
     override fun onModuleLoaded(param: ModuleLoadedParam) {
         super.onModuleLoaded(param)
@@ -67,13 +72,14 @@ class MainModule : XposedModule() {
         fun applyCurrentConfig() {
             val source = prefs.getString("hook_config", null)
                 ?: RemoteConfigLoader.read(this)
-                ?: return
+                ?: DEFAULT_CONFIG
             configExecutor.execute {
                 try {
                     val config = HookConfigParser.parse(source)
-                    updateClassLoadWatcher(config.observeClassLoads)
                     val report = hookRuntime.applyWithReport(config)
+                    updateClassLoadWatcher(config.observeClassLoads)
                     logApplyReport(config.rules.size, report.added, report.replaced, report.retained, report.removed, report.failed)
+                    scheduleReportPublish()
                 } catch (t: Throwable) {
                     ModuleLogger.w("configuration rejected; reason=${t.javaClass.simpleName}")
                 }
@@ -87,7 +93,6 @@ class MainModule : XposedModule() {
         }.also { prefs.registerOnSharedPreferenceChangeListener(it) }
     }
 
-    /** Capture the target app Context at Application startup and start narrow Provider polling. */
     private fun installContextBootstrap() {
         try {
             val callback = Instrumentation::class.java.getDeclaredMethod(
@@ -109,26 +114,48 @@ class MainModule : XposedModule() {
     }
 
     private fun startProviderPolling() {
+        scheduleReportPublish()
+        startStartupDiscovery()
         if (providerPollStarted.compareAndSet(false, true)) {
-            providerConfigExecutor.scheduleWithFixedDelay({
-                pollProviderConfig()
-            }, 0, CONFIG_POLL_SECONDS, TimeUnit.SECONDS)
+            providerConfigExecutor.scheduleWithFixedDelay({ pollProviderConfig() }, 0, CONFIG_POLL_SECONDS, TimeUnit.SECONDS)
         }
         if (discoveryPollStarted.compareAndSet(false, true)) {
-            discoveryPoller.scheduleWithFixedDelay({
-                pollDiscoveryRequest()
-            }, 0, DISCOVERY_POLL_SECONDS, TimeUnit.SECONDS)
+            discoveryPoller.scheduleWithFixedDelay({ pollDiscoveryRequest() }, 0, DISCOVERY_POLL_SECONDS, TimeUnit.SECONDS)
+        }
+    }
+
+    private fun startStartupDiscovery() {
+        if (!startupDiscoveryStarted.compareAndSet(false, true)) return
+        discoveryExecutor.execute {
+            try {
+                val result = activeRuntime?.discover("com.openai.", null, 100, 0)
+                    ?: JSONObject().put("ok", false).put("error", "hook_runtime_unavailable")
+                if (!result.optBoolean("ok", false)) {
+                    ModuleLogger.w("startup DEX discovery incomplete; error=${result.optString("error", "unknown")}")
+                    return@execute
+                }
+                val ctx = targetContextForIpc ?: return@execute
+                val extras = Bundle().apply { putString(ObservationProvider.KEY_STARTUP_DISCOVERY, result.toString()) }
+                val accepted = ctx.contentResolver.call(
+                    PROVIDER_URI, ObservationProvider.METHOD_TARGET_PUBLISH_STARTUP_DISCOVERY, null, extras
+                )?.getBoolean(ObservationProvider.KEY_ACCEPTED) == true
+                if (accepted) {
+                    ModuleLogger.i("startup DEX discovery published; classes=${result.optInt("classesInspected")}; records=${result.optInt("recordCount")}; truncated=${result.optBoolean("scanTruncated")}")
+                } else {
+                    ModuleLogger.w("startup DEX discovery snapshot was not accepted")
+                }
+            } catch (t: Throwable) {
+                ModuleLogger.w("startup DEX discovery failed; reason=${t.javaClass.simpleName}")
+            }
         }
     }
 
     private fun pollProviderConfig() {
         val ctx = targetContextForIpc ?: return
         try {
-            val state = ctx.contentResolver.call(
-                PROVIDER_URI, ObservationProvider.METHOD_TARGET_CONFIG, null, null
-            ) ?: return
+            val state = ctx.contentResolver.call(PROVIDER_URI, ObservationProvider.METHOD_TARGET_CONFIG, null, null) ?: return
             val version = state.getLong(ObservationProvider.KEY_CONFIG_UPDATED, 0L)
-            if (version <= 0L || version == lastProviderConfigVersion) return
+            if (version == lastProviderConfigVersion) return
             val source = state.getString(ObservationProvider.KEY_CONFIG) ?: return
             val enabled = state.getBoolean(ObservationProvider.KEY_ENABLED, true)
             lastProviderConfigVersion = version
@@ -137,14 +164,18 @@ class MainModule : XposedModule() {
                 if (!enabled) {
                     updateClassLoadWatcher(false)
                     val removed = runtime.clear()
-                    ModuleLogger.i("DSH disabled Hook runtime; removed=$removed; revision=$version")
+                    lastApplyReportJson = JSONObject().put("state", "disabled").put("removed", removed)
+                        .put("failed", 0).put("revision", version).put("updatedAtMs", System.currentTimeMillis()).toString()
+                    ModuleLogger.i("GPT API disabled Hook runtime; removed=$removed; revision=$version")
+                    scheduleReportPublish()
                     return@execute
                 }
                 try {
                     val config = HookConfigParser.parse(source)
-                    updateClassLoadWatcher(config.observeClassLoads)
                     val report = runtime.applyWithReport(config)
+                    updateClassLoadWatcher(config.observeClassLoads)
                     logApplyReport(config.rules.size, report.added, report.replaced, report.retained, report.removed, report.failed, version)
+                    scheduleReportPublish()
                 } catch (t: Throwable) {
                     ModuleLogger.w("DSH config rejected; revision=$version; reason=${t.javaClass.simpleName}")
                 }
@@ -154,7 +185,6 @@ class MainModule : XposedModule() {
         }
     }
 
-    /** Provider leases the request before returning it; a restarted process can reclaim it after expiry. */
     private fun pollDiscoveryRequest() {
         if (!discoveryWorkQueued.compareAndSet(false, true)) return
         val ctx = targetContextForIpc
@@ -163,9 +193,7 @@ class MainModule : XposedModule() {
             return
         }
         try {
-            val pending = ctx.contentResolver.call(
-                PROVIDER_URI, ObservationProvider.METHOD_TARGET_DISCOVERY_POLL, null, null
-            ) ?: run {
+            val pending = ctx.contentResolver.call(PROVIDER_URI, ObservationProvider.METHOD_TARGET_DISCOVERY_POLL, null, null) ?: run {
                 discoveryWorkQueued.set(false)
                 return
             }
@@ -184,7 +212,6 @@ class MainModule : XposedModule() {
                 ModuleLogger.w("Provider returned an invalid discovery lease")
                 return
             }
-
             discoveryExecutor.execute {
                 try {
                     val prefix = request.optString("prefix", "com.openai.")
@@ -212,9 +239,7 @@ class MainModule : XposedModule() {
                             putLong(ObservationProvider.KEY_DISCOVERY_REVISION, revision)
                             putString(ObservationProvider.KEY_DISCOVERY_RESULT, failure.toString())
                         }
-                        ctx.contentResolver.call(
-                            PROVIDER_URI, ObservationProvider.METHOD_TARGET_DISCOVERY_RESULT, null, extras
-                        )
+                        ctx.contentResolver.call(PROVIDER_URI, ObservationProvider.METHOD_TARGET_DISCOVERY_RESULT, null, extras)
                     }
                 } finally {
                     discoveryWorkQueued.set(false)
@@ -229,29 +254,24 @@ class MainModule : XposedModule() {
     private fun updateClassLoadWatcher(enabled: Boolean) {
         try {
             if (enabled) {
-                if (classLoadWatcher.enable()) ModuleLogger.i("ClassLoader metadata watcher enabled")
+                if (classLoadWatcher.enable()) ModuleLogger.i("dynamic ClassLoader watcher enabled")
             } else {
-                if (classLoadWatcher.disable()) ModuleLogger.i("ClassLoader metadata watcher disabled")
+                if (classLoadWatcher.disable()) ModuleLogger.i("dynamic ClassLoader watcher disabled")
             }
         } catch (t: Throwable) {
-            ModuleLogger.w("ClassLoader metadata watcher update failed; reason=${t.javaClass.simpleName}")
+            ModuleLogger.w("ClassLoader watcher update failed; reason=${t.javaClass.simpleName}")
         }
     }
 
     private fun logApplyReport(
-        rules: Int,
-        added: Int,
-        replaced: Int,
-        retained: Int,
-        removed: Int,
-        failed: Int,
-        revision: Long? = null
+        rules: Int, added: Int, replaced: Int, retained: Int, removed: Int, failed: Int, revision: Long? = null
     ) {
-        ModuleLogger.i(
-            "Hook config applied; rules=$rules; added=$added; replaced=$replaced; " +
-                "retained=$retained; removed=$removed; failed=$failed" +
-                (revision?.let { "; revision=$it" } ?: "")
-        )
+        lastApplyReportJson = JSONObject()
+            .put("state", if (failed == 0) "applied" else "partial")
+            .put("requestedRules", rules).put("added", added).put("replaced", replaced)
+            .put("retained", retained).put("removed", removed).put("failed", failed)
+            .put("revision", revision ?: JSONObject.NULL).put("updatedAtMs", System.currentTimeMillis()).toString()
+        ModuleLogger.i("Hook config applied; rules=$rules; added=$added; replaced=$replaced; retained=$retained; removed=$removed; failed=$failed")
     }
 
     private fun scheduleReportPublish() {
@@ -263,14 +283,18 @@ class MainModule : XposedModule() {
     }
 
     private fun publishReport() {
-        val json = eventBuffer.toJson()
+        val report = JSONObject(eventBuffer.toJson())
+            .put("runtime", activeRuntime?.runtimeSnapshot() ?: JSONObject()
+                .put("state", "unavailable").put("activeHookCount", 0).put("hooks", org.json.JSONArray()))
+            .put("classLoadWatcherEnabled", classLoadWatcher.isEnabled())
+            .put("lastApplyReport", JSONObject(lastApplyReportJson))
+            .put("generatedAtMs", System.currentTimeMillis())
+        val json = report.toString(2)
         ModuleLogger.i("observation-report: $json")
         val ctx = targetContextForIpc ?: return
         try {
             val extras = Bundle().apply { putString(ObservationProvider.KEY_REPORT, json) }
-            val result = ctx.contentResolver.call(
-                PROVIDER_URI, ObservationProvider.METHOD_PUBLISH, null, extras
-            )
+            val result = ctx.contentResolver.call(PROVIDER_URI, ObservationProvider.METHOD_PUBLISH, null, extras)
             if (result?.getBoolean(ObservationProvider.KEY_ACCEPTED) != true) {
                 ModuleLogger.w("observation report relay not accepted; logcat channel in use")
             }
@@ -281,6 +305,8 @@ class MainModule : XposedModule() {
 
     private companion object {
         const val TARGET_PACKAGE = "com.openai.chatgpt"
+        const val DEFAULT_CONFIG =
+            """{"schemaVersion":1,"targetPackage":"com.openai.chatgpt","rules":[],"observeClassLoads":true}"""
         const val CONFIG_POLL_SECONDS = 3L
         const val DISCOVERY_POLL_SECONDS = 1L
         const val REPORT_DEBOUNCE_MS = 1500L

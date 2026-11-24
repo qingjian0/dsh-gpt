@@ -1,52 +1,58 @@
-# DSH AI Dynamic Hook Workbench
+# DSH AI Dynamic Hook Runtime
 
-## Delivered control and observation loop
+## Runtime behavior
 
-1. The module app validates declarative JSON rules and writes `hook_config` through libxposed remote preferences.
-2. The scoped target process independently validates the configuration and applies/removes hooks on preference changes.
-3. Hook callbacks record only bounded method metadata: rule ID, class/method/signature, elapsed time, sequence and exception class.
-4. A debounced publisher sends a bounded JSON snapshot to the module app's exported ContentProvider.
-5. The provider accepts writes only when Binder caller UID maps to `com.openai.chatgpt`; reads and clears are restricted to the module app UID.
-6. The console can refresh, copy, or share the sanitized report to an explicitly selected AI assistant.
-7. Paste an AI-suggested configuration into the editor; it is validated again before dispatch. This completes a user-mediated analysis → revise → apply loop without a hidden hosted AI client.
+The Kotlin/libxposed API 102 runtime supports live rule application in the ChatGPT target process:
 
-## Observation IPC security
+1. Send a new complete rule snapshot to `PUT /v1/hook/config`.
+2. The module app stores it through the authenticated local API and Provider boundary.
+3. The target process picks up the new revision on its short config poll and applies it without rebuilding the APK or restarting ChatGPT.
+4. Existing Hook IDs are replaced when a rule changes; removed rules are unhooked.
+5. If a configured class is not available yet, the ClassLoader watcher attaches it when that class is loaded later.
+6. Runtime status exposes the actual installed Hook handles, modes and invocation counts.
 
-- Authority: `com.gpt.hook.observations`.
-- Target-to-module transport uses Android ContentProvider `call()`; remote preferences are not used for reverse transport.
-- The provider is exported solely because the target app has a different UID. Every publish verifies the Binder caller UID's package set contains the exact configured target package. Read/clear require the module app UID.
-- The provider accepts only the expected report schema and at most 128 KiB per report.
-- The in-process buffer holds at most 100 events. Publication is debounced to avoid Binder calls on every hooked invocation.
-- The provider exposes no query/insert/update/delete data surface.
-- The target process captures its own application Context during `Instrumentation.callApplicationOnCreate(Application)` and calls the exported provider directly; Binder therefore carries the target app UID. This bootstrap and caller-UID behavior must still be verified on-device.
-
-## Configuration schema
+## Dynamic rule schema
 
 ```json
 {
   "schemaVersion": 1,
   "targetPackage": "com.openai.chatgpt",
+  "observeClassLoads": true,
   "rules": [{
     "id": "sample-method",
     "className": "com.openai.example.Sample",
-    "methodName": "run",
-    "parameterTypes": ["java.lang.String"],
+    "methodName": "calculate",
+    "methodDescriptor": "(I)I",
+    "mode": "return",
+    "result": 7,
     "enabled": true,
     "sampleEvery": 1
   }]
 }
 ```
 
-At most 64 rules, 8 overloads per rule, 128 KiB config, and sampleEvery 1..10000. Classes must be in `com.openai.*`; prefer explicit parameter types.
+Modes:
+- `observe` / `dump`: call the original method and record bounded timing/exception metadata.
+- `return`: return a configured primitive or String value without calling the original method.
+- `args`: replace selected primitive/String arguments, then call the original method.
+- `noop`: skip the original method and return its default value.
+- `throw`: skip the original method and throw a configured `IllegalStateException`.
 
-## AI integration boundary
+Argument indexes are zero-based. Return/argument values are JSON scalars and are type-checked against the actual reflected method before installation. Constructors support observation only. Exact JVM descriptors distinguish overloads; constructor descriptors end in `)V`. Up to eight matching overloads are attached per rule.
 
-The app does not embed an AI API key or silently upload reports. "Share to AI" invokes Android's chooser with the sanitized JSON; the user selects the assistant/provider. AI-generated rules must be pasted back and pass local validation before application. A fully automated hosted AI client requires provider selection, credentials, privacy disclosure and network implementation, and is intentionally not claimed by this build.
+## Live control
 
-## Privacy boundary
+- `GET /v1/hook/status`: actual installed Hook inventory and latest apply report.
+- `GET /v1/hook/events`: bounded metadata-only runtime observations.
+- `POST /v1/hook/discover`: bounded DEX discovery.
+- `POST /v1/hook/inspect`: exact class metadata inspection.
+- `PUT /v1/hook/config`: replace the active rule snapshot; the target runtime applies it live.
+- `PUT /v1/hook/enabled`: disable and unhook all active rules, or re-enable the current configuration.
 
-Never collect or serialize method arguments, return values, HTTP headers, cookies, authorization data, request/response bodies, device identifiers, anti-abuse challenge/proof material or credentials. This project does not solve or bypass anti-abuse challenges or access controls.
+A config update is picked up on the target process's short poll. It does not require an APK rebuild or app restart. A successful config response means it is stored; check `lastApplyReport` and `installedHooks` for actual runtime state.
 
-## Build and validation
+## Safety and privacy
 
-CI runs `assembleDebug`, verifies the LSPosed metadata entries and uploads the APK artifact. CI success proves compilation and packaging only. It does not prove LSPosed injection, IPC caller identity behavior, target app hook callbacks or Android-version compatibility on a physical device. Those require installation and device testing.
+Behavior-changing modes are rejected for authentication, session, token, credential, network, payment, attestation, security and cryptographic targets, and for sensitive method names such as verify/authorize/sign. Values are restricted to primitive and String scalars; arbitrary scripts and object injection are not supported.
+
+Observation payloads never serialize method arguments, return values, authorization headers, cookies, tokens, request/response bodies or anti-abuse proof material. Do not use Hook rules to bypass authentication, access controls, payment checks or security enforcement.

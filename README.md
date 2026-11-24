@@ -33,6 +33,8 @@ gradle assembleDebug --no-daemon
 
 See [AI_DYNAMIC_HOOK.md](docs/AI_DYNAMIC_HOOK.md) for schema, IPC design and privacy constraints.
 
+See [GPT API Hook Control](docs/GPT_API_HOOK_CONTROL.md) for the authenticated local API control routes and their acceptance semantics.
+
 ## Privacy and security
 
 Only method signature, timing, sequence, rule ID and exception class are recorded. No method arguments, return values, headers, cookies, tokens, request/response bodies, device identifiers or anti-abuse challenge/proof material are collected. No silent network upload or challenge bypass is implemented.

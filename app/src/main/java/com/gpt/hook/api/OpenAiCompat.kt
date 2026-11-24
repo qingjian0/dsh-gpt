@@ -17,8 +17,15 @@ object OpenAiCompat {
         "gpt-6" to emptyList(),
         "gpt-6-think" to listOf("reason"),
         "gpt-6-deep" to listOf("deep_research"),
-        "gpt-6-search" to listOf("reason", "web_search")
+        "gpt-6-search" to listOf("reason", "web_search"),
+        // 需要 RelayConfig.connectorId；为空时自动降级为 gpt-6-think 的行为
+        "gpt-6-tools" to listOf("reason")
     )
+
+    /** gpt-6-tools 的 hints 依赖已授权 connector id */
+    fun toolHints(connectorId: String): List<String> =
+        if (connectorId.isBlank()) listOf("reason")
+        else listOf("reason", "plugin:connector_" + connectorId)
     val DEFAULT_MODELS = listOf("auto") + MODEL_PROFILES.keys.toList()
 
     /** 把客户端请求的 model 映射成上游 slug + hints */
@@ -30,7 +37,8 @@ object OpenAiCompat {
     fun toConversation(
         openAi: JSONObject,
         upstreamConversationId: String? = null,
-        upstreamParentMessageId: String? = null
+        upstreamParentMessageId: String? = null,
+        connectorId: String = ""
     ): JSONObject {
         val messages = openAi.optJSONArray("messages") ?: JSONArray()
         val systemInstructions = ArrayList<String>()
@@ -57,7 +65,8 @@ object OpenAiCompat {
         }
 
         val rawModel = openAi.optString("model", "auto").ifBlank { "auto" }
-        val (requestedModel, profileHints) = resolveProfile(rawModel)
+        val (requestedModel, baseHints) = resolveProfile(rawModel)
+        val profileHints = if (rawModel == "gpt-6-tools") toolHints(connectorId) else baseHints
         val body = JSONObject()
             .put("action", "next")
             .put("model", requestedModel)
@@ -106,7 +115,7 @@ object OpenAiCompat {
         return ""
     }
 
-    private fun contentText(m: JSONObject): String {
+    fun contentText(m: JSONObject): String {
         val c = m.opt("content") ?: return ""
         if (c is String) return c
         if (c is JSONArray) {

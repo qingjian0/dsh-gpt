@@ -16,7 +16,7 @@ class ChatGptClient(private val cfg: RelayConfig) {
         val conn = url.openConnection() as HttpURLConnection
         conn.requestMethod = method
         conn.connectTimeout = 15000
-        conn.readTimeout = 300000
+        conn.readTimeout = 120000
         conn.doInput = true
         conn.setRequestProperty("Authorization", "DPoP ${cfg.accessToken}")
         conn.setRequestProperty("oai-did", cfg.oaiDid)

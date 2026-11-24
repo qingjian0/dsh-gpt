@@ -98,14 +98,32 @@ object OpenAiCompat {
         if (finalHints.length() > 0) body.put("system_hints", finalHints)
 
         if (!upstreamConversationId.isNullOrBlank()) body.put("conversation_id", upstreamConversationId)
-        val msg = JSONObject()
-            .put("id", UUID.randomUUID().toString())
-            .put("author", JSONObject().put("role", "user"))
-            .put(
-                "content",
-                JSONObject().put("content_type", "text").put("parts", JSONArray().put(prompt))
+        val messagesOut = JSONArray()
+        // 实测：工具调用协议必须放在独立的 system 消息里，拼进 user 文本模型会拒绝。
+        if (systemInstructions.isNotEmpty()) {
+            messagesOut.put(
+                JSONObject()
+                    .put("id", UUID.randomUUID().toString())
+                    .put("author", JSONObject().put("role", "system"))
+                    .put(
+                        "content",
+                        JSONObject().put("content_type", "text")
+                            .put("parts", JSONArray().put(systemInstructions.joinToString("\n\n")))
+                    )
             )
-        body.put("messages", JSONArray().put(msg))
+        }
+        val userParts = (toolResults + if (upstreamConversationId.isNullOrBlank() && transcript.size > 1) transcript else listOf(lastUser))
+        messagesOut.put(
+            JSONObject()
+                .put("id", UUID.randomUUID().toString())
+                .put("author", JSONObject().put("role", "user"))
+                .put(
+                    "content",
+                    JSONObject().put("content_type", "text")
+                        .put("parts", JSONArray().put(userParts.filter { it.isNotBlank() }.joinToString("\n\n")))
+                )
+        )
+        body.put("messages", messagesOut)
         return body
     }
 

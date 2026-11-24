@@ -63,3 +63,12 @@ Limitations retained deliberately:
 - Conversation persistence remains local and caller-scoped; this is not cloud synchronization.
 - Hook dashboard values depend on the target process publishing a fresh runtime report.
 - Physical-device acceptance remains pending; CI cannot verify LSPosed injection, Binder identity or live upstream behavior.
+
+
+## APK size optimization
+
+- CI now builds and publishes the optimized `release` APK instead of the unshrunk `debug` APK.
+- The existing release configuration enables R8 code shrinking and resource shrinking (`minifyEnabled true`, `shrinkResources true`).
+- JVM unit tests still run independently with the debug unit-test variant.
+- The release artifact is checked for all required LSPosed metadata entries before upload.
+- Actual APK size reduction is not claimed until the optimized artifact is produced and its byte size is measured against the debug artifact.

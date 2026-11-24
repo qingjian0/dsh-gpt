@@ -728,8 +728,9 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         } catch (t: Throwable) {
             try { socketSafeFlush(out) } catch (_: Throwable) { }
         } finally {
-            // 不主动 disconnect：正常读完响应后 JDK 会把连接放回 keep-alive 池，
-            // 下个请求可复用 TLS，省 200-500ms。异常路径由连接自身回收。
+            // 必须 disconnect：实测不释放会让后续请求阻塞（上游 7.5s 变成 42.6s）。
+            // keep-alive 的收益在这里不成立，连接必须显式归还。
+            try { conn.disconnect() } catch (_: Throwable) { }
         }
         }
     }

@@ -13,6 +13,7 @@ import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.util.UUID
+import java.security.MessageDigest
 import java.util.concurrent.Executors
 
 /**
@@ -82,18 +83,28 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                     json(out, 413, err("request_too_large", "request body exceeds 1 MiB"))
                     return
                 }
-                val body = if (contentLength > 0) {
-                    val buf = ByteArray(contentLength)
-                    var off = 0
-                    while (off < contentLength) {
-                        val n = input.read(buf, off, contentLength - off)
-                        if (n < 0) break
-                        off += n
+                if (headers["expect"]?.equals("100-continue", ignoreCase = true) == true) {
+                    out.write("HTTP/1.1 100 Continue\r\n\r\n".toByteArray(Charsets.ISO_8859_1))
+                    out.flush()
+                }
+                val body = when {
+                    headers["transfer-encoding"]?.contains("chunked", ignoreCase = true) == true ->
+                        readChunkedBody(input)
+                    contentLength > 0 -> {
+                        val buf = ByteArray(contentLength)
+                        var off = 0
+                        while (off < contentLength) {
+                            val n = input.read(buf, off, contentLength - off)
+                            if (n < 0) throw java.io.EOFException("incomplete request body")
+                            off += n
+                        }
+                        buf
                     }
-                    buf
-                } else null
+                    else -> null
+                }
 
                 when {
+                    method == "OPTIONS" -> corsPreflight(out)
                     target == "/health" -> json(out, 200, health())
                     cfg.apiKey.isBlank() -> json(out, 503, err("configuration_required", "configure a gateway API key before using protected API routes"))
                     !authorized(headers) -> json(out, 401, err("invalid_api_key", "missing or bad Authorization"))
@@ -110,6 +121,8 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                         conversationRoute(out, method, target, body, headers)
                     method == "POST" && target == "/v1/chat/completions" ->
                         chat(out, body ?: ByteArray(0), headers)
+                    method == "POST" && target == "/v1/responses" ->
+                        responses(out, body ?: ByteArray(0), headers)
                     target.startsWith("/backend-api") -> passthrough(out, method, target, body, headers)
                     else -> json(out, 404, err("not_found", "route not found"))
                 }
@@ -347,8 +360,7 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
             json(out, 503, err("configuration_required", "configure a gateway API key before using conversation endpoints"))
             return
         }
-        val caller = headers["x-dsh-client-id"]
-        if (caller.isNullOrBlank()) { json(out, 400, err("invalid_request", "X-DSH-Client-Id is required")); return }
+        val caller = callerId(headers)
         try {
             val base = "/v1/conversations"
             if (target == base && method == "GET") {
@@ -405,6 +417,52 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         return bytes.toString("ISO-8859-1")
     }
 
+    /** Standard OpenAI clients only send Authorization; the DSH header remains optional. */
+    private fun callerId(headers: Map<String, String>): String {
+        val supplied = headers["x-dsh-client-id"]?.trim()
+        if (!supplied.isNullOrBlank() && supplied.length <= 96 &&
+            supplied.matches(Regex("[A-Za-z0-9._:-]+"))) return supplied
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest(cfg.apiKey.toByteArray(Charsets.UTF_8))
+            .take(8).joinToString("") { "%02x".format(it) }
+        return "openai-$digest"
+    }
+
+    private fun corsPreflight(out: OutputStream) {
+        writeHead(out, 204, "text/plain; charset=utf-8", 0L)
+    }
+
+    private fun readChunkedBody(input: java.io.InputStream): ByteArray {
+        val output = java.io.ByteArrayOutputStream()
+        while (true) {
+            val sizeLine = readHttpLine(input) ?: throw java.io.EOFException("missing chunk size")
+            val size = sizeLine.substringBefore(";").trim().toLongOrNull(16)
+                ?: throw IllegalArgumentException("invalid chunk size")
+            if (size < 0 || size > MAX_REQUEST_BYTES || output.size().toLong() + size > MAX_REQUEST_BYTES) {
+                throw IllegalArgumentException("request body exceeds 1 MiB")
+            }
+            if (size == 0L) {
+                while (true) {
+                    val trailer = readHttpLine(input) ?: break
+                    if (trailer.isEmpty()) break
+                }
+                break
+            }
+            var remaining = size.toInt()
+            val buffer = ByteArray(minOf(8192, remaining))
+            while (remaining > 0) {
+                val count = input.read(buffer, 0, minOf(buffer.size, remaining))
+                if (count < 0) throw java.io.EOFException("incomplete chunk")
+                output.write(buffer, 0, count)
+                remaining -= count
+            }
+            if (input.read() != 13 || input.read() != 10) {
+                throw IllegalArgumentException("invalid chunk terminator")
+            }
+        }
+        return output.toByteArray()
+    }
+
     private fun authorized(headers: Map<String, String>): Boolean {
         val expected = cfg.apiKey
         if (expected.isBlank()) return false
@@ -420,14 +478,79 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         .put("ready", cfg.ready).put("upstream", cfg.upstreamBase)
         .toString()
 
-    private fun chat(out: OutputStream, body: ByteArray, headers: Map<String, String>) {
+    private fun responses(out: OutputStream, body: ByteArray, headers: Map<String, String>) {
+        val request = try { JSONObject(String(body, Charsets.UTF_8)) } catch (t: Throwable) {
+            json(out, 400, err("invalid_request", "body is not JSON")); return
+        }
+        val messages = org.json.JSONArray()
+        val instructions = request.optString("instructions").trim()
+        if (instructions.isNotEmpty()) messages.put(JSONObject().put("role", "system").put("content", instructions))
+        when (val input = request.opt("input")) {
+            is String -> if (input.isNotBlank()) messages.put(JSONObject().put("role", "user").put("content", input))
+            is org.json.JSONArray -> {
+                val looseText = StringBuilder()
+                for (i in 0 until input.length()) {
+                    when (val item = input.opt(i)) {
+                        is String -> if (item.isNotBlank()) messages.put(JSONObject().put("role", "user").put("content", item))
+                        is JSONObject -> {
+                            val content = responseInputText(item.opt("content") ?: item.opt("text"))
+                            if (content.isNotBlank()) {
+                                if (item.has("role") || item.optString("type") == "message") {
+                                    messages.put(JSONObject().put("role", item.optString("role", "user")).put("content", content))
+                                } else {
+                                    if (looseText.isNotEmpty()) looseText.append("\n")
+                                    looseText.append(content)
+                                }
+                            }
+                        }
+                    }
+                }
+                if (looseText.isNotEmpty()) messages.put(JSONObject().put("role", "user").put("content", looseText.toString()))
+            }
+            else -> {
+                json(out, 400, err("invalid_request", "input must be a string or an array of messages")); return
+            }
+        }
+        if (messages.length() == 0) {
+            json(out, 400, err("invalid_request", "input must contain text")); return
+        }
+        val chatRequest = JSONObject()
+            .put("model", request.optString("model", "auto"))
+            .put("messages", messages)
+            .put("stream", request.optBoolean("stream", false))
+        chat(out, chatRequest.toString().toByteArray(Charsets.UTF_8), headers, responsesMode = true)
+    }
+
+    private fun responseInputText(value: Any?): String {
+        if (value is String) return value
+        if (value is org.json.JSONArray) {
+            val result = StringBuilder()
+            for (i in 0 until value.length()) {
+                val part = value.opt(i)
+                if (part is String) result.append(part)
+                else if (part is JSONObject) result.append(part.optString("text"))
+            }
+            return result.toString()
+        }
+        if (value is JSONObject) return value.optString("text")
+        return ""
+    }
+
+    private fun writeResponseEvent(out: OutputStream, type: String, payload: JSONObject) {
+        payload.put("type", type)
+        writeChunk(out, "event: $type\ndata: $payload\n\n")
+    }
+
+    private fun chat(
+        out: OutputStream,
+        body: ByteArray,
+        headers: Map<String, String>,
+        responsesMode: Boolean = false
+    ) {
         val req = try { JSONObject(String(body, Charsets.UTF_8)) } catch (t: Throwable) {
             json(out, 400, err("invalid_request", "body is not JSON")); return
         }
-        val caller = headers["x-dsh-client-id"]
-        if (caller.isNullOrBlank()) {
-            json(out, 400, err("invalid_request", "X-DSH-Client-Id is required for chat completions")); return
-        }
+        val caller = callerId(headers)
         val model = req.optString("model", "auto").ifBlank { "auto" }
         val userText = OpenAiCompat.lastUserText(req)
         if (userText.isBlank()) {
@@ -461,7 +584,9 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         }
 
         val stream = req.optBoolean("stream", false)
-        val id = "chatcmpl-" + UUID.randomUUID().toString().replace("-", "").take(24)
+        val id = (if (responsesMode) "resp-" else "chatcmpl-") +
+            UUID.randomUUID().toString().replace("-", "").take(24)
+        val responseItemId = "msg_" + UUID.randomUUID().toString().replace("-", "").take(24)
         val client = ChatGptClient(cfg)
         val payload = OpenAiCompat.toConversation(
             req, conversationForTurn.upstreamConversationId, conversationForTurn.upstreamParentMessageId
@@ -486,6 +611,19 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         try {
             if (stream) {
                 writeHead(out, 200, "text/event-stream; charset=utf-8", null, responseHeaders)
+                if (responsesMode) {
+                    writeResponseEvent(out, "response.created", JSONObject()
+                        .put("response", OpenAiCompat.responseObject(id, model, "", "in_progress", responseItemId)))
+                    writeResponseEvent(out, "response.in_progress", JSONObject()
+                        .put("response", OpenAiCompat.responseObject(id, model, "", "in_progress", responseItemId)))
+                    writeResponseEvent(out, "response.output_item.added", JSONObject()
+                        .put("output_index", 0)
+                        .put("item", JSONObject().put("id", responseItemId).put("type", "message")
+                            .put("status", "in_progress").put("role", "assistant").put("content", org.json.JSONArray())))
+                    writeResponseEvent(out, "response.content_part.added", JSONObject()
+                        .put("item_id", responseItemId).put("output_index", 0).put("content_index", 0)
+                        .put("part", JSONObject().put("type", "output_text").put("text", "").put("annotations", org.json.JSONArray())))
+                }
                 var line: String?
                 while (reader.readLine().also { line = it } != null) {
                     val l = line ?: continue
@@ -496,10 +634,33 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                     val delta = extractDelta(event, sent) ?: continue
                     sent += delta
                     textOut.append(delta)
-                    writeChunk(out, "data: " + OpenAiCompat.chunk(id, model, delta) + "\n\n")
+                    if (responsesMode) {
+                        writeResponseEvent(out, "response.output_text.delta", JSONObject()
+                            .put("item_id", responseItemId).put("output_index", 0)
+                            .put("content_index", 0).put("delta", delta))
+                    } else {
+                        writeChunk(out, "data: " + OpenAiCompat.chunk(id, model, delta) + "\n\n")
+                    }
                 }
-                writeChunk(out, "data: " + OpenAiCompat.chunk(id, model, "", "stop") + "\n\n")
-                writeChunk(out, "data: [DONE]\n\n")
+                if (responsesMode) {
+                    val full = textOut.toString()
+                    writeResponseEvent(out, "response.output_text.done", JSONObject()
+                        .put("item_id", responseItemId).put("output_index", 0).put("content_index", 0).put("text", full))
+                    writeResponseEvent(out, "response.content_part.done", JSONObject()
+                        .put("item_id", responseItemId).put("output_index", 0).put("content_index", 0)
+                        .put("part", JSONObject().put("type", "output_text").put("text", full).put("annotations", org.json.JSONArray())))
+                    writeResponseEvent(out, "response.output_item.done", JSONObject()
+                        .put("output_index", 0)
+                        .put("item", JSONObject().put("id", responseItemId).put("type", "message")
+                            .put("status", "completed").put("role", "assistant")
+                            .put("content", org.json.JSONArray().put(JSONObject().put("type", "output_text")
+                                .put("text", full).put("annotations", org.json.JSONArray())))))
+                    writeResponseEvent(out, "response.completed", JSONObject()
+                        .put("response", OpenAiCompat.responseObject(id, model, full, itemId = responseItemId)))
+                } else {
+                    writeChunk(out, "data: " + OpenAiCompat.chunk(id, model, "", "stop") + "\n\n")
+                    writeChunk(out, "data: [DONE]\n\n")
+                }
                 out.flush()
             } else {
                 reader.forEachLine { l ->
@@ -510,7 +671,10 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                         if (delta != null) { sent += delta; textOut.append(delta) }
                     }
                 }
-                json(out, 200, OpenAiCompat.completion(id, model, textOut.toString()), responseHeaders)
+                json(out, 200,
+                    if (responsesMode) OpenAiCompat.responseObject(id, model, textOut.toString()).toString()
+                    else OpenAiCompat.completion(id, model, textOut.toString()),
+                    responseHeaders)
             }
             if (textOut.isNotEmpty()) {
                 conversations.appendMessage(
@@ -581,8 +745,31 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         extraHeaders: Map<String, String> = emptyMap()
     ) {
         val sb = StringBuilder()
-        sb.append("HTTP/1.1 ").append(code).append(" X\r\n")
+        val reason = when (code) {
+            200 -> "OK"
+            201 -> "Created"
+            202 -> "Accepted"
+            204 -> "No Content"
+            400 -> "Bad Request"
+            401 -> "Unauthorized"
+            403 -> "Forbidden"
+            404 -> "Not Found"
+            405 -> "Method Not Allowed"
+            413 -> "Payload Too Large"
+            429 -> "Too Many Requests"
+            500 -> "Internal Server Error"
+            502 -> "Bad Gateway"
+            503 -> "Service Unavailable"
+            else -> "Response"
+        }
+        sb.append("HTTP/1.1 ").append(code).append(" ").append(reason).append("\r\n")
         sb.append("Content-Type: ").append(contentType).append("\r\n")
+        sb.append("Access-Control-Allow-Origin: *\r\n")
+        sb.append("Access-Control-Allow-Private-Network: true\r\n")
+        sb.append("Access-Control-Allow-Headers: Authorization, Content-Type, X-DSH-Client-Id, X-DSH-Conversation-Id\r\n")
+        sb.append("Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n")
+        sb.append("Access-Control-Max-Age: 86400\r\n")
+        sb.append("Vary: Origin\r\n")
         if (length != null) sb.append("Content-Length: ").append(length).append("\r\n")
         extraHeaders.forEach { (name, value) ->
             if (name.matches(Regex("[A-Za-z0-9-]{1,64}")) && value.none { it == '\r' || it == '\n' }) {

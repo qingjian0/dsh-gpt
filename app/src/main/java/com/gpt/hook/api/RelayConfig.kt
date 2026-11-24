@@ -1,12 +1,13 @@
 package com.gpt.hook.api
 
 import android.content.Context
+import java.util.UUID
 
 /** 本地 API / 反代网关的可持久化配置。 */
 data class RelayConfig(
     val enabled: Boolean = false,
     val port: Int = 8766,
-    val lan: Boolean = false,
+    val lan: Boolean = true,
     val apiKey: String = "",
     val upstreamBase: String = "https://android.chat.openai.com",
     val accessToken: String = "",
@@ -22,11 +23,16 @@ data class RelayConfig(
         fun load(ctx: Context): RelayConfig {
             val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             val defaults = RelayConfig()
+            val storedApiKey = p.getString("apiKey", null)
+            val apiKey = storedApiKey?.takeIf { it.isNotBlank() }
+                ?: "sk-local-" + UUID.randomUUID().toString().replace("-", "") +
+                    UUID.randomUUID().toString().replace("-", "")
+            if (storedApiKey != apiKey) p.edit().putString("apiKey", apiKey).apply()
             return RelayConfig(
                 enabled = p.getBoolean("enabled", defaults.enabled),
                 port = p.getInt("port", defaults.port),
                 lan = p.getBoolean("lan", defaults.lan),
-                apiKey = p.getString("apiKey", defaults.apiKey) ?: defaults.apiKey,
+                apiKey = apiKey,
                 upstreamBase = p.getString("upstreamBase", defaults.upstreamBase) ?: defaults.upstreamBase,
                 accessToken = p.getString("accessToken", "") ?: "",
                 oaiDid = p.getString("oaiDid", "") ?: "",

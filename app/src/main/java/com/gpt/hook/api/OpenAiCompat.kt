@@ -103,6 +103,36 @@ object OpenAiCompat {
         return JSONObject().put("object", "list").put("data", arr).toString()
     }
 
+
+    fun responseObject(
+        id: String,
+        model: String,
+        text: String,
+        status: String = "completed",
+        itemId: String = "msg_" + id.removePrefix("resp-")
+    ): JSONObject {
+        val part = JSONObject()
+            .put("type", "output_text")
+            .put("text", text)
+            .put("annotations", JSONArray())
+        val item = JSONObject()
+            .put("id", itemId)
+            .put("type", "message")
+            .put("status", status)
+            .put("role", "assistant")
+            .put("content", JSONArray().put(part))
+        return JSONObject()
+            .put("id", id)
+            .put("object", "response")
+            .put("created_at", System.currentTimeMillis() / 1000)
+            .put("status", status)
+            .put("error", JSONObject.NULL)
+            .put("incomplete_details", JSONObject.NULL)
+            .put("model", model)
+            .put("output", JSONArray().put(item))
+            .put("output_text", text)
+    }
+
     fun chunk(id: String, model: String, delta: String, finish: String? = null): String {
         val choice = JSONObject()
             .put("index", 0)

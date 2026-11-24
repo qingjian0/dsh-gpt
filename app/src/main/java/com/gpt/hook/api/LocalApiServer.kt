@@ -677,19 +677,23 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                         .put("response", OpenAiCompat.responseObject(id, model, full, itemId = responseItemId)))
                 } else {
                     val full = textOut.toString()
-                    val call = if (ToolBridge.hasTools(req)) ToolBridge.parse(full) else null
-                    if (call != null) {
-                        // 工具调用：DSH 侧按标准协议解析 tool_calls
+                    val calls = if (ToolBridge.hasTools(req)) ToolBridge.parseAll(full) else emptyList()
+                    if (calls.isNotEmpty()) {
+                        // 工具调用：一次可带多个，DSH 侧并行执行
+                        val deltas = org.json.JSONArray()
+                        calls.forEachIndexed { i, c ->
+                            deltas.put(JSONObject()
+                                .put("index", i).put("id", c.id).put("type", "function")
+                                .put("function", JSONObject().put("name", c.name)
+                                    .put("arguments", c.arguments)))
+                        }
                         val frame = JSONObject()
                             .put("id", id).put("object", "chat.completion.chunk")
                             .put("created", System.currentTimeMillis() / 1000).put("model", model)
                             .put("choices", org.json.JSONArray().put(JSONObject().put("index", 0)
                                 .put("delta", JSONObject().put("role", "assistant")
                                     .put("content", JSONObject.NULL)
-                                    .put("tool_calls", org.json.JSONArray().put(JSONObject()
-                                        .put("index", 0).put("id", call.id).put("type", "function")
-                                        .put("function", JSONObject().put("name", call.name)
-                                            .put("arguments", call.arguments)))))
+                                    .put("tool_calls", deltas))
                                 .put("finish_reason", "tool_calls")))
                         writeChunk(out, "data: " + frame + "\n\n")
                     } else {
@@ -708,10 +712,10 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                     }
                 }
                 val full = textOut.toString()
-                val call = if (ToolBridge.hasTools(req)) ToolBridge.parse(full) else null
+                val calls = if (ToolBridge.hasTools(req)) ToolBridge.parseAll(full) else emptyList()
                 json(out, 200,
                     if (responsesMode) OpenAiCompat.responseObject(id, model, full).toString()
-                    else OpenAiCompat.completion(id, model, full, 0, call),
+                    else OpenAiCompat.completion(id, model, full, 0, calls),
                     responseHeaders)
             }
             if (textOut.isNotEmpty()) {
@@ -724,7 +728,8 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         } catch (t: Throwable) {
             try { socketSafeFlush(out) } catch (_: Throwable) { }
         } finally {
-            try { conn.disconnect() } catch (_: Throwable) { }
+            // 不主动 disconnect：正常读完响应后 JDK 会把连接放回 keep-alive 池，
+            // 下个请求可复用 TLS，省 200-500ms。异常路径由连接自身回收。
         }
         }
     }

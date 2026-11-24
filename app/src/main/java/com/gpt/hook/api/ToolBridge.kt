@@ -37,17 +37,56 @@ object ToolBridge {
             val name = fn.optString("name")
             if (name.isBlank()) continue
             sb.append("- ").append(name).append(": ")
-            sb.append(fn.optString("description").replace("\n", " ").take(400))
-            val params = fn.optJSONObject("parameters")
-            if (params != null) sb.append("\n  参数 schema: ").append(params.toString().take(1200))
+            sb.append(fn.optString("description").replace("\n", " ").take(160))
+            val props = fn.optJSONObject("parameters")?.optJSONObject("properties")
+            if (props != null && props.length() > 0) {
+                val keys = props.keys()
+                val names = ArrayList<String>()
+                while (keys.hasNext()) {
+                    val k = keys.next()
+                    names += k + ":" + (props.optJSONObject(k)?.optString("type") ?: "any")
+                }
+                sb.append(" 参数(").append(names.joinToString(", ")).append(")")
+            }
             sb.append("\n")
         }
         sb.append("\n规则：\n")
-        sb.append("1. 需要工具时，整条回复只能是 ").append(OPEN).append("...").append(CLOSE).append("，前后不加文字。\n")
+        sb.append("1. 需要工具时，整条回复只能由 ").append(OPEN).append("...").append(CLOSE).append(" 组成，前后不加文字。\n")
+        sb.append("   可以一次输出多个 ").append(OPEN).append(" 块来并行调用多个工具，减少往返。\n")
         sb.append("2. arguments 必须是合法 JSON 对象，键名与参数 schema 一致。\n")
         sb.append("3. 如果不需要工具，直接正常回答，不要输出 tool_call。\n")
         sb.append("4. 工具结果会以「工具返回：」前缀提供给你，据此继续。\n")
         return sb.toString()
+    }
+
+    /** 解析全部工具调用（模型可一次输出多个，减少往返轮次） */
+    fun parseAll(text: String): List<ParsedCall> {
+        val out = ArrayList<ParsedCall>()
+        var from = 0
+        while (true) {
+            val start = text.indexOf(OPEN, from)
+            if (start < 0) break
+            val end = text.indexOf(CLOSE, start)
+            if (end < 0) break
+            val parsed = parseOne(text.substring(start + OPEN.length, end).trim())
+            if (parsed != null) out += parsed
+            from = end + CLOSE.length
+        }
+        return out
+    }
+
+    private fun parseOne(raw: String): ParsedCall? {
+        val obj = runCatching { JSONObject(raw) }.getOrNull() ?: return null
+        val name = obj.optString("name")
+        if (name.isBlank()) return null
+        val args = obj.opt("arguments")
+        val argsText = when (args) {
+            null, JSONObject.NULL -> "{}"
+            is JSONObject -> args.toString()
+            is String -> args
+            else -> args.toString()
+        }
+        return ParsedCall(name, argsText, "call_" + System.nanoTime().toString(36))
     }
 
     /** 从模型输出里解析工具调用；没有或格式非法时返回 null */
@@ -81,6 +120,15 @@ object ToolBridge {
             out += "工具返回（$name）：" + OpenAiCompat.contentText(m).take(6000)
         }
         return out
+    }
+
+    fun toolCallsJson(calls: List<ParsedCall>): JSONArray {
+        val arr = JSONArray()
+        for (c in calls) arr.put(
+            JSONObject().put("id", c.id).put("type", "function")
+                .put("function", JSONObject().put("name", c.name).put("arguments", c.arguments))
+        )
+        return arr
     }
 
     /** OpenAI 标准 tool_calls 数组 */

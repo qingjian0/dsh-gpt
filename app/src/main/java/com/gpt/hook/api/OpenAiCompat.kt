@@ -210,11 +210,11 @@ object OpenAiCompat {
         return obj.toString()
     }
 
-    fun completion(id: String, model: String, text: String, promptTokens: Int = 0, toolCall: ToolBridge.ParsedCall? = null): String {
+    fun completion(id: String, model: String, text: String, promptTokens: Int = 0, toolCalls: List<ToolBridge.ParsedCall> = emptyList()): String {
         val msg = JSONObject().put("role", "assistant")
         val choice = JSONObject().put("index", 0)
-        if (toolCall != null) {
-            msg.put("content", JSONObject.NULL).put("tool_calls", ToolBridge.toolCallsJson(toolCall))
+        if (toolCalls.isNotEmpty()) {
+            msg.put("content", JSONObject.NULL).put("tool_calls", ToolBridge.toolCallsJson(toolCalls))
             choice.put("message", msg).put("finish_reason", "tool_calls")
         } else {
             msg.put("content", text)

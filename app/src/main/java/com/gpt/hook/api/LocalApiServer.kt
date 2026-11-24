@@ -632,6 +632,7 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         }
 
         val textOut = StringBuilder()
+        val upstreamState = UpstreamState()
         var sent = ""
         val reader = BufferedReader(InputStreamReader(conn.inputStream, Charsets.UTF_8))
         try {
@@ -656,7 +657,7 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                     if (l == "data: [DONE]") break
                     if (!l.startsWith("data:")) continue
                     val event = l.substring(5).trim()
-                    captureUpstreamState(event, caller, localId)
+                    captureUpstreamState(event, upstreamState)
                     val delta = extractDelta(event, sent) ?: continue
                     sent += delta
                     textOut.append(delta)
@@ -714,7 +715,7 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                 reader.forEachLine { l ->
                     if (l.startsWith("data:")) {
                         val event = l.substring(5).trim()
-                        captureUpstreamState(event, caller, localId)
+                        captureUpstreamState(event, upstreamState)
                         val delta = extractDelta(event, sent)
                         if (delta != null) { sent += delta; textOut.append(delta) }
                     }
@@ -725,6 +726,14 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                     if (responsesMode) OpenAiCompat.responseObject(id, model, full).toString()
                     else OpenAiCompat.completion(id, model, full, 0, calls),
                     responseHeaders)
+            }
+            // 上游 id 与消息一起提交，避免每个 SSE 事件都写一次库
+            if (upstreamState.conversationId != null || upstreamState.parentMessageId != null) {
+                runCatching {
+                    conversations.updateUpstreamState(
+                        caller, localId, upstreamState.conversationId, upstreamState.parentMessageId
+                    )
+                }
             }
             if (textOut.isNotEmpty()) {
                 conversations.appendMessage(
@@ -743,16 +752,26 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         }
     }
 
-    private fun captureUpstreamState(payload: String, caller: String, localId: String) {
+    /**
+     * 只解析 SSE 事件，把上游 id 记到 holder 里，不写库。
+     *
+     * 之前每个事件都写一次 SQLite：一次回答有几百个事件就是几百次写，
+     * 实测把 1 秒的上游响应拖到 32 秒。现在由调用方在结束时统一提交一次。
+     */
+    private class UpstreamState {
+        var conversationId: String? = null
+        var parentMessageId: String? = null
+    }
+
+    private fun captureUpstreamState(payload: String, state: UpstreamState) {
         if (payload.isEmpty() || payload == "[DONE]") return
         val obj = try { JSONObject(payload) } catch (_: Throwable) { return }
-        val conversationId = obj.optString("conversation_id").takeIf { it.isNotBlank() && it != "null" }
+        obj.optString("conversation_id").takeIf { it.isNotBlank() && it != "null" }
+            ?.let { state.conversationId = it }
         val message = obj.optJSONObject("message")
-        val parentMessageId = if (message?.optJSONObject("author")?.optString("role") == "assistant") {
+        if (message?.optJSONObject("author")?.optString("role") == "assistant") {
             message.optString("id").takeIf { it.isNotBlank() && it != "null" }
-        } else null
-        if (conversationId != null || parentMessageId != null) {
-            conversations.updateUpstreamState(caller, localId, conversationId, parentMessageId)
+                ?.let { state.parentMessageId = it }
         }
     }
 

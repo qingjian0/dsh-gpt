@@ -615,7 +615,7 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         val responseItemId = "msg_" + UUID.randomUUID().toString().replace("-", "").take(24)
         val client = ChatGptClient(cfg)
         val payload = OpenAiCompat.toConversation(
-            req, conversationForTurn.upstreamConversationId, conversationForTurn.upstreamParentMessageId, cfg.connectorId
+            req, conversationForTurn.upstreamConversationId, conversationForTurn.upstreamParentMessageId, cfg.connectorId, cfg.temporaryChat
         ).toString().toByteArray(Charsets.UTF_8)
 
         val conn = try {

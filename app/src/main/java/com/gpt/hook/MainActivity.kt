@@ -344,6 +344,16 @@ private fun ApiScreen() {
                 Text("允许局域网访问", modifier = Modifier.weight(1f))
                 Switch(checked = config.lan, onCheckedChange = { config = config.copy(lan = it) })
             }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("临时对话")
+                    Text("不保存历史、不进训练、不带记忆（history_and_training_disabled）",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Switch(checked = config.temporaryChat,
+                    onCheckedChange = { config = config.copy(temporaryChat = it) })
+            }
             Button(onClick = {
                 val parsedPort = port.toIntOrNull()
                 if (parsedPort == null || parsedPort !in 1..65535) {

@@ -15,6 +15,8 @@ data class RelayConfig(
     val sessionId: String = "",
     /** ChatGPT 已授权应用的 connector id，用于 system_hints: ["plugin:connector_<id>"] */
     val connectorId: String = "",
+    /** 临时对话：上游 history_and_training_disabled=true，不保存、不进训练、不带记忆 */
+    val temporaryChat: Boolean = false,
     val userAgent: String = "ChatGPT/1.2026.321 (Android 15; 22081212C)",
 ) {
     val ready: Boolean get() = accessToken.isNotBlank() && oaiDid.isNotBlank()
@@ -40,6 +42,7 @@ data class RelayConfig(
                 oaiDid = p.getString("oaiDid", "") ?: "",
                 sessionId = p.getString("sessionId", "") ?: "",
                 connectorId = p.getString("connectorId", "") ?: "",
+                temporaryChat = p.getBoolean("temporaryChat", false),
                 userAgent = p.getString("userAgent", defaults.userAgent) ?: defaults.userAgent,
             )
         }
@@ -55,6 +58,7 @@ data class RelayConfig(
                 .putString("oaiDid", cfg.oaiDid)
                 .putString("sessionId", cfg.sessionId)
                 .putString("connectorId", cfg.connectorId)
+                .putBoolean("temporaryChat", cfg.temporaryChat)
                 .putString("userAgent", cfg.userAgent)
                 .apply()
         }
@@ -68,6 +72,7 @@ data class RelayConfig(
                 oaiDid = o.optString("oai_did", o.optString("oai-did", cur.oaiDid)),
                 sessionId = o.optString("session_id", o.optString("sessionId", cur.sessionId)),
                 connectorId = o.optString("connectorId", cur.connectorId),
+                temporaryChat = o.optBoolean("temporaryChat", cur.temporaryChat),
             )
             save(ctx, next)
             return next

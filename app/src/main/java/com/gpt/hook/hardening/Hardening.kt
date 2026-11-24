@@ -101,7 +101,8 @@ object Hardening {
                     f.set(null, value)
                     n++
                 }
-            } catch (_: Throwable) {
+            } catch (t: Throwable) {
+                ModuleLogger.w("$TAG build field $name failed: ${t.javaClass.simpleName}: ${t.message}")
             }
         }
         ModuleLogger.i("$TAG Build fields spoofed: $n/${BUILD_FIELDS.size} (unsafe=${theUnsafe != null})")

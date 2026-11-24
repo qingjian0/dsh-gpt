@@ -578,8 +578,16 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                 val boundId = implicitSignature?.let { signatureIndex[caller + "|" + it] }
                 val bound = boundId?.let { runCatching { conversations.get(caller, it) }.getOrNull() }
                 if (bound != null) bound
-                else conversations.create(caller, userText.take(160), model).also { created ->
-                    if (implicitSignature != null) signatureIndex[caller + "|" + implicitSignature] = created.id
+                else {
+                    // DSH 每轮的 messages 结构不固定（有时只发当前条），签名无法命中。
+                    // 兜底：同一 caller 在 CONTINUATION_WINDOW_MS 内复用最近一个会话，
+                    // 保证「同一个对话接同一个对话」，不再每条消息都新建。
+                    val now = System.currentTimeMillis()
+                    val recent = runCatching { conversations.list(caller, 1).firstOrNull() }.getOrNull()
+                    val reuse = recent?.takeIf { now - it.updatedAt < CONTINUATION_WINDOW_MS }
+                    reuse ?: conversations.create(caller, userText.take(160), model).also { created ->
+                        if (implicitSignature != null) signatureIndex[caller + "|" + implicitSignature] = created.id
+                    }
                 }
             }
         } catch (e: IllegalArgumentException) {
@@ -728,8 +736,9 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         } catch (t: Throwable) {
             try { socketSafeFlush(out) } catch (_: Throwable) { }
         } finally {
-            // 不主动 disconnect：正常读完响应后 JDK 会把连接放回 keep-alive 池，
-            // 下个请求可复用 TLS，省 200-500ms。异常路径由连接自身回收。
+            // 必须 disconnect：实测不释放会让后续请求阻塞（上游 7.5s 变成 42.6s）。
+            // keep-alive 的收益在这里不成立，连接必须显式归还。
+            try { conn.disconnect() } catch (_: Throwable) { }
         }
         }
     }
@@ -867,6 +876,8 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         private val HOOK_PROVIDER_URI: Uri = Uri.parse("content://com.gpt.hook.observations")
         // 客户端（DSH）每轮会重发完整历史；这里必须能收下，再由 conversation_id 增量转发给上游。
         // 上游本身限制约 1 MiB，但那是转发出去的 payload，与被接收的请求体不是一回事。
+        /** 同一 caller 在此窗口内不新建会话，直接续用最近一个 */
+        private const val CONTINUATION_WINDOW_MS = 30 * 60 * 1000L
         private const val MAX_REQUEST_BYTES = 8 * 1024 * 1024
         private const val MAX_HEADER_LINE_BYTES = 16 * 1024
     }

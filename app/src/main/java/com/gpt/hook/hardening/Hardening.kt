@@ -71,18 +71,40 @@ object Hardening {
         ModuleLogger.i("$TAG installed; hooks=$ok")
     }
 
+    /**
+     * android.os.Build 的字段是 static final，ART 上普通反射 set 会被拒。
+     * 用 sun.misc.Unsafe 的 staticFieldBase/staticFieldOffset + putObject 绕过。
+     */
     private fun spoofBuild(cl: ClassLoader): Int {
+        val build = try { Class.forName("android.os.Build", false, cl) } catch (_: Throwable) { return 0 }
+        val unsafeClass = try { Class.forName("sun.misc.Unsafe") } catch (_: Throwable) { null }
+        val theUnsafe = try {
+            unsafeClass?.getDeclaredField("theUnsafe")?.apply { isAccessible = true }?.get(null)
+        } catch (_: Throwable) { null }
+        val base = try { unsafeClass?.getMethod("staticFieldBase", Field::class.java) } catch (_: Throwable) { null }
+        val offset = try { unsafeClass?.getMethod("staticFieldOffset", Field::class.java) } catch (_: Throwable) { null }
+        val putObject = try {
+            unsafeClass?.getMethod("putObject", Any::class.java, Long::class.javaPrimitiveType, Any::class.java)
+        } catch (_: Throwable) { null }
+
         var n = 0
         for ((name, value) in BUILD_FIELDS) {
             try {
-                val f: Field = Class.forName("android.os.Build", false, cl).getDeclaredField(name)
+                val f = build.getDeclaredField(name)
                 f.isAccessible = true
-                f.set(null, value)
-                n++
+                if (theUnsafe != null && base != null && offset != null && putObject != null) {
+                    val b = base.invoke(theUnsafe, f)
+                    val off = offset.invoke(theUnsafe, f) as Long
+                    putObject.invoke(theUnsafe, b, off, value)
+                    n++
+                } else {
+                    f.set(null, value)
+                    n++
+                }
             } catch (_: Throwable) {
             }
         }
-        ModuleLogger.i("$TAG Build fields spoofed: $n/${BUILD_FIELDS.size}")
+        ModuleLogger.i("$TAG Build fields spoofed: $n/${BUILD_FIELDS.size} (unsafe=${theUnsafe != null})")
         return n
     }
 

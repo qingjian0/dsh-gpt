@@ -39,13 +39,33 @@ object OpenAiCompat {
             (systemInstructions.map { "System: $it" } + transcript).joinToString("\n\n")
         }
 
+        val requestedModel = openAi.optString("model", "auto").ifBlank { "auto" }
         val body = JSONObject()
             .put("action", "next")
-            .put("model", openAi.optString("model", "auto").ifBlank { "auto" })
+            .put("model", requestedModel)
             .put("conversation_mode", JSONObject().put("kind", "primary_assistant"))
             .put("parent_message_id", upstreamParentMessageId?.takeIf { it.isNotBlank() } ?: UUID.randomUUID().toString())
             .put("timezone_offset_min", TimeZone.getDefault().getOffset(System.currentTimeMillis()) / 60000)
             .put("history_and_training_disabled", false)
+
+        // On the free ChatGPT Android backend, the bare "gpt-6" slug can
+        // return an empty response. The measured working path is the same
+        // request with system_hints=["reason"], which resolves to the
+        // available gpt-6-t-mini-mini reasoning model.
+        if (requestedModel == "gpt-6") {
+            val hints = openAi.optJSONArray("system_hints") ?: JSONArray()
+            val normalizedHints = JSONArray()
+            for (i in 0 until hints.length()) normalizedHints.put(hints.opt(i))
+            var hasReason = false
+            for (i in 0 until normalizedHints.length()) {
+                if (normalizedHints.optString(i) == "reason") hasReason = true
+            }
+            if (!hasReason) normalizedHints.put("reason")
+            body.put("system_hints", normalizedHints)
+        } else if (openAi.has("system_hints") && openAi.opt("system_hints") is JSONArray) {
+            body.put("system_hints", openAi.optJSONArray("system_hints"))
+        }
+
         if (!upstreamConversationId.isNullOrBlank()) body.put("conversation_id", upstreamConversationId)
         val msg = JSONObject()
             .put("id", UUID.randomUUID().toString())

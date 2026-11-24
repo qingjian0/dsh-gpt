@@ -7,7 +7,7 @@ The local gateway is a generic OpenAI-compatible endpoint. It is not DSH-specifi
 - On the Android phone: `http://127.0.0.1:8766/v1`
 - From another device on the same LAN: `http://<phone-lan-ip>:8766/v1`
 - API key: copy **客户端 API Key** from the API Gateway screen.
-- Model: `auto` (also advertises `gpt-6`, `gpt-6-mini`, `gpt-5-6-mini`, and `research`).
+- Default model: `auto` for normal conversation; choose `gpt-6` to request the measured free-tier reasoning path.
 
 Use the Base URL exactly as shown; clients append the endpoint path themselves. On the phone, use loopback. On a computer, use the phone's LAN IPv4 address and enable **允许局域网访问** before saving/restarting the service.
 
@@ -18,6 +18,23 @@ Authorization: Bearer <API_KEY>
 ```
 
 No `X-DSH-Client-Id` header is required. It remains optional for clients that want separate local conversation namespaces.
+
+## Model routing
+
+The gateway exposes model names as client-facing aliases; they are not a list of public OpenAI API models.
+
+| Client model | Gateway behavior | Observed result |
+|---|---|---|
+| `auto` | Pass through without adding hints | ChatGPT Android backend selects its normal default (observed: `gpt-6-mini`) |
+| `gpt-6-mini` | Pass through without adding hints | Normal response path |
+| `gpt-6` | Automatically adds `system_hints: ["reason"]` | Observed on the free account to resolve to `gpt-6-t-mini-mini` |
+| `gpt-5-6-mini`, `research` | Passed through as requested | Not validated by this reasoning test matrix |
+
+The `gpt-6` alias is intentional: the bare slug returned an empty response in the reported test, while the same request with `system_hints: ["reason"]` produced a response from `gpt-6-t-mini-mini`. The gateway adds that hint automatically, so OpenAI-compatible clients only need to select `gpt-6`.
+
+`reasoning_effort` is not translated because the Android backend ignored it in the reported tests. Thinking duration is selected by the backend/model based on the task; the gateway does not promise a fixed thinking-time level.
+
+The `deep_research` and `web_search` hints are not implied by these aliases. A response that looks like a research report is not proof of actual web retrieval: real browsing requires executed search calls and returned search results/citations. The reported free-account tests returned zero search queries and zero citations.
 
 ## Endpoints
 
@@ -38,25 +55,25 @@ The upstream is the ChatGPT Android conversation backend, not the public OpenAI 
 On the phone:
 
 ```sh
-curl -s http://127.0.0.1:8766/v1/models \
+curl -s http://127.0.0.1:8766/v1/models \\
   -H "Authorization: Bearer $API_KEY"
 ```
 
 Chat Completions:
 
 ```sh
-curl -sN http://127.0.0.1:8766/v1/chat/completions \
-  -H "Authorization: Bearer $API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"auto","messages":[{"role":"user","content":"只回复OK"}],"stream":true}'
+curl -sN http://127.0.0.1:8766/v1/chat/completions \\
+  -H "Authorization: Bearer $API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{"model":"gpt-6","messages":[{"role":"user","content":"解释一下浮点误差"}],"stream":true}'
 ```
 
 Responses:
 
 ```sh
-curl -s http://127.0.0.1:8766/v1/responses \
-  -H "Authorization: Bearer $API_KEY" \
-  -H "Content-Type: application/json" \
+curl -s http://127.0.0.1:8766/v1/responses \\
+  -H "Authorization: Bearer $API_KEY" \\
+  -H "Content-Type: application/json" \\
   -d '{"model":"auto","input":"只回复OK"}'
 ```
 

@@ -24,6 +24,13 @@ object OpenAiCompat {
             return "response_format / JSON Schema constrained output is not supported by this adapter"
         }
         if (request.optInt("n", 1) != 1) return "only n=1 is supported"
+        val modalities = request.optJSONArray("modalities")
+        if (modalities != null && (0 until modalities.length()).any { modalities.optString(it) != "text" }) {
+            return "only text modality is supported"
+        }
+        if (request.has("audio") || request.has("input_audio")) {
+            return "audio input/output is not supported by this text-only adapter"
+        }
         val messages = request.optJSONArray("messages") ?: return null
         for (i in 0 until messages.length()) {
             val message = messages.optJSONObject(i) ?: continue
@@ -32,13 +39,15 @@ object OpenAiCompat {
                 for (j in 0 until content.length()) {
                     val part = content.optJSONObject(j) ?: continue
                     val type = part.optString("type").lowercase()
-                    if (type.contains("image") || type.contains("audio") || type == "file") {
+                    if (type.contains("image") || type.contains("audio") || type == "file" ||
+                        part.has("image_url") || part.has("input_audio") || part.has("audio")) {
                         return "multimodal image/audio/file input is not supported by this text-only adapter"
                     }
                 }
             } else if (content is JSONObject) {
                 val type = content.optString("type").lowercase()
-                if (type.contains("image") || type.contains("audio") || type == "file") {
+                if (type.contains("image") || type.contains("audio") || type == "file" ||
+                    content.has("image_url") || content.has("input_audio") || content.has("audio")) {
                     return "multimodal image/audio/file input is not supported by this text-only adapter"
                 }
             }

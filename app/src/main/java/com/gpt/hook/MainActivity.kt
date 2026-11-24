@@ -775,14 +775,12 @@ private fun HookScreen() {
                 runtimeObject.optString("state") == "active")
             StatusLine("已配置规则", configuredRuleCount.toString())
             StatusLine("实际安装 Hook", activeHookCount.toString(), activeHookCount > 0)
-            StatusLine("观察报告", if ((reportObject?.optLong("updatedAtMs") ?: 0L) > 0L) "已收到" else "等待中")
+            StatusLine("观察报告", if (runtimeObject.optLong("capturedAtMs", 0L) > 0L) "已收到" else "等待中")
             Text("最近应用结果", style = MaterialTheme.typography.labelMedium)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 StatusLine("新增", applyReport.optInt("added").toString())
                 StatusLine("替换", applyReport.optInt("replaced").toString())
                 StatusLine("保留", applyReport.optInt("retained").toString())
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 StatusLine("移除", applyReport.optInt("removed").toString())
                 StatusLine("失败", applyReport.optInt("failed").toString(), applyReport.optInt("failed") == 0)
             }

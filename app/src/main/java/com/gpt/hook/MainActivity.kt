@@ -28,6 +28,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.gpt.hook.api.ApiService
+import com.gpt.hook.api.UpstreamConversations
 import com.gpt.hook.api.RelayConfig
 import com.gpt.hook.diagnostics.HookConfigParser
 import kotlinx.coroutines.Dispatchers
@@ -406,6 +407,12 @@ private fun ConversationsScreen() {
     var draft by rememberSaveable { mutableStateOf("") }
     var status by rememberSaveable { mutableStateOf("正在加载") }
     var sending by rememberSaveable { mutableStateOf(false) }
+    // 上游真实对话（来自 ChatGPT 账号，不是本地网关库）
+    val upstreamCfg = remember { RelayConfig.load(context.applicationContext) }
+    var upItems by remember { mutableStateOf(emptyList<UpstreamConversations.Summary>()) }
+    var upDetail by remember { mutableStateOf<UpstreamConversations.Detail?>(null) }
+    var upStatus by rememberSaveable { mutableStateOf("未加载") }
+    var upLoading by rememberSaveable { mutableStateOf(false) }
 
     suspend fun reload() {
         val snapshot = withContext(Dispatchers.IO) { repository.list(caller) }
@@ -425,6 +432,73 @@ private fun ConversationsScreen() {
     PageColumn {
         PageHeading("对话", if (selectedConversation == null) "管理本地会话，选择会话后可直接通过本地 API 网关对话。" else "当前会话通过本地网关连接已配置的 ChatGPT 上游。")
         if (selectedConversation == null) {
+            SectionCard("ChatGPT 真实对话") {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(upStatus, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    TextButton(enabled = !upLoading, onClick = {
+                        upLoading = true
+                        upStatus = "加载中…"
+                        scope.launch {
+                            runCatching {
+                                val list = withContext(Dispatchers.IO) {
+                                    UpstreamConversations(upstreamCfg).list(20)
+                                }
+                                upItems = list
+                                upDetail = null
+                                upStatus = "共 ${list.size} 个对话"
+                            }.onFailure { upStatus = "加载失败：${it.message ?: "unknown"}" }
+                            upLoading = false
+                        }
+                    }) { Text("拉取") }
+                }
+                if (upDetail != null) {
+                    val d = upDetail!!
+                    Text("标题：${d.title}", style = MaterialTheme.typography.bodySmall)
+                    Text("默认模型：${d.model}", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    d.turns.forEach { turn ->
+                        Text(
+                            (if (turn.role == "user") "你：" else "GPT：") + turn.text.take(400),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        val meta = buildList {
+                            if (turn.model.isNotBlank()) add("模型 " + turn.model)
+                            if (turn.reasoningSec > 0) add("思考 " + turn.reasoningSec + "s")
+                            if (turn.hasTool) add("工具 " + turn.toolLabel)
+                        }
+                        if (meta.isNotEmpty()) Text(meta.joinToString(" · "),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                } else if (upItems.isNotEmpty()) {
+                    upItems.forEach { item ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(item.title, style = MaterialTheme.typography.bodyMedium)
+                                Text(item.updatedAt, style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            TextButton(enabled = !upLoading, onClick = {
+                                upLoading = true
+                                upStatus = "打开中…"
+                                scope.launch {
+                                    runCatching {
+                                        upDetail = withContext(Dispatchers.IO) {
+                                            UpstreamConversations(upstreamCfg).detail(item.id)
+                                        }
+                                        upStatus = "已打开"
+                                    }.onFailure { upStatus = "打开失败：${it.message ?: "unknown"}" }
+                                    upLoading = false
+                                }
+                            }) { Text("查看") }
+                        }
+                    }
+                } else {
+                    Text("点「拉取」读取账号里的真实对话，含模型、思考时长与工具调用记录。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
             SectionCard("会话中心") {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(status, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)

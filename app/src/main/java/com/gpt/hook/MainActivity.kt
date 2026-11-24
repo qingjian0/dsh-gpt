@@ -804,7 +804,7 @@ private fun HookScreen() {
                 modifier = Modifier.fillMaxWidth(), minLines = 8, maxLines = 16,
                 textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace))
             Button(onClick = {
-                val current = DshApplication.currentService
+                val current = DshApplication.currentServiceState.value
                 if (current == null) {
                     status = "LSPosed 服务未连接，无法提交。"
                 } else {

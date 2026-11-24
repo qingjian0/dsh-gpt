@@ -91,6 +91,21 @@ class ConversationRepository(context: Context) : SQLiteOpenHelper(
         ).use { c -> return if (c.moveToFirst()) c.toConversation() else null }
     }
 
+    fun updateDetails(callerId: String, id: String, title: String, model: String): Conversation? {
+        val safeTitle = title.trim().take(160).ifBlank { "New conversation" }
+        val safeModel = model.trim().take(120).ifBlank { "auto" }
+        val values = ContentValues().apply {
+            put("title", safeTitle)
+            put("model", safeModel)
+            put("updated_at", System.currentTimeMillis())
+        }
+        val changed = writableDatabase.update(
+            "conversations", values, "id=? AND caller_hash=?",
+            arrayOf(id, callerHash(callerId))
+        )
+        return if (changed > 0) get(callerId, id) else null
+    }
+
     fun appendMessage(callerId: String, id: String, message: JSONObject): Conversation? {
         val serializedMessage = message.toString()
         require(serializedMessage.toByteArray(Charsets.UTF_8).size <= MAX_MESSAGE_BYTES) {

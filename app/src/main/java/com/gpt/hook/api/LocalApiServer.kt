@@ -109,6 +109,7 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                     cfg.apiKey.isBlank() -> json(out, 503, err("configuration_required", "configure a gateway API key before using protected API routes"))
                     !authorized(headers) -> json(out, 401, err("invalid_api_key", "missing or bad Authorization"))
                     target == "/v1/models" -> json(out, 200, OpenAiCompat.modelsJson(OpenAiCompat.DEFAULT_MODELS))
+                    target == "/v1/capabilities" && method == "GET" -> json(out, 200, OpenAiCompat.capabilitiesJson())
                     target == "/v1/hook/status" && method == "GET" -> hookStatus(out)
                     target == "/v1/hook/events" && method == "GET" -> hookEvents(out)
                     target == "/v1/hook/startup-discovery" && method == "GET" -> hookStartupDiscovery(out)
@@ -381,6 +382,19 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                 if (item == null) json(out, 404, err("not_found", "conversation not found")) else json(out, 200, conversationJson(item).toString())
                 return
             }
+            if (parts.size == 1 && method == "PATCH") {
+                val current = conversations.get(caller, id)
+                if (current == null) {
+                    json(out, 404, err("not_found", "conversation not found")); return
+                }
+                val req = JSONObject(String(body ?: ByteArray(0), Charsets.UTF_8))
+                val title = if (req.has("title")) req.optString("title") else current.title
+                val model = if (req.has("model")) req.optString("model") else current.model
+                val updated = conversations.updateDetails(caller, id, title, model)
+                if (updated == null) json(out, 404, err("not_found", "conversation not found"))
+                else json(out, 200, conversationJson(updated).toString())
+                return
+            }
             if (parts.size == 1 && method == "DELETE") {
                 val deleted = conversations.delete(caller, id)
                 if (deleted) json(out, 200, JSONObject().put("deleted", true).put("id", id).toString()) else json(out, 404, err("not_found", "conversation not found"))
@@ -392,8 +406,13 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                 return
             }
             json(out, 404, err("not_found", "route not found"))
-        } catch (e: IllegalArgumentException) { json(out, 400, err("invalid_request", e.message ?: "invalid request")) }
-          catch (t: Throwable) { json(out, 500, err("internal_error", "conversation operation failed")) }
+        } catch (e: org.json.JSONException) {
+            json(out, 400, err("invalid_request", e.message ?: "invalid JSON body"))
+        } catch (e: IllegalArgumentException) {
+            json(out, 400, err("invalid_request", e.message ?: "invalid request"))
+        } catch (t: Throwable) {
+            json(out, 500, err("internal_error", "conversation operation failed"))
+        }
     }
 
     private fun conversationJson(item: ConversationRepository.Conversation, includeMessages: Boolean = true): JSONObject {
@@ -482,6 +501,22 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         val request = try { JSONObject(String(body, Charsets.UTF_8)) } catch (t: Throwable) {
             json(out, 400, err("invalid_request", "body is not JSON")); return
         }
+        if ((request.optJSONArray("tools")?.length() ?: 0) > 0 ||
+            request.has("tool_choice") || request.has("functions") || request.has("function_call")) {
+            json(out, 400, err("unsupported_feature", "tool/function calling is not supported by this adapter")); return
+        }
+        val requestedModalities = request.optJSONArray("modalities")
+        if (request.has("audio") || request.has("input_audio") ||
+            (requestedModalities != null &&
+                (0 until requestedModalities.length()).any { requestedModalities.optString(it) != "text" })) {
+            json(out, 400, err("unsupported_feature", "only text input/output is supported by this adapter")); return
+        }
+        val responseTextFormat = request.optJSONObject("text")
+            ?.optJSONObject("format")?.optString("type").orEmpty()
+        if (request.has("response_format") ||
+            (responseTextFormat.isNotBlank() && responseTextFormat != "text")) {
+            json(out, 400, err("unsupported_feature", "constrained text/JSON Schema output is not supported by this adapter")); return
+        }
         val messages = org.json.JSONArray()
         val instructions = request.optString("instructions").trim()
         if (instructions.isNotEmpty()) messages.put(JSONObject().put("role", "system").put("content", instructions))
@@ -493,7 +528,11 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                     when (val item = input.opt(i)) {
                         is String -> if (item.isNotBlank()) messages.put(JSONObject().put("role", "user").put("content", item))
                         is JSONObject -> {
-                            val content = responseInputText(item.opt("content") ?: item.opt("text"))
+                            val rawContent = item.opt("content") ?: item.opt("text")
+                            if (containsNonTextResponseInput(rawContent)) {
+                                json(out, 400, err("unsupported_feature", "image/audio/file input is not supported by this text-only adapter")); return
+                            }
+                            val content = responseInputText(rawContent)
                             if (content.isNotBlank()) {
                                 if (item.has("role") || item.optString("type") == "message") {
                                     messages.put(JSONObject().put("role", item.optString("role", "user")).put("content", content))
@@ -519,6 +558,20 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
             .put("messages", messages)
             .put("stream", request.optBoolean("stream", false))
         chat(out, chatRequest.toString().toByteArray(Charsets.UTF_8), headers, responsesMode = true)
+    }
+
+    private fun containsNonTextResponseInput(value: Any?): Boolean {
+        return when (value) {
+            is JSONObject -> {
+                val type = value.optString("type").lowercase()
+                type.contains("image") || type.contains("audio") || type == "file" ||
+                    value.has("image_url") || value.has("input_audio") || value.has("audio")
+            }
+            is org.json.JSONArray -> (0 until value.length()).any { index ->
+                containsNonTextResponseInput(value.opt(index))
+            }
+            else -> false
+        }
     }
 
     private fun responseInputText(value: Any?): String {
@@ -549,6 +602,10 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
     ) {
         val req = try { JSONObject(String(body, Charsets.UTF_8)) } catch (t: Throwable) {
             json(out, 400, err("invalid_request", "body is not JSON")); return
+        }
+        val unsupported = OpenAiCompat.unsupportedChatFeature(req)
+        if (unsupported != null) {
+            json(out, 400, err("unsupported_feature", unsupported)); return
         }
         val caller = callerId(headers)
         val model = req.optString("model", "auto").ifBlank { "auto" }

@@ -39,22 +39,22 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.6.1'
-      - name: Build debug APK
-        run: gradle assembleDebug --no-daemon
+      - name: Build optimized release APK
+        run: gradle assembleRelease --no-daemon
       - name: Run JVM unit tests
         run: gradle testDebugUnitTest --no-daemon
-      - name: Verify LSPosed module metadata
+      - name: Verify release LSPosed module metadata
         shell: bash
         run: |
-          APK="$(find app/build/outputs/apk/debug -name '*.apk' -print -quit)"
+          APK="$(find app/build/outputs/apk/release -name '*.apk' -print -quit)"
           test -n "$APK"
           unzip -l "$APK" | grep -F 'META-INF/xposed/java_init.list'
           unzip -l "$APK" | grep -F 'META-INF/xposed/module.prop'
           unzip -l "$APK" | grep -F 'META-INF/xposed/scope.list'
           unzip -p "$APK" 'META-INF/xposed/java_init.list' | grep -Fx 'com.gpt.hook.MainModule'
-      - name: Upload APK artifact
+      - name: Upload optimized release APK
         uses: actions/upload-artifact@v4
         with:
-          name: dsh-gpt-debug-apk
+          name: dsh-gpt-release-apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error

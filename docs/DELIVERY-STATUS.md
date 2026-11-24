@@ -1,7 +1,7 @@
 # DSH-GPT Delivery Status
 
 Last reviewed: 2026-11-24
-Baseline: `main` at `5aa6397b1189da4cfd3e238c881e61722e27e90a`
+Baseline: `main` at `b83d0d37a123738f60f107c6f217295065b3f08f`
 
 This is the delivery truth source. Source presence and CI success are not substitutes for live upstream, DSH-host, or physical-device acceptance.
 

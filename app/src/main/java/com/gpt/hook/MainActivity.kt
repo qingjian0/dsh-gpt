@@ -204,7 +204,8 @@ private fun HomeScreen(onNavigate: (MainTab) -> Unit) {
     PageColumn {
         PageHeading("运行总览", "管理 AI 服务、运行时扩展与智能体工作流。")
         SectionCard("系统状态", "仅展示当前可读取的真实状态") {
-            StatusLine("本地 API", if (relay.enabled && relay.ready) "已配置 / 已启用" else if (relay.enabled) "缺少上游凭据" else "已停止", relay.enabled && relay.ready)
+            StatusLine("本地 API 开关", if (relay.enabled) "已启用" else "已停止", relay.enabled)
+            StatusLine("上游凭据", if (relay.ready) "已配置" else "尚未配置", relay.ready)
             StatusLine("LSPosed 服务", if (xposedConnected) "已连接" else "未连接", xposedConnected)
             StatusLine("目标应用", "com.openai.chatgpt")
         }
@@ -268,7 +269,7 @@ private fun ApiScreen() {
     }
 
     PageColumn {
-        PageHeading("API Gateway", "本地反代服务与上游连接配置。")
+        PageHeading("API Gateway", "本地 OpenAI 兼容 API；上游凭据可以稍后配置。")
         SectionCard("服务状态") {
             StatusLine("监听地址", (if (config.lan) "0.0.0.0" else "127.0.0.1") + ":" + config.port)
             StatusLine("上游凭据", if (config.ready) "已配置" else "未配置", config.ready)
@@ -386,7 +387,7 @@ private fun ApiScreen() {
         }
         SectionCard("高级能力") {
             StatusLine("流式响应", "沿用当前网关实现")
-            StatusLine("会话复用策略", "待接入会话存储层")
+            StatusLine("会话复用策略", "SQLite 本地会话存储已接入")
             StatusLine("思考模式与插件路由", "待接入能力协商")
         }
     }
@@ -599,7 +600,7 @@ private fun ConversationsScreen() {
 @Composable
 private fun HookScreen() {
     val context = LocalContext.current
-    val service = DshApplication.currentService
+    val service = DshApplication.currentServiceState.value
     val defaultConfig = """{
   "schemaVersion": 1,
   "targetPackage": "com.openai.chatgpt",
@@ -607,7 +608,10 @@ private fun HookScreen() {
 }"""
     var configText by remember { mutableStateOf(defaultConfig) }
     var configLoaded by rememberSaveable { mutableStateOf(false) }
+    var reportText by rememberSaveable { mutableStateOf("尚无观察报告。") }
+    var status by rememberSaveable { mutableStateOf(if (service == null) "LSPosed 服务未连接" else "LSPosed 服务已连接") }
     LaunchedEffect(service) {
+        if (service == null) configLoaded = false
         if (service != null && !configLoaded) {
             configText = runCatching {
                 service.getRemotePreferences("dsh").getString("hook_config", defaultConfig) ?: defaultConfig
@@ -617,8 +621,6 @@ private fun HookScreen() {
         status = if (service == null) "LSPosed 服务未连接" else
             service.frameworkName + " / API " + service.apiVersion
     }
-    var reportText by rememberSaveable { mutableStateOf("尚无观察报告。") }
-    var status by rememberSaveable { mutableStateOf(if (service == null) "LSPosed 服务未连接" else "LSPosed 服务已连接") }
     var discoveryPrefix by rememberSaveable { mutableStateOf("com.openai.") }
     var discoveryId by rememberSaveable { mutableStateOf("") }
     var discoveryTaskText by rememberSaveable { mutableStateOf("尚未扫描") }

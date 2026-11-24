@@ -6,6 +6,8 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.net.Uri
 import android.os.Bundle
+import com.gpt.hook.hardening.Hardening
+import com.gpt.hook.hardening.RequestDump
 import com.gpt.hook.diagnostics.EventBuffer
 import com.gpt.hook.diagnostics.ClassLoadWatcher
 import com.gpt.hook.diagnostics.HookConfigParser
@@ -76,6 +78,8 @@ class MainModule : XposedModule() {
             configExecutor.execute {
                 try {
                     val config = HookConfigParser.parse(source)
+                    if (config.hardening) runCatching { Hardening.install(this@MainModule, param.classLoader) }
+                    if (config.dumpRequests) runCatching { RequestDump.install(this@MainModule, param.classLoader) }
                     val report = hookRuntime.applyWithReport(config)
                     updateClassLoadWatcher(config.observeClassLoads)
                     logApplyReport(config.rules.size, report.added, report.replaced, report.retained, report.removed, report.failed)

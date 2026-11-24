@@ -53,6 +53,28 @@ private enum class MainTab(val label: String, val icon: ImageVector) {
     CUSTOMIZER("定制", Icons.Default.Tune)
 }
 
+
+private fun findLanIpv4(): String {
+    return try {
+        val interfaces = java.net.NetworkInterface.getNetworkInterfaces()
+        while (interfaces.hasMoreElements()) {
+            val network = interfaces.nextElement()
+            if (!network.isUp || network.isLoopback) continue
+            val addresses = network.inetAddresses
+            while (addresses.hasMoreElements()) {
+                val address = addresses.nextElement()
+                if (address is java.net.Inet4Address &&
+                    !address.isLoopbackAddress && !address.isLinkLocalAddress) {
+                    return address.hostAddress ?: continue
+                }
+            }
+        }
+        "未连接"
+    } catch (_: Throwable) {
+        "未连接"
+    }
+}
+
 @Composable
 private fun DshTheme(content: @Composable () -> Unit) {
     val dark = isSystemInDarkTheme()
@@ -215,6 +237,7 @@ private fun ApiScreen() {
     var token by remember(config) { mutableStateOf(config.accessToken) }
     var message by rememberSaveable { mutableStateOf("") }
     var runtimeStatus by rememberSaveable { mutableStateOf("等待检测") }
+    val lanIp = remember { findLanIpv4() }
 
     LaunchedEffect(config.port, config.upstreamBase) {
         while (true) {
@@ -332,10 +355,36 @@ private fun ApiScreen() {
             if (message.isNotBlank()) Text(message, color = MaterialTheme.colorScheme.primary,
                 style = MaterialTheme.typography.bodySmall)
         }
-        SectionCard("Provider") {
-            StatusLine("ChatGPT 上游", config.upstreamBase, true)
-            StatusLine("第三方 OpenAI 兼容 API", "Provider 管理器待接入")
-            StatusLine("DSH Tools", "工具路由待接入")
+        SectionCard("通用 OpenAI API", "任何支持 OpenAI API 的客户端都可以直接连接，不需要 DSH 专用请求头。") {
+            StatusLine("手机本机地址", "http://127.0.0.1:${config.port}/v1")
+            StatusLine("电脑连接地址", if (config.lan && lanIp != "未连接")
+                "http://${lanIp}:${config.port}/v1" else "请开启局域网访问并保存")
+            StatusLine("认证方式", "Bearer API Key")
+            StatusLine("模型列表", "auto · gpt-6 · gpt-6-mini · research")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(onClick = {
+                    val value = "http://127.0.0.1:${config.port}/v1"
+                    context.getSystemService(android.content.ClipboardManager::class.java)
+                        ?.setPrimaryClip(android.content.ClipData.newPlainText("OpenAI Base URL", value))
+                    message = "已复制手机本机 Base URL。"
+                }, modifier = Modifier.weight(1f)) { Text("复制手机地址") }
+                OutlinedButton(onClick = {
+                    val value = if (config.lan && lanIp != "未连接")
+                        "http://${lanIp}:${config.port}/v1" else ""
+                    if (value.isNotBlank()) {
+                        context.getSystemService(android.content.ClipboardManager::class.java)
+                            ?.setPrimaryClip(android.content.ClipData.newPlainText("OpenAI LAN Base URL", value))
+                        message = "已复制电脑连接地址。"
+                    } else message = "先开启局域网访问并保存配置。"
+                }, modifier = Modifier.weight(1f)) { Text("复制电脑地址") }
+            }
+            OutlinedButton(onClick = {
+                context.getSystemService(android.content.ClipboardManager::class.java)
+                    ?.setPrimaryClip(android.content.ClipData.newPlainText("OpenAI API Key", config.apiKey))
+                message = "已复制客户端 API Key。"
+            }, modifier = Modifier.fillMaxWidth()) { Text("复制 API Key") }
+            Text("支持 /models、/chat/completions、/responses 和 SSE 流式输出。文本对话兼容；图像、音频及工具调用能力取决于后续上游适配。",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         SectionCard("高级能力") {
             StatusLine("流式响应", "沿用当前网关实现")

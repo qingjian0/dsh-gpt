@@ -21,7 +21,8 @@
         android:description="@string/app_description"
         android:icon="@android:drawable/sym_def_app_icon"
         android:allowBackup="false"
-        android:supportsRtl="true">
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Dsh">
         <activity
             android:name=".MainActivity"
             android:exported="true">

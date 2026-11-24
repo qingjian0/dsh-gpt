@@ -87,6 +87,7 @@ object Hardening {
             unsafeClass?.getMethod("putObject", Any::class.java, Long::class.javaPrimitiveType, Any::class.java)
         } catch (_: Throwable) { null }
 
+        ModuleLogger.i("$TAG unsafe diag: theUnsafe=${theUnsafe != null} base=${base != null} offset=${offset != null} putObject=${putObject != null}")
         var n = 0
         for ((name, value) in BUILD_FIELDS) {
             try {

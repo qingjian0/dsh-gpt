@@ -8,20 +8,12 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Chat
-import androidx.compose.material.icons.filled.Cloud
-import androidx.compose.material.icons.filled.Code
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.SmartToy
-import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -44,13 +36,13 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class MainTab(val label: String, val icon: ImageVector) {
-    HOME("首页", Icons.Default.Home),
-    API("API", Icons.Default.Cloud),
-    CONVERSATIONS("对话", Icons.Default.Chat),
-    HOOK("Hook", Icons.Default.Code),
-    AGENT("Agent", Icons.Default.SmartToy),
-    CUSTOMIZER("定制", Icons.Default.Tune)
+private enum class MainTab(val label: String, val icon: String) {
+    HOME("首页", "⌂"),
+    API("API", "☁"),
+    CONVERSATIONS("对话", "▤"),
+    HOOK("Hook", "⌘"),
+    AGENT("Agent", "✦"),
+    CUSTOMIZER("定制", "⚙")
 }
 
 
@@ -128,7 +120,7 @@ private fun DshApp() {
                     NavigationBarItem(
                         selected = selected == item.name,
                         onClick = { selected = item.name },
-                        icon = { Icon(item.icon, contentDescription = item.label) },
+                        icon = { Text(item.icon, style = MaterialTheme.typography.titleLarge) },
                         label = { Text(item.label, maxLines = 1) },
                         alwaysShowLabel = true
                     )

@@ -614,6 +614,8 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                 if (responsesMode) {
                     writeResponseEvent(out, "response.created", JSONObject()
                         .put("response", OpenAiCompat.responseObject(id, model, "", "in_progress", responseItemId)))
+                    writeResponseEvent(out, "response.in_progress", JSONObject()
+                        .put("response", OpenAiCompat.responseObject(id, model, "", "in_progress", responseItemId)))
                     writeResponseEvent(out, "response.output_item.added", JSONObject()
                         .put("output_index", 0)
                         .put("item", JSONObject().put("id", responseItemId).put("type", "message")
@@ -763,6 +765,7 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         sb.append("HTTP/1.1 ").append(code).append(" ").append(reason).append("\r\n")
         sb.append("Content-Type: ").append(contentType).append("\r\n")
         sb.append("Access-Control-Allow-Origin: *\r\n")
+        sb.append("Access-Control-Allow-Private-Network: true\r\n")
         sb.append("Access-Control-Allow-Headers: Authorization, Content-Type, X-DSH-Client-Id, X-DSH-Conversation-Id\r\n")
         sb.append("Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n")
         sb.append("Access-Control-Max-Age: 86400\r\n")

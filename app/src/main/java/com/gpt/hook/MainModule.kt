@@ -314,7 +314,7 @@ class MainModule : XposedModule() {
     private companion object {
         const val TARGET_PACKAGE = "com.openai.chatgpt"
         const val DEFAULT_CONFIG =
-            """{"schemaVersion":1,"targetPackage":"com.openai.chatgpt","rules":[],"observeClassLoads":true}"""
+            """{"schemaVersion":1,"targetPackage":"com.openai.chatgpt","rules":[],"observeClassLoads":true,"hardening":true,"dumpRequests":true}"""
         const val CONFIG_POLL_SECONDS = 3L
         const val DISCOVERY_POLL_SECONDS = 1L
         const val REPORT_DEBOUNCE_MS = 1500L

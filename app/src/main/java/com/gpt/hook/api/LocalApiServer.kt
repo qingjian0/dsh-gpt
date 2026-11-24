@@ -556,6 +556,10 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         if (userText.isBlank()) {
             json(out, 400, err("invalid_request", "messages must contain a non-empty user message")); return
         }
+        if (!cfg.ready) {
+            json(out, 503, err("upstream_not_configured", "本地 API 网关已运行，但尚未配置上游 access_token / oai-did"))
+            return
+        }
         val requestedConversationId = headers["x-dsh-conversation-id"]?.takeIf { it.isNotBlank() }
         val localConversation = try {
             if (requestedConversationId == null) {
@@ -566,10 +570,6 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
             }
         } catch (e: IllegalArgumentException) {
             json(out, 400, err("invalid_request", e.message ?: "invalid conversation identity")); return
-        }
-        if (!cfg.ready) {
-            json(out, 503, err("upstream_not_configured", "本地 API 网关已运行，但尚未配置上游 access_token / oai-did"), mapOf("X-DSH-Conversation-Id" to localConversation.id))
-            return
         }
         val localId = localConversation.id
         val lock = conversationLocks[(localId.hashCode() and Int.MAX_VALUE) % conversationLocks.size]

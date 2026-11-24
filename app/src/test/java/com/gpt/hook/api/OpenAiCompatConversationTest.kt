@@ -4,6 +4,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -92,7 +93,7 @@ class OpenAiCompatConversationTest {
         val request = JSONObject().put("messages", JSONArray().put(
             JSONObject().put("role", "user").put("content", "hello")
         ))
-        assertEquals(null, OpenAiCompat.unsupportedChatFeature(request))
+        assertNull(OpenAiCompat.unsupportedChatFeature(request))
     }
 
     @Test

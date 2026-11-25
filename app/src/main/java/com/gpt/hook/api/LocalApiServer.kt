@@ -23,7 +23,10 @@ import java.util.concurrent.Executors
 class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfig, private val conversations: ConversationRepository) {
 
     private var server: ServerSocket? = null
-    private val pool = Executors.newFixedThreadPool(8)
+    // 固定 8 线程会被慢上游占满：一次上游卡住就吃到 readTimeout（分钟级），
+    // 之后连 /health 都排不上队。改成可伸缩池并限制并发上限。
+    private val pool = java.util.concurrent.Executors.newCachedThreadPool()
+    private val inFlight = java.util.concurrent.Semaphore(64)
     private val conversationLocks = Array(64) { Any() }
     /**
      * 标准 OpenAI 客户端不会带 X-DSH-Conversation-Id，每轮都发全量 messages。

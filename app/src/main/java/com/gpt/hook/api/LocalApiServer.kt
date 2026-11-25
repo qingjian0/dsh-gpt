@@ -802,15 +802,49 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
     }
 
     /** 上游每条 assistant 消息携带完整文本，取与已发送部分的增量。 */
+    /**
+     * 从 SSE 事件里取增量文本。
+     *
+     * 实测一次回答有几百个事件，之前对每个事件都做完整 JSONObject 解析、
+     * parts.optString 复制整段累积文本、再用 sent += 拼接，整体 O(n²)，
+     * 把上游 0.5 秒的响应拖到 5 秒。这里改成字符串扫描，命中才解析。
+     */
     private fun extractDelta(payload: String, sent: String): String? {
-        if (payload.isEmpty() || payload == "[DONE]") return null
-        val obj = try { JSONObject(payload) } catch (t: Throwable) { return null }
-        val msg = obj.optJSONObject("message") ?: return null
-        val role = msg.optJSONObject("author")?.optString("role")
-        if (role != "assistant") return null
-        val parts = msg.optJSONObject("content")?.optJSONArray("parts") ?: return null
-        val full = parts.optString(0, "")
-        if (full.isEmpty() || full.length <= sent.length) return null
+        if (payload.length < 16) return null
+        if (!payload.contains("assistant")) return null
+        val marker = "\"parts\":[\""
+        val idx = payload.indexOf(marker)
+        if (idx < 0) return null
+        var i = idx + marker.length
+        val sb = StringBuilder()
+        while (i < payload.length) {
+            val c = payload[i]
+            if (c == '"') break
+            if (c == '\\' && i + 1 < payload.length) {
+                val e = payload[i + 1]
+                when (e) {
+                    'n' -> sb.append('\n')
+                    't' -> sb.append('\t')
+                    'r' -> sb.append('\r')
+                    '"' -> sb.append('"')
+                    '\\' -> sb.append('\\')
+                    'u' -> {
+                        if (i + 5 < payload.length) {
+                            val hex = payload.substring(i + 2, i + 6)
+                            runCatching { sb.append(hex.toInt(16).toChar()) }
+                            i += 4
+                        }
+                    }
+                    else -> sb.append(e)
+                }
+                i += 2
+                continue
+            }
+            sb.append(c)
+            i++
+        }
+        val full = sb.toString()
+        if (full.length <= sent.length) return null
         return full.substring(sent.length)
     }
 

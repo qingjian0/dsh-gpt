@@ -554,31 +554,30 @@ private fun DshApp(
                         }
                     },
                     onReadWeb = { url ->
-                        scope.launch {
-                            val start = System.currentTimeMillis()
-                            try {
-                                val response = backend.post(
-                                    "/v1/web/open",
-                                    JSONObject().put("url", url)
-                                )
-                                val elapsed = System.currentTimeMillis() - start
-                                val record = ToolCallRecord(
-                                    "web.open",
-                                    elapsed,
-                                    response.code in 200..299,
-                                    response.body
-                                )
-                                state = state.copy(
-                                    history = (listOf(record) + state.history).take(50)
-                                )
-                            } catch (e: Exception) {
-                                ToolCallRecord(
-                                    "web.open",
-                                    System.currentTimeMillis() - start,
-                                    false,
-                                    readableError(e)
-                                )
-                            }
+                        val start = System.currentTimeMillis()
+                        try {
+                            val response = backend.post(
+                                "/v1/web/open",
+                                JSONObject().put("url", url)
+                            )
+                            val elapsed = System.currentTimeMillis() - start
+                            val record = ToolCallRecord(
+                                "web.open",
+                                elapsed,
+                                response.code in 200..299,
+                                response.body
+                            )
+                            state = state.copy(
+                                history = (listOf(record) + state.history).take(50)
+                            )
+                            record
+                        } catch (e: Exception) {
+                            ToolCallRecord(
+                                "web.open",
+                                System.currentTimeMillis() - start,
+                                false,
+                                readableError(e)
+                            )
                         }
                     },
                     onReload = {
@@ -1132,7 +1131,7 @@ private fun ToolsPage(
     history: List<ToolCallRecord>,
     backend: Backend,
     onCall: (String, JSONObject) -> Unit,
-    onReadWeb: (String) -> Unit,
+    onReadWeb: suspend (String) -> ToolCallRecord,
     onReload: () -> Unit
 ) {
     var subTab by remember { mutableIntStateOf(0) }

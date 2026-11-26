@@ -185,6 +185,12 @@ object OpenAiCompat {
     }
 
     fun unsupportedResponsesFeature(request: JSONObject): String? {
+        // Responses input is currently normalized into Chat Completions messages. Until
+        // output-item/tool-call round-tripping is implemented, reject tools rather than
+        // silently dropping them and returning a misleading successful text response.
+        if (request.has("tools") || request.has("tool_choice")) {
+            return "tool calling is currently supported only by /v1/chat/completions"
+        }
         val format = request.optJSONObject("text")?.optJSONObject("format")
         if (format != null && format.optString("type", "text") != "text") {
             return "structured JSON output is not supported by this adapter"

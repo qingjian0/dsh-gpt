@@ -20,7 +20,7 @@ This document is the delivery truth source. Source presence and CI success are n
 | DSH Agent plugin | PR #12 merged plugin package, 9 modes, task-state tools and 7 Skills | Package/source present; real DSH Profile installation, tool visibility and workflow execution unverified |
 | DSH host bridge | Host implementation was identified on `qingjian0/Deepseek-Harness-Local-Android:refactor/dsh-gpt-hook-bridge-hardening`; host PR #35 is draft and divergent | Not release-integrated; reconcile and validate host branch before merge |
 | UI Customizer | No confirmed stable ChatGPT UI target binding | Not implemented; do not present a simulated success state |
-| CI | PR #40 run [45826199024](https://github.com/qingjian0/dsh-gpt/actions/runs/45826199024) and PR #41 run [45835490142](https://github.com/qingjian0/dsh-gpt/actions/runs/45835490142) passed Debug build, JVM tests, LSPosed metadata verification and artifact upload | Both delivery fixes passed PR-level CI; physical-device acceptance remains separate |
+| CI | PR #40 [45826199024](https://github.com/qingjian0/dsh-gpt/actions/runs/45826199024), #41 [45835490142](https://github.com/qingjian0/dsh-gpt/actions/runs/45835490142), and #42 [45838306530](https://github.com/qingjian0/dsh-gpt/actions/runs/45838306530) passed Debug build, JVM tests, LSPosed metadata verification and artifact upload | All three delivery fixes passed PR-level CI; physical-device acceptance remains separate |
 | Physical device | See [DEVICE-ACCEPTANCE.md](DEVICE-ACCEPTANCE.md) | Not run/recorded for this delivery |
 
 ## Hook configuration contract
@@ -45,7 +45,7 @@ The merged PR #40 console fix uses metadata-only `observe` and `dump` modes, val
 - Never claim a Hook rule is active solely because its configuration was accepted. Use target-process runtime reports.
 - LAN gateway access must remain opt-in and protected by the configured Bearer API key. Do not expose the local gateway directly to the public internet.
 
-## Branch and PR triage (2026-11-26, post-PR #40)
+## Branch and PR triage (2026-11-26, post-PR #42)
 
 The reviewed snapshot had 46 branches and 8 open PRs. PR #40, PR #41 and PR #42 have since been merged; PRs #36, #29, #39, #24 and #25 were closed as superseded after confirming their relevant behavior is already present in main or selectively ported.
 
@@ -60,7 +60,6 @@ The reviewed snapshot had 46 branches and 8 open PRs. PR #40, PR #41 and PR #42 
 | #30 | Compact tool schema | 1 unique commit, 9 behind; reduces schema detail and needs token/accuracy benchmark | Keep open; do not merge without measured quality results |
 | #25 | UI state/API lifecycle | Relevant API startup/readiness behavior selectively ported in PR #42; its older UI implementation was not compatible with current main | Closed as superseded by selective port |
 | #24 | Window/system bars | NoActionBar theme and edge-to-edge setup selectively ported in PR #42; old TopAppBar styling did not match current UI | Closed as superseded by selective port |
-| #24 | Window/system bars | 3 unique commits, 10 behind; UI/theme changes need Android-version and edge-to-edge validation | Keep open for selective review; no wholesale merge |
 | #23 | APK size optimization | 3 commits, 11 behind; removing icons dependency is not currently safe because main UI imports Material icons | Keep Draft; do not merge as-is |
 | #20 | API sessions/Hook console | 18 commits, 12 behind; contains useful ideas but its OpenAiCompat and MainActivity are based on an older incompatible architecture | Keep open for selective porting; do not merge wholesale |
 
@@ -82,7 +81,7 @@ Remote branch deletion was not performed: the available GitHub connection expose
 DSH-GPT is mainline-integrated and buildable at the PR level, with a constrained dynamic Hook runtime, a packaged DSH Agent integration, a corrected Hook configuration console, and explicit API capability guardrails. It is **not yet a device-accepted, end-to-end autonomous AI Hook release**. Do not claim full completion until host integration, real DSH Profile execution, live upstream checks, target-process Hook inventory and physical-device acceptance have recorded evidence.
 
 
-## Follow-up review (2026-11-26, PR #42 in progress)
+## Follow-up review (2026-11-26, post-PR #42 merge)
 
 - PR #42 selectively ported the still-relevant parts of stale PR #25 and PR #24 onto current main. It decouples local listener startup from upstream credentials, returns HTTP 503 `upstream_not_configured` from the shared chat path (covering Chat Completions and Responses), adds an explicit NoActionBar theme, and enables edge-to-edge layout.
 - PR #42 merged as `d1b7fa7142a0ce8c198828f28bf61a32ee030191`; CI run [45838306530](https://github.com/qingjian0/dsh-gpt/actions/runs/45838306530) passed Debug build, JVM tests, LSPosed metadata verification and APK artifact upload.

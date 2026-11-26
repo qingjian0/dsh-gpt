@@ -1,8 +1,8 @@
 # DSH-GPT Delivery Status
 
-Last reviewed: 2026-11-26
+Last reviewed: 2026-11-26 (post-PR #40 merge)
 Main baseline reviewed: `f0530efc4c67e392aeb622c6b5709bc90baaf291`
-Current delivery fix branch: `fix/hook-ui-config-contract`
+Latest delivery fix merged: PR #40 (`6790e22798231859f0c09ee6e7bf8e7b5a12b569`)
 
 This document is the delivery truth source. Source presence and CI success are not substitutes for live upstream, DSH-host, or physical-device acceptance.
 
@@ -14,7 +14,7 @@ This document is the delivery truth source. Source presence and CI success are n
 | Runtime discovery | PR #13 merged: bounded DEX metadata discovery, pagination, cancellation, task state, ClassLoader observation and inherited method metadata | Source and JVM CI present; target-process execution on device unverified |
 | Dynamic Hook runtime | PR #14 merged: authenticated `/v1/hook/*` routes, full config snapshots, revision polling, late ClassLoader attachment, HookHandle inventory and apply reports | Constrained dynamic execution exists; actual device application and end-to-end AI feedback loop unverified |
 | Hook action policy | Runtime parser supports `observe`, `dump`, `return`, `args`, `noop`, and `throw`; behavior-changing actions are blocked for sensitive authentication, session, credential, network, payment, security and cryptographic targets | Policy exists in source; keep the console's default workflow metadata-only |
-| Hook console | Mainline PR #38 four-tab UI had a protocol mismatch: it used POST, legacy mode names and legacy parameter keys. Branch `fix/hook-ui-config-contract` changes the console to GET current config → append a valid rule → PUT the complete snapshot | Fix is prepared on a dedicated branch; merge only after CI and review |
+| Hook console | Mainline PR #38 four-tab UI had a protocol mismatch: it used POST, legacy mode names and legacy parameter keys. PR #40 merged the console fix: GET current config → append a valid rule → PUT the complete snapshot | Merged; PR CI passed Debug build, JVM tests, LSPosed metadata verification and APK artifact upload |
 | OpenAI-compatible gateway | Local API exposes models, Chat Completions, text Responses, SSE and local conversation routes | Text-oriented compatibility only; images, audio and full standard Function Calling are not established |
 | MCP gateway | PR #37 merged MCP tool/resource listing and calls plus web reading | MCP routes exist; this is not equivalent to OpenAI standard Function Calling |
 | DSH Agent plugin | PR #12 merged plugin package, 9 modes, task-state tools and 7 Skills | Package/source present; real DSH Profile installation, tool visibility and workflow execution unverified |
@@ -33,7 +33,7 @@ The local API contract is:
 - Each rule requires a unique `id`, `className`, `methodName`, and a supported `mode`; parameter matching uses `parameterTypes` or `methodDescriptor`.
 - A successful PUT means the control plane accepted the snapshot. It does **not** prove the target process installed the hook. Confirm the target report and HookHandle inventory through `GET /v1/hook/status`.
 
-The console fix on `fix/hook-ui-config-contract` uses metadata-only `observe` and `dump` modes, validates the target package namespace, generates a unique rule ID, preserves existing rules, and submits the complete snapshot with PUT. Behavior-changing modes remain available only through the bounded runtime API and its policy checks.
+The merged PR #40 console fix uses metadata-only `observe` and `dump` modes, validates the target package namespace, generates a unique rule ID, preserves existing rules, and submits the complete snapshot with PUT. Behavior-changing modes remain available only through the bounded runtime API and its policy checks.
 
 ## Integration decisions
 
@@ -62,10 +62,12 @@ The review snapshot identified 46 branches and 8 open PRs. No branches were dele
 
 Historical branch comparison also showed that `feat/dsh-agent-hook-extension` is heavily behind main despite having unique commits; it requires commit-level triage, not a branch merge. The R1/R2/R3 and template migration branches have no known unique commits in the reviewed comparison and are likely archival candidates after a final reachability check. Deletion is intentionally deferred.
 
+PR #40 was squash-merged after all four required workflow steps passed: Debug APK build, JVM unit tests, LSPosed metadata verification and APK artifact upload. Merge commit: `6790e22798231859f0c09ee6e7bf8e7b5a12b569`.
+
 ## Remaining release blockers
 
-1. Merge the Hook UI contract fix only after its GitHub Actions workflow passes and the resulting diff is reviewed.
-2. Add focused regression tests for Hook config snapshot parsing and UI/backend contract behavior; current JVM tests did not catch the UI protocol mismatch.
+1. Add focused regression tests for Hook config snapshot parsing and UI/backend contract behavior; PR #40 CI passed, but current JVM tests did not catch the original UI protocol mismatch.
+2. Validate the merged Hook console against a live target process and confirm installed HookHandle inventory.
 3. Validate the gateway from phone loopback and a desktop on the same LAN against the configured upstream, including authentication, text Chat Completions, Responses, SSE and consecutive turns.
 4. Reconcile the DSH host bridge branch against host main; validate Provider authorization, capability negotiation, status/events/rules/discovery/cancel routes, retry and timeout semantics.
 5. Install the Agent plugin into a real DSH Profile and verify tool visibility, Skill loading, native workflow/subagent execution, cancellation and result aggregation.

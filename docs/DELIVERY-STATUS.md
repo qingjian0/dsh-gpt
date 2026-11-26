@@ -45,34 +45,34 @@ The merged PR #40 console fix uses metadata-only `observe` and `dump` modes, val
 - Never claim a Hook rule is active solely because its configuration was accepted. Use target-process runtime reports.
 - LAN gateway access must remain opt-in and protected by the configured Bearer API key. Do not expose the local gateway directly to the public internet.
 
-## Branch and PR triage (2026-11-26)
+## Branch and PR triage (2026-11-26, post-PR #40)
 
-The review snapshot identified 46 branches and 8 open PRs. No branches were deleted and no existing PRs were merged during this review.
+The reviewed snapshot had 46 branches and 8 open PRs. PR #40 has since been merged; PRs #36, #29 and #39 were closed as superseded after confirming their relevant behavior is already present in main or their UI is obsolete.
 
-| PR | Branch/topic | Snapshot | Action |
-|---|---|---:|---|
-| #39 | `feat/ui-complete`, legacy five-tab UI | 1 ahead / 0 behind | Do not merge wholesale; current four-tab main UI is newer. |
-| #36 | Rate-limit awareness | 1 ahead / 2 behind | Rebase/review and retain the independent rate-limit behavior if still valid. |
-| #30 | Compact tool schema | 1 ahead / 7 behind | Verify behavior and tests; cherry-pick only if still useful. |
-| #29 | Keep-alive revert | 1 ahead / 7 behind | Validate against current connection lifecycle before considering. |
-| #25 | UI state/API lifecycle | 7 ahead / 8 behind | Do not merge as-is; rebase and isolate fixes. |
-| #24 | Top-window system bars | 3 ahead / 8 behind | Rebase and validate on supported Android versions. |
-| #23 | APK size optimization | 3 ahead / 9 behind; Draft | Keep draft; require size comparison and regression evidence. |
-| #20 | API sessions/Hook console | 18 ahead / 10 behind | Do not merge wholesale; extract any still-missing independent commits. |
+| PR | Branch/topic | Current assessment | Action |
+|---|---|---|---|
+| #40 | Hook UI config contract | Merged as `6790e227`; PR CI passed | Complete |
+| #36 | Rate-limit awareness | The same `sendBlockedUntil()` probe/cache and `Retry-After` behavior is already in main | Closed as superseded; do not merge the stale branch |
+| #29 | Keep-alive revert | Explicit upstream `disconnect()` is already in main | Closed as superseded; do not merge the stale branch |
+| #39 | Legacy five-tab UI | Replaces newer four-tab UI; its latest CI runs failed | Closed as obsolete |
+| #30 | Compact tool schema | 1 unique commit, 9 behind; reduces schema detail and needs token/accuracy benchmark | Keep open; do not merge without measured quality results |
+| #25 | UI state/API lifecycle | 7 unique commits, 10 behind; overlaps the current MainActivity and service lifecycle | Keep open for commit-level extraction; no wholesale merge |
+| #24 | Window/system bars | 3 unique commits, 10 behind; UI/theme changes need Android-version and edge-to-edge validation | Keep open for selective review; no wholesale merge |
+| #23 | APK size optimization | 3 commits, 11 behind; removing icons dependency is not currently safe because main UI imports Material icons | Keep Draft; do not merge as-is |
+| #20 | API sessions/Hook console | 18 commits, 12 behind; contains useful ideas but its OpenAiCompat and MainActivity are based on an older incompatible architecture | Keep open for selective porting; do not merge wholesale |
 
-Historical branch comparison also showed that `feat/dsh-agent-hook-extension` is heavily behind main despite having unique commits; it requires commit-level triage, not a branch merge. The R1/R2/R3 and template migration branches have no known unique commits in the reviewed comparison and are likely archival candidates after a final reachability check. Deletion is intentionally deferred.
+Historical discovery branches and the Prslc migration branch remain archival candidates after a final reachability check. The old `feat/dsh-agent-hook-extension` branch still requires commit-level review because it contains unique work despite substantial divergence.
 
-PR #40 was squash-merged after all four required workflow steps passed: Debug APK build, JVM unit tests, LSPosed metadata verification and APK artifact upload. Merge commit: `6790e22798231859f0c09ee6e7bf8e7b5a12b569`.
+Remote branch deletion was not performed: the available GitHub connection exposes branch/ref updates but no delete-ref operation. The three superseded PRs are closed, while their remote branch refs remain untouched. No branch was force-updated or deleted.
 
 ## Remaining release blockers
 
-1. Add focused regression tests for Hook config snapshot parsing and UI/backend contract behavior; PR #40 CI passed, but current JVM tests did not catch the original UI protocol mismatch.
-2. Validate the merged Hook console against a live target process and confirm installed HookHandle inventory.
-3. Validate the gateway from phone loopback and a desktop on the same LAN against the configured upstream, including authentication, text Chat Completions, Responses, SSE and consecutive turns.
-4. Reconcile the DSH host bridge branch against host main; validate Provider authorization, capability negotiation, status/events/rules/discovery/cancel routes, retry and timeout semantics.
-5. Install the Agent plugin into a real DSH Profile and verify tool visibility, Skill loading, native workflow/subagent execution, cancellation and result aggregation.
-6. Run [DEVICE-ACCEPTANCE.md](DEVICE-ACCEPTANCE.md) on the supported Android/KernelSU/LSPosed/ChatGPT device, covering module injection, Provider Binder identity, discovery, dynamic Hook apply/replace/unhook, process restart, privacy and performance.
-7. Record the full controlled feedback loop: AI decision → bounded discovery → candidate review → authorized rule update → target HookHandle confirmation → metadata-only feedback → next AI iteration.
+1. Validate the merged Hook console against a live target process and confirm installed HookHandle inventory.
+2. Reconcile the DSH host bridge branch against host main; its PR #35 is still Draft and 38 ahead / 12 behind. Validate Provider authorization, capability negotiation, status/events/rules/discovery/cancel routes, retry and timeout semantics.
+3. Install the Agent plugin into a real DSH Profile and verify tool visibility, Skill loading, native workflow/subagent execution, cancellation and result aggregation.
+4. Validate the gateway from phone loopback and a desktop on the same LAN against the configured upstream, including authentication, text Chat Completions, Responses, SSE and consecutive turns.
+5. Run [DEVICE-ACCEPTANCE.md](DEVICE-ACCEPTANCE.md) on the supported Android/KernelSU/LSPosed/ChatGPT device, covering module injection, Provider Binder identity, discovery, dynamic Hook apply/replace/unhook, process restart, privacy and performance.
+6. Record the full controlled feedback loop: AI decision → bounded discovery → candidate review → authorized rule update → target HookHandle confirmation → metadata-only feedback → next AI iteration.
 
 ## Release gate
 

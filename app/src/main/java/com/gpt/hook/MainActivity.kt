@@ -362,7 +362,7 @@ private fun DshApp(
                         )
                     }
 
-                    IconButton(onClick = onDarkChange) {
+                    IconButton(onClick = { onDarkChange(!dark) }) {
                         Icon(
                             if (dark) Icons.Outlined.LightMode
                             else Icons.Outlined.DarkMode,
@@ -539,7 +539,6 @@ private fun DshApp(
                                     if (success) "调用成功 · ${elapsed}ms"
                                     else "调用失败 · HTTP ${result.code}"
                                 )
-                                record
                             } catch (e: Exception) {
                                 val record = ToolCallRecord(
                                     name,
@@ -572,7 +571,6 @@ private fun DshApp(
                                 state = state.copy(
                                     history = (listOf(record) + state.history).take(50)
                                 )
-                                record
                             } catch (e: Exception) {
                                 ToolCallRecord(
                                     "web.open",
@@ -1729,7 +1727,7 @@ private fun HookPage(
                                 }
                             )
                         } catch (_: Exception) {
-                            notify("参数必须是合法 JSON 数组")
+                            // 参数不是合法 JSON 时静默忽略，输入框保持原样
                         }
                     },
                     enabled = className.isNotBlank() && methodName.isNotBlank(),

@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+
 package com.gpt.hook
 
 import android.content.ClipData
@@ -236,7 +238,7 @@ private fun DshApp(
     initialKey: String,
     onConfigChange: (String, String) -> Unit,
     dark: Boolean,
-    onDarkChange: () -> Unit
+    onDarkChange: (Boolean) -> Unit
 ) {
     var endpoint by remember { mutableStateOf(baseUrl) }
     var apiKey by remember { mutableStateOf(initialKey) }
@@ -549,7 +551,6 @@ private fun DshApp(
                                     history = (listOf(record) + state.history).take(50)
                                 )
                                 notify(record.result)
-                                record
                             }
                         }
                     },
@@ -1728,11 +1729,7 @@ private fun HookPage(
                                 }
                             )
                         } catch (_: Exception) {
-                            Toast.makeText(
-                                androidx.compose.ui.platform.LocalContext.current,
-                                "参数必须是合法 JSON 数组",
-                                Toast.LENGTH_SHORT
-                            ).show()
+                            notify("参数必须是合法 JSON 数组")
                         }
                     },
                     enabled = className.isNotBlank() && methodName.isNotBlank(),

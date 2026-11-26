@@ -1132,7 +1132,7 @@ private fun ToolsPage(
     history: List<ToolCallRecord>,
     backend: Backend,
     onCall: (String, JSONObject) -> Unit,
-    onReadWeb: suspend (String) -> ToolCallRecord,
+    onReadWeb: (String) -> Unit,
     onReload: () -> Unit
 ) {
     var subTab by remember { mutableIntStateOf(0) }

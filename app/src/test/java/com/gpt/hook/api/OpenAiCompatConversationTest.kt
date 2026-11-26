@@ -26,6 +26,7 @@ class OpenAiCompatConversationTest {
         val selection = JSONObject().put("tool_choice", "required")
         assertTrue(OpenAiCompat.unsupportedChatFeature(schema)?.contains("constrained") == true)
         assertTrue(OpenAiCompat.unsupportedChatFeature(selection)?.contains("tool_choice") == true)
+        assertEquals(null, OpenAiCompat.unsupportedChatFeature(JSONObject().put("tool_choice", "auto")))
     }
 
     @Test

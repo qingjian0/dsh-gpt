@@ -8,6 +8,53 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class OpenAiCompatConversationTest {
+
+    @Test
+    fun rejectsMultimodalChatInsteadOfFlatteningImagesToEmptyText() {
+        val request = JSONObject().put("messages", JSONArray().put(
+            JSONObject().put("role", "user").put("content", JSONArray().put(
+                JSONObject().put("type", "image_url")
+                    .put("image_url", JSONObject().put("url", "https://example.invalid/image.png"))
+            ))
+        ))
+        assertTrue(OpenAiCompat.unsupportedChatFeature(request)?.contains("multimodal") == true)
+    }
+
+    @Test
+    fun rejectsStructuredOutputAndUnsupportedToolSelection() {
+        val schema = JSONObject().put("response_format", JSONObject().put("type", "json_schema"))
+        val selection = JSONObject().put("tool_choice", "required")
+        assertTrue(OpenAiCompat.unsupportedChatFeature(schema)?.contains("constrained") == true)
+        assertTrue(OpenAiCompat.unsupportedChatFeature(selection)?.contains("tool_choice") == true)
+        assertEquals(null, OpenAiCompat.unsupportedChatFeature(JSONObject().put("tool_choice", "auto")))
+    }
+
+    @Test
+    fun keepsToolBridgeAndPlainTextChatSupported() {
+        val request = JSONObject()
+            .put("tools", JSONArray().put(JSONObject().put("type", "function")))
+            .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", "hello")))
+        assertEquals(null, OpenAiCompat.unsupportedChatFeature(request))
+    }
+
+    @Test
+    fun rejectsMultimodalResponsesInput() {
+        val request = JSONObject().put("input", JSONArray().put(
+            JSONObject().put("type", "message").put("content", JSONArray().put(
+                JSONObject().put("type", "input_image").put("image_url", "https://example.invalid/image.png")
+            ))
+        ))
+        assertTrue(OpenAiCompat.unsupportedResponsesFeature(request)?.contains("multimodal") == true)
+    }
+
+    @Test
+    fun capabilitiesAdvertiseOnlyVerifiedModalitiesAndToolBridge() {
+        val capabilities = JSONObject(OpenAiCompat.capabilitiesJson())
+        assertEquals("text", capabilities.getJSONArray("modalities").getString(0))
+        assertTrue(capabilities.getBoolean("tool_calling"))
+        assertEquals("ToolBridge text-protocol adapter", capabilities.getString("tool_calling_mode"))
+    }
+
     @Test
     fun continuationUsesStoredUpstreamConversationAndParentMessageIds() {
         val request = JSONObject()

@@ -49,7 +49,7 @@ phone or desktop client with the Base URL and generated API key shown in the API
 - Android app on the same phone: `http://127.0.0.1:8766/v1`
 - Desktop or another device on the same LAN: `http://<phone-lan-ip>:8766/v1` (enable LAN access)
 - Authentication: `Authorization: Bearer <API_KEY>`; no DSH-specific client header is required.
-- Endpoints: `GET /v1/models`, `POST /v1/chat/completions`, and `POST /v1/responses`.
+- Endpoints: `GET /v1/models`, `GET /v1/capabilities`, `POST /v1/chat/completions`, and `POST /v1/responses`.
 - Both chat and Responses support normal JSON output and SSE streaming for text.
 - The local API key is generated and persisted automatically. Keep it private; LAN access is intended
   only for trusted networks.

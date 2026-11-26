@@ -156,6 +156,82 @@ object OpenAiCompat {
         return ""
     }
 
+    /**
+     * Reject features that this text-oriented adapter cannot preserve end-to-end.
+     * Tool calls remain supported through ToolBridge; legacy function fields and tool_choice
+     * are rejected because their selection semantics are not implemented.
+     */
+    fun unsupportedChatFeature(request: JSONObject): String? {
+        if (request.has("response_format") &&
+            request.optJSONObject("response_format")?.optString("type") != "text") {
+            return "JSON object/schema constrained output is not supported by this adapter"
+        }
+        if (request.optInt("n", 1) != 1) return "only n=1 is supported"
+        if (request.has("functions") || request.has("function_call")) {
+            return "legacy function calling is not supported; use the tools array"
+        }
+        val toolChoice = request.opt("tool_choice")
+        if (toolChoice != null && toolChoice != JSONObject.NULL && toolChoice != "auto") {
+            return "forced tool_choice is not supported; automatic tool selection is supported"
+        }
+        val modalities = request.optJSONArray("modalities")
+        if (modalities != null && (0 until modalities.length()).any { modalities.optString(it) != "text" }) {
+            return "only text modality is supported"
+        }
+        if (containsUnsupportedMedia(request.optJSONArray("messages"))) {
+            return "multimodal image/audio/video/file input is not supported by this text-only adapter"
+        }
+        return null
+    }
+
+    fun unsupportedResponsesFeature(request: JSONObject): String? {
+        val format = request.optJSONObject("text")?.optJSONObject("format")
+        if (format != null && format.optString("type", "text") != "text") {
+            return "structured JSON output is not supported by this adapter"
+        }
+        if (containsUnsupportedMedia(request.opt("input"))) {
+            return "multimodal image/audio/video/file input is not supported by this text-only adapter"
+        }
+        return null
+    }
+
+    private fun containsUnsupportedMedia(value: Any?): Boolean = when (value) {
+        is JSONArray -> (0 until value.length()).any { containsUnsupportedMedia(value.opt(it)) }
+        is JSONObject -> {
+            val type = value.optString("type").lowercase()
+            val unsupportedType = type.contains("image") || type.contains("audio") ||
+                type.contains("video") || type == "file"
+            val unsupportedField = listOf(
+                "image_url", "input_image", "input_audio", "audio", "video_url", "file"
+            ).any { value.has(it) }
+            unsupportedType || unsupportedField || run {
+                val keys = value.keys()
+                var found = false
+                while (keys.hasNext() && !found) found = containsUnsupportedMedia(value.opt(keys.next()))
+                found
+            }
+        }
+        else -> false
+    }
+
+    fun capabilitiesJson(): String = JSONObject()
+        .put("object", "dsh.capabilities")
+        .put("chat_completions", true)
+        .put("responses", true)
+        .put("streaming", true)
+        .put("conversations", true)
+        .put("hook_control", true)
+        .put("tool_calling", true)
+        .put("tool_calling_mode", "ToolBridge text-protocol adapter")
+        .put("modalities", JSONArray().put("text"))
+        .put("unsupported", JSONArray()
+            .put("image_input").put("audio_input").put("audio_output")
+            .put("video_input").put("file_input")
+            .put("legacy_function_calling").put("forced_tool_choice")
+            .put("json_schema_constrained_output"))
+        .put("upstream", "ChatGPT Android conversation backend")
+        .toString()
+
     fun modelsJson(upstreamIds: List<String>): String {
         val arr = JSONArray()
         upstreamIds.forEachIndexed { i, id ->

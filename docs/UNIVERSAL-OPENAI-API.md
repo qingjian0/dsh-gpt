@@ -80,3 +80,13 @@ curl -s http://127.0.0.1:8766/v1/responses \\
 ## Network security
 
 The LAN listener binds to `0.0.0.0` when enabled. Keep the generated API key private and use the gateway only on trusted networks. Do not expose this session-backed gateway directly to the public internet. The key is generated and persisted locally when the configuration is first loaded.
+
+
+## Capability discovery and unsupported input handling
+
+`GET /v1/capabilities` is authenticated and reports the gateway's implemented surface.
+The current adapter accepts text modalities and tool calls through the ToolBridge text-protocol
+adapter. It rejects image/audio/video/file payloads and structured JSON output with HTTP 400
+(`unsupported_feature`) rather than silently flattening or dropping those inputs. Legacy
+function-calling fields and explicit `tool_choice` are also rejected; use the supported
+`tools` array with automatic selection.

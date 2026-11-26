@@ -645,6 +645,9 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         }
 
         val stream = req.optBoolean("stream", false)
+        // Tool-call detection requires the complete assistant payload. Do not leak the
+        // private <tool_call> envelope as content before deciding the OpenAI finish_reason.
+        val deferredToolStream = stream && ToolBridge.hasTools(req) && !responsesMode
         val id = (if (responsesMode) "resp-" else "chatcmpl-") +
             UUID.randomUUID().toString().replace("-", "").take(24)
         val responseItemId = "msg_" + UUID.randomUUID().toString().replace("-", "").take(24)
@@ -672,7 +675,9 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         val reader = BufferedReader(InputStreamReader(conn.inputStream, Charsets.UTF_8))
         try {
             if (stream) {
-                writeHead(out, 200, "text/event-stream; charset=utf-8", null, responseHeaders)
+                if (!deferredToolStream) {
+                    writeHead(out, 200, "text/event-stream; charset=utf-8", null, responseHeaders)
+                }
                 if (responsesMode) {
                     writeResponseEvent(out, "response.created", JSONObject()
                         .put("response", OpenAiCompat.responseObject(id, model, "", "in_progress", responseItemId)))
@@ -700,7 +705,7 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                         writeResponseEvent(out, "response.output_text.delta", JSONObject()
                             .put("item_id", responseItemId).put("output_index", 0)
                             .put("content_index", 0).put("delta", delta))
-                    } else {
+                    } else if (!deferredToolStream) {
                         writeChunk(out, "data: " + OpenAiCompat.chunk(id, model, delta) + "\n\n")
                     }
                 }
@@ -723,6 +728,9 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                     val full = textOut.toString()
                     val calls = if (ToolBridge.hasTools(req)) ToolBridge.parseAll(full) else emptyList()
                     if (calls.isNotEmpty()) {
+                        if (deferredToolStream) {
+                            writeHead(out, 200, "text/event-stream; charset=utf-8", null, responseHeaders)
+                        }
                         // 工具调用：一次可带多个，DSH 侧并行执行
                         val deltas = org.json.JSONArray()
                         calls.forEachIndexed { i, c ->
@@ -741,6 +749,12 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                                 .put("finish_reason", "tool_calls")))
                         writeChunk(out, "data: " + frame + "\n\n")
                     } else {
+                        if (deferredToolStream) {
+                            writeHead(out, 200, "text/event-stream; charset=utf-8", null, responseHeaders)
+                            if (textOut.isNotEmpty()) {
+                                writeChunk(out, "data: " + OpenAiCompat.chunk(id, model, textOut.toString()) + "\n\n")
+                            }
+                        }
                         writeChunk(out, "data: " + OpenAiCompat.chunk(id, model, "", "stop") + "\n\n")
                     }
                     writeChunk(out, "data: [DONE]\n\n")

@@ -1,8 +1,8 @@
 # DSH-GPT Delivery Status
 
-Last reviewed: 2026-11-26 (post-PR #41 merge)
-Main baseline reviewed: `247413a2fc6f8f3b15bee464be47ee17ec7ed97a`
-Latest delivery fix merged: PR #40 (`6790e22798231859f0c09ee6e7bf8e7b5a12b569`)
+Last reviewed: 2026-11-26 (post-PR #42 merge)
+Main baseline reviewed: `d1b7fa7142a0ce8c198828f28bf61a32ee030191`
+Latest delivery fix merged: PR #42 (`d1b7fa7142a0ce8c198828f28bf61a32ee030191`)
 
 This document is the delivery truth source. Source presence and CI success are not substitutes for live upstream, DSH-host, or physical-device acceptance.
 
@@ -47,17 +47,19 @@ The merged PR #40 console fix uses metadata-only `observe` and `dump` modes, val
 
 ## Branch and PR triage (2026-11-26, post-PR #40)
 
-The reviewed snapshot had 46 branches and 8 open PRs. PR #40 and PR #41 have since been merged; PRs #36, #29 and #39 were closed as superseded after confirming their relevant behavior is already present in main or their UI is obsolete.
+The reviewed snapshot had 46 branches and 8 open PRs. PR #40, PR #41 and PR #42 have since been merged; PRs #36, #29, #39, #24 and #25 were closed as superseded after confirming their relevant behavior is already present in main or selectively ported.
 
 | PR | Branch/topic | Current assessment | Action |
 |---|---|---|---|
+| #42 | Local API lifecycle and Android system bars | Merged as `d1b7fa71`; PR CI passed Debug build, JVM tests, LSPosed metadata verification and APK artifact upload | Complete |
 | #41 | API capability discovery and unsupported-media guardrails | Merged as `247413a2`; PR CI passed build, JVM tests, LSPosed metadata verification and APK artifact upload | Complete |
 | #40 | Hook UI config contract | Merged as `6790e227`; PR CI passed | Complete |
 | #36 | Rate-limit awareness | The same `sendBlockedUntil()` probe/cache and `Retry-After` behavior is already in main | Closed as superseded; do not merge the stale branch |
 | #29 | Keep-alive revert | Explicit upstream `disconnect()` is already in main | Closed as superseded; do not merge the stale branch |
 | #39 | Legacy five-tab UI | Replaces newer four-tab UI; its latest CI runs failed | Closed as obsolete |
 | #30 | Compact tool schema | 1 unique commit, 9 behind; reduces schema detail and needs token/accuracy benchmark | Keep open; do not merge without measured quality results |
-| #25 | UI state/API lifecycle | 7 unique commits, 10 behind; overlaps the current MainActivity and service lifecycle | Keep open for commit-level extraction; no wholesale merge |
+| #25 | UI state/API lifecycle | Relevant API startup/readiness behavior selectively ported in PR #42; its older UI implementation was not compatible with current main | Closed as superseded by selective port |
+| #24 | Window/system bars | NoActionBar theme and edge-to-edge setup selectively ported in PR #42; old TopAppBar styling did not match current UI | Closed as superseded by selective port |
 | #24 | Window/system bars | 3 unique commits, 10 behind; UI/theme changes need Android-version and edge-to-edge validation | Keep open for selective review; no wholesale merge |
 | #23 | APK size optimization | 3 commits, 11 behind; removing icons dependency is not currently safe because main UI imports Material icons | Keep Draft; do not merge as-is |
 | #20 | API sessions/Hook console | 18 commits, 12 behind; contains useful ideas but its OpenAiCompat and MainActivity are based on an older incompatible architecture | Keep open for selective porting; do not merge wholesale |
@@ -82,11 +84,11 @@ DSH-GPT is mainline-integrated and buildable at the PR level, with a constrained
 
 ## Follow-up review (2026-11-26, PR #42 in progress)
 
-- PR #42 selectively ports the still-relevant parts of stale PR #25 and PR #24 onto current main. It decouples local listener startup from upstream credentials, returns HTTP 503 `upstream_not_configured` from the shared chat path (therefore covering both Chat Completions and Responses), adds an explicit NoActionBar theme, and enables edge-to-edge layout.
-- PR #42 CI run [45838306530](https://github.com/qingjian0/dsh-gpt/actions/runs/45838306530) was still running at the time of this update. Do not merge until Debug build, JVM tests and LSPosed metadata verification complete successfully.
-- PR #25's old MainActivity and DshApplication state changes were not ported: the current mainline UI is a different dashboard implementation. Only the API lifecycle behavior was independently applicable.
-- PR #24's old TopAppBar styling was not ported because mainline uses a custom dashboard header. Only the theme/window behavior was independently applicable. Android 17 visual acceptance is still required.
-- PRs #24 and #25 have comments documenting the selective port and should be closed as superseded only after PR #42 merges.
+- PR #42 selectively ported the still-relevant parts of stale PR #25 and PR #24 onto current main. It decouples local listener startup from upstream credentials, returns HTTP 503 `upstream_not_configured` from the shared chat path (covering Chat Completions and Responses), adds an explicit NoActionBar theme, and enables edge-to-edge layout.
+- PR #42 merged as `d1b7fa7142a0ce8c198828f28bf61a32ee030191`; CI run [45838306530](https://github.com/qingjian0/dsh-gpt/actions/runs/45838306530) passed Debug build, JVM tests, LSPosed metadata verification and APK artifact upload.
+- PR #25's old MainActivity and DshApplication state changes were not ported because the current mainline UI is a different dashboard implementation; only its API lifecycle behavior was independently applicable.
+- PR #24's old TopAppBar styling was not ported because mainline uses a custom dashboard header; only the theme/window behavior was independently applicable. Android 17 visual acceptance is still required.
+- PRs #24 and #25 were closed as superseded after the selective port merged.
 - PR #30 remains open pending a real token-size/latency benchmark and tool-call accuracy regression test; its shortened descriptions and omitted schema detail are not safe to merge on estimated savings alone.
 - PR #23 remains Draft because its release workflow points at the debug APK artifact path and the proposed dependency removal is not yet proven safe.
 - PR #20 remains open for selective extraction only; its release workflow and older conversation UI are not safe to merge wholesale.

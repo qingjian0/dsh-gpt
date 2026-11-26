@@ -5,6 +5,7 @@ import android.net.Uri
 import android.os.Bundle
 import com.gpt.hook.ObservationProvider
 import com.gpt.hook.diagnostics.HookConfigParser
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -34,6 +35,8 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
      * 从而复用 upstreamConversationId，只向上游发增量。
      */
     private val signatureIndex = java.util.concurrent.ConcurrentHashMap<String, String>()
+    /** (send 解禁时间戳, 查询时间) —— 30 秒内复用，避免每个请求都探测 */
+    @Volatile private var blockedCache: Pair<Long, Long>? = null
     @Volatile private var running = false
 
     val port: Int get() = cfg.port
@@ -118,6 +121,12 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                     cfg.apiKey.isBlank() -> json(out, 503, err("configuration_required", "configure a gateway API key before using protected API routes"))
                     !authorized(headers) -> json(out, 401, err("invalid_api_key", "missing or bad Authorization"))
                     target == "/v1/models" -> json(out, 200, OpenAiCompat.modelsJson(OpenAiCompat.DEFAULT_MODELS))
+                    // MCP 通道：不消耗每小时消息额度，可直接调工具/读网页
+                    target == "/v1/mcp/tools" && method == "GET" -> mcpTools(out)
+                    target == "/v1/mcp/resources" && method == "GET" -> mcpResources(out)
+                    target == "/v1/mcp/resource" && method == "POST" -> mcpResourceRead(out, body)
+                    target == "/v1/mcp/call" && method == "POST" -> mcpCall(out, body)
+                    target == "/v1/web/open" && method == "POST" -> webOpen(out, body)
                     target == "/v1/hook/status" && method == "GET" -> hookStatus(out)
                     target == "/v1/hook/events" && method == "GET" -> hookEvents(out)
                     target == "/v1/hook/startup-discovery" && method == "GET" -> hookStartupDiscovery(out)
@@ -612,6 +621,18 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
             json(out, 413, err("conversation_limit", e.message ?: "conversation limit reached"), responseHeaders); return
         }
 
+        // 先看账号是否被限流，被限时直接回带 Retry-After 的 429
+        val blockedUntil = sendBlockedUntil()
+        if (blockedUntil > System.currentTimeMillis()) {
+            val waitSec = ((blockedUntil - System.currentTimeMillis()) / 1000).coerceAtLeast(1)
+            json(out, 429, JSONObject().put("error", JSONObject()
+                .put("type", "rate_limited")
+                .put("message", "ChatGPT 账号每小时消息数已用完，请 " + waitSec + " 秒后重试")
+                .put("retry_after_seconds", waitSec)).toString(),
+                responseHeaders + mapOf("Retry-After" to waitSec.toString()))
+            return
+        }
+
         val stream = req.optBoolean("stream", false)
         val id = (if (responsesMode) "resp-" else "chatcmpl-") +
             UUID.randomUUID().toString().replace("-", "").take(24)
@@ -776,6 +797,85 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
             message.optString("id").takeIf { it.isNotBlank() && it != "null" }
                 ?.let { state.parentMessageId = it }
         }
+    }
+
+    /**
+     * 读取账号当前的限流状态。
+     *
+     * 实测 POST /backend-api/conversation/init 不消耗消息额度，
+     * 返回 blocked_features[].resets_after 精确到秒。
+     * "send" 被 block 时，生成请求必定 429，提前告诉客户端比让它干等更好。
+     */
+    private fun mcpTools(out: OutputStream) {
+        runCatching { McpBridge(cfg).listTools() }
+            .onSuccess { json(out, 200, JSONObject().put("object", "list").put("data", it).toString()) }
+            .onFailure { json(out, 502, err("mcp_error", it.message ?: "list failed")) }
+    }
+
+    private fun mcpResources(out: OutputStream) {
+        runCatching { McpBridge(cfg).listResources() }
+            .onSuccess { json(out, 200, JSONObject().put("object", "list").put("data", it).toString()) }
+            .onFailure { json(out, 502, err("mcp_error", it.message ?: "list failed")) }
+    }
+
+    private fun mcpResourceRead(out: OutputStream, body: ByteArray?) {
+        val req = runCatching { JSONObject(body?.toString(Charsets.UTF_8) ?: "") }.getOrNull()
+        val uri = req?.optString("uri").orEmpty()
+        if (uri.isBlank()) { json(out, 400, err("invalid_request", "uri required")); return }
+        runCatching { McpBridge(cfg).readResource(uri) }
+            .onSuccess { json(out, 200, JSONObject().put("uri", uri).put("content", it).toString()) }
+            .onFailure { json(out, 502, err("mcp_error", it.message ?: "read failed")) }
+    }
+
+    private fun mcpCall(out: OutputStream, body: ByteArray?) {
+        val req = runCatching { JSONObject(body?.toString(Charsets.UTF_8) ?: "") }.getOrNull()
+        val name = req?.optString("name").orEmpty()
+        if (name.isBlank()) { json(out, 400, err("invalid_request", "name required")); return }
+        val args = req?.optJSONObject("arguments") ?: JSONObject()
+        runCatching { McpBridge(cfg).callTool(name, args) }
+            .onSuccess { json(out, 200, it.toString()) }
+            .onFailure { json(out, 502, err("mcp_error", it.message ?: "call failed")) }
+    }
+
+    private fun webOpen(out: OutputStream, body: ByteArray?) {
+        val req = runCatching { JSONObject(body?.toString(Charsets.UTF_8) ?: "") }.getOrNull()
+        val url = req?.optString("url").orEmpty()
+        if (url.isBlank()) { json(out, 400, err("invalid_request", "url required")); return }
+        runCatching { McpBridge(cfg).openUrl(url) }
+            .onSuccess { json(out, 200, JSONObject().put("url", url).put("text", it).toString()) }
+            .onFailure { json(out, 502, err("mcp_error", it.message ?: "open failed")) }
+    }
+
+    private fun sendBlockedUntil(): Long {
+        val now = System.currentTimeMillis()
+        val cached = blockedCache
+        if (cached != null && now - cached.second < 30_000L) return cached.first
+        var until = 0L
+        runCatching {
+            val body = JSONObject().put("conversation_id", JSONObject.NULL)
+                .put("gizmo_id", JSONObject.NULL).put("model", "auto")
+                .toString().toByteArray(Charsets.UTF_8)
+            val conn = ChatGptClient(cfg).open("POST", "/backend-api/conversation/init", body, "application/json")
+            try {
+                if (conn.responseCode == 200) {
+                    val root = JSONObject(conn.inputStream.bufferedReader().readText())
+                    val list = root.optJSONArray("blocked_features") ?: JSONArray()
+                    for (i in 0 until list.length()) {
+                        val f = list.optJSONObject(i) ?: continue
+                        if (f.optString("name") == "send") {
+                            val iso = f.optString("resets_after")
+                            until = runCatching {
+                                java.time.Instant.parse(iso).toEpochMilli()
+                            }.getOrDefault(0L)
+                        }
+                    }
+                }
+            } finally {
+                runCatching { conn.disconnect() }
+            }
+        }
+        blockedCache = until to now
+        return until
     }
 
     private fun sha256(value: String): String {

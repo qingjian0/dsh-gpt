@@ -83,7 +83,7 @@ A removal is complete only after the Hook ID is absent from the live inventory. 
 - The gateway's MCP routes are direct, separately authenticated tool/resource operations. They do not imply that the model autonomously selected or executed a tool.
 - Responses API currently does not implement tool-call item round-tripping. Requests containing `tools` or `tool_choice` must be rejected instead of silently dropping those fields.
 - Tool-enabled streaming must buffer until the response can be classified as either normal assistant text or tool calls. Never send the private ToolBridge envelope as user-visible content before returning `finish_reason=tool_calls`.
-- Tool names and argument objects must be validated against the request's declared tool schemas before being returned to the Agent.
+- Tool names and argument objects are checked against the request's declared names, required fields, property types, nested object/array schemas, enum values, and additionalProperties policy before being returned to the Agent.
 
 ## Adaptive policy defaults
 

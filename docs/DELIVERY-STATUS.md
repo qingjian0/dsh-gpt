@@ -78,3 +78,16 @@ Remote branch deletion was not performed: the available GitHub connection expose
 ## Release gate
 
 DSH-GPT is mainline-integrated and buildable at the PR level, with a constrained dynamic Hook runtime, a packaged DSH Agent integration, a corrected Hook configuration console, and explicit API capability guardrails. It is **not yet a device-accepted, end-to-end autonomous AI Hook release**. Do not claim full completion until host integration, real DSH Profile execution, live upstream checks, target-process Hook inventory and physical-device acceptance have recorded evidence.
+
+
+## Follow-up review (2026-11-26, PR #42 in progress)
+
+- PR #42 selectively ports the still-relevant parts of stale PR #25 and PR #24 onto current main. It decouples local listener startup from upstream credentials, returns HTTP 503 `upstream_not_configured` from the shared chat path (therefore covering both Chat Completions and Responses), adds an explicit NoActionBar theme, and enables edge-to-edge layout.
+- PR #42 CI run [45838306530](https://github.com/qingjian0/dsh-gpt/actions/runs/45838306530) was still running at the time of this update. Do not merge until Debug build, JVM tests and LSPosed metadata verification complete successfully.
+- PR #25's old MainActivity and DshApplication state changes were not ported: the current mainline UI is a different dashboard implementation. Only the API lifecycle behavior was independently applicable.
+- PR #24's old TopAppBar styling was not ported because mainline uses a custom dashboard header. Only the theme/window behavior was independently applicable. Android 17 visual acceptance is still required.
+- PRs #24 and #25 have comments documenting the selective port and should be closed as superseded only after PR #42 merges.
+- PR #30 remains open pending a real token-size/latency benchmark and tool-call accuracy regression test; its shortened descriptions and omitted schema detail are not safe to merge on estimated savings alone.
+- PR #23 remains Draft because its release workflow points at the debug APK artifact path and the proposed dependency removal is not yet proven safe.
+- PR #20 remains open for selective extraction only; its release workflow and older conversation UI are not safe to merge wholesale.
+- Host PR #35 remains Draft in `qingjian0/Deepseek-Harness-Local-Android`; it is 38 commits ahead / 12 behind host main. Static Provider/Bundle contract agreement is not runtime acceptance. Reconcile only its Hook bridge, endpoint catalog and profile-plugin packaging against current host main, then run host CI and real Profile installation tests.

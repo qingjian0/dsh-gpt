@@ -160,6 +160,9 @@ private class Backend(
     suspend fun post(path: String, body: JSONObject): ApiResponse =
         request("POST", path, body.toString())
 
+    suspend fun put(path: String, body: JSONObject): ApiResponse =
+        request("PUT", path, body.toString())
+
     private suspend fun request(
         method: String,
         path: String,
@@ -618,13 +621,37 @@ private fun DshApp(
                     onSaveRule = { rule ->
                         scope.launch {
                             try {
-                                val response = backend.post(
-                                    "/v1/hook/config",
-                                    rule
-                                )
+                                val current = backend.get("/v1/hook/config")
+                                if (current.code !in 200..299) {
+                                    throw Exception("读取现有 Hook 配置失败：HTTP ${current.code}")
+                                }
+                                val envelope = JSONObject(current.body)
+                                val config = envelope.optJSONObject("config")
+                                    ?: throw Exception("后端未返回有效 Hook 配置")
+                                val rules = config.optJSONArray("rules") ?: JSONArray()
+                                if (rules.length() >= 64) {
+                                    throw Exception("规则数量已达到上限（64）")
+                                }
+                                rules.put(rule)
+                                config.put("schemaVersion", config.optInt("schemaVersion", 1))
+                                config.put("targetPackage", "com.openai.chatgpt")
+                                config.put("rules", rules)
+
+                                val response = backend.put("/v1/hook/config", config)
+                                if (response.code !in 200..299) {
+                                    throw Exception("规则提交失败：HTTP ${response.code} ${response.body}")
+                                }
+                                val accepted = JSONObject(response.body)
+                                val status = backend.get("/v1/hook/status")
+                                if (status.code in 200..299) {
+                                    state = state.copy(hook = JSONObjectOrEmpty(status.body))
+                                }
                                 notify(
-                                    if (response.code in 200..299) "规则提交成功"
-                                    else "规则提交失败：HTTP ${response.code}"
+                                    if (accepted.optBoolean("accepted", false)) {
+                                        "规则已接受；请检查目标进程安装清单确认实际生效"
+                                    } else {
+                                        "后端未确认规则接受"
+                                    }
                                 )
                             } catch (e: Exception) {
                                 notify(readableError(e))
@@ -1597,19 +1624,17 @@ private fun HookPage(
 ) {
     var className by remember { mutableStateOf("") }
     var methodName by remember { mutableStateOf("") }
-    var mode by remember { mutableStateOf("BEFORE") }
+    var mode by remember { mutableStateOf("observe") }
     var parameters by remember { mutableStateOf("[]") }
     var rawExpanded by remember { mutableStateOf(false) }
     var eventExpanded by remember { mutableStateOf(false) }
 
     val enabled = hook.optBoolean("enabled", false)
-    val ruleCount = hook.optInt(
-        "rule_count",
-        hook.optInt("rules_count", 0)
-    )
-    val lastApplied = hook.optString("last_applied")
-        .ifBlank { hook.optString("updated_at") }
-        .ifBlank { "暂无记录" }
+    val ruleCount = hook.optInt("configuredRuleCount", 0)
+    val lastApplied = hook.optJSONObject("lastApplyReport")
+        ?.optString("state")
+        ?.takeIf { !it.isNullOrBlank() && it != "unavailable" }
+        ?: "等待目标进程报告"
 
     LazyColumn(
         Modifier.fillMaxSize(),
@@ -1658,7 +1683,7 @@ private fun HookPage(
             CardBlock {
                 Text("创建动态规则", fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 Text(
-                    "提交规则到 Hook 后端",
+                    "当前控制台仅创建 observe / dump 元数据观察规则；提交完整配置快照",
                     color = Muted,
                     fontSize = 12.sp
                 )
@@ -1692,7 +1717,7 @@ private fun HookPage(
                         expanded = expanded,
                         onDismissRequest = { expanded = false }
                     ) {
-                        listOf("BEFORE", "AFTER", "REPLACE").forEach {
+                        listOf("observe", "dump").forEach {
                             DropdownMenuItem(
                                 text = { Text(it) },
                                 onClick = {
@@ -1704,7 +1729,7 @@ private fun HookPage(
                     }
                 }
 
-                FieldLabel("参数类型（JSON 数组）")
+                FieldLabel("参数类型（JSON 数组；空数组表示不限定重载）")
                 AppTextField(
                     parameters,
                     { parameters = it },
@@ -1717,19 +1742,21 @@ private fun HookPage(
                             val args = JSONArray(parameters)
                             onSaveRule(
                                 JSONObject().apply {
-                                    put("class_name", className)
-                                    put("className", className)
-                                    put("method_name", methodName)
-                                    put("methodName", methodName)
+                                    put("id", "ui-" + java.util.UUID.randomUUID().toString())
+                                    put("className", className.trim())
+                                    put("methodName", methodName.trim())
                                     put("mode", mode)
-                                    put("parameters", args)
+                                    put("parameterTypes", args)
+                                    put("enabled", true)
+                                    put("sampleEvery", 1)
                                 }
                             )
                         } catch (_: Exception) {
                             // 参数不是合法 JSON 时静默忽略，输入框保持原样
                         }
                     },
-                    enabled = className.isNotBlank() && methodName.isNotBlank(),
+                    enabled = className.startsWith("com.openai.") &&
+                        methodName.isNotBlank(),
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp)
                 ) {

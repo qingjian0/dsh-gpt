@@ -581,6 +581,10 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         if (userText.isBlank()) {
             json(out, 400, err("invalid_request", "messages must contain a non-empty user message")); return
         }
+        if (!cfg.ready) {
+            json(out, 503, err("upstream_not_configured", "本地 API 网关已运行，但尚未配置上游 access_token / oai-did"))
+            return
+        }
         val requestedConversationId = headers["x-dsh-conversation-id"]?.takeIf { it.isNotBlank() }
         // 隐式会话绑定：显式头 > 客户端 user 字段 > 首条 user 消息指纹
         val implicitSignature = run {

@@ -20,7 +20,7 @@ This document is the delivery truth source. Source presence and CI success are n
 | DSH Agent plugin | PR #12 merged plugin package, 9 modes, task-state tools and 7 Skills | Package/source present; real DSH Profile installation, tool visibility and workflow execution unverified |
 | DSH host bridge | Host implementation was identified on `qingjian0/Deepseek-Harness-Local-Android:refactor/dsh-gpt-hook-bridge-hardening`; host PR #35 is draft and divergent | Not release-integrated; reconcile and validate host branch before merge |
 | UI Customizer | No confirmed stable ChatGPT UI target binding | Not implemented; do not present a simulated success state |
-| CI | PR #38 run [45820342105](https://github.com/qingjian0/dsh-gpt/actions/runs/45820342105) passed Debug build, JVM tests, LSPosed metadata verification and artifact upload | PR-level build green; the Hook UI/backend contract defect was not caught by existing tests |
+| CI | PR #40 run [45826199024](https://github.com/qingjian0/dsh-gpt/actions/runs/45826199024) and PR #41 run [45835490142](https://github.com/qingjian0/dsh-gpt/actions/runs/45835490142) passed Debug build, JVM tests, LSPosed metadata verification and artifact upload | Both delivery fixes passed PR-level CI; physical-device acceptance remains separate |
 | Physical device | See [DEVICE-ACCEPTANCE.md](DEVICE-ACCEPTANCE.md) | Not run/recorded for this delivery |
 
 ## Hook configuration contract
@@ -77,4 +77,4 @@ Remote branch deletion was not performed: the available GitHub connection expose
 
 ## Release gate
 
-DSH-GPT is mainline-integrated and buildable at the PR level, with a constrained dynamic Hook runtime and a packaged DSH Agent integration. It is **not yet a device-accepted, end-to-end autonomous AI Hook release**. Do not claim full completion until the Hook UI fix, host integration, real DSH Profile execution, live upstream checks and physical-device acceptance have recorded evidence.
+DSH-GPT is mainline-integrated and buildable at the PR level, with a constrained dynamic Hook runtime, a packaged DSH Agent integration, a corrected Hook configuration console, and explicit API capability guardrails. It is **not yet a device-accepted, end-to-end autonomous AI Hook release**. Do not claim full completion until host integration, real DSH Profile execution, live upstream checks, target-process Hook inventory and physical-device acceptance have recorded evidence.

@@ -1,5 +1,3 @@
-@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
-
 package com.gpt.hook
 
 import android.content.ClipData
@@ -9,439 +7,385 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateContentSize
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.*
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
-import java.net.HttpURLConnection
-import java.net.URL
-import java.util.Locale
-import kotlin.math.max
+import java.util.concurrent.TimeUnit
 
 private val Green = Color(0xFF10A37F)
-private val Ink = Color(0xFF0D0D0D)
-private val Muted = Color(0xFF8E8E93)
-private val SurfaceLight = Color(0xFFF7F7F8)
-private val DarkSurface = Color(0xFF303030)
+private val Background = Color(0xFFF7F7F8)
+private val CardColor = Color.White
+private val Dark = Color(0xFF202123)
+private val Gray = Color(0xFF8E8EA0)
+private val JsonMedia = "application/json; charset=utf-8".toMediaType()
 
 class MainActivity : ComponentActivity() {
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        val prefs = getSharedPreferences("dsh_gpt", MODE_PRIVATE)
-
         setContent {
-            val dark = remember {
-                mutableStateOf(prefs.getBoolean("dark", false))
-            }
-
-            DshTheme(dark.value) {
-                DshApp(
-                    context = this,
-                    baseUrl = prefs.getString("base_url", "http://127.0.0.1:8766") ?: "",
-                    initialKey = prefs.getString("api_key", "") ?: "",
-                    onConfigChange = { url, key ->
-                        prefs.edit()
-                            .putString("base_url", url)
-                            .putString("api_key", key)
-                            .apply()
-                    },
-                    dark = dark.value,
-                    onDarkChange = {
-                        dark.value = it
-                        prefs.edit().putBoolean("dark", it).apply()
-                    }
+            MaterialTheme(
+                colorScheme = lightColorScheme(
+                    primary = Green,
+                    background = Background,
+                    surface = CardColor,
+                    onBackground = Dark,
+                    onSurface = Dark
                 )
+            ) {
+                DshApp(this)
             }
         }
     }
 }
 
-@Composable
-private fun DshTheme(
-    dark: Boolean,
-    content: @Composable () -> Unit
-) {
-    val scheme = if (dark) {
-        darkColorScheme(
-            primary = Green,
-            background = Color(0xFF212121),
-            surface = Color(0xFF2B2B2B),
-            onBackground = Color.White,
-            onSurface = Color.White,
-            surfaceVariant = Color(0xFF383838)
-        )
-    } else {
-        lightColorScheme(
-            primary = Green,
-            background = Color.White,
-            surface = Color.White,
-            onBackground = Ink,
-            onSurface = Ink,
-            surfaceVariant = SurfaceLight
-        )
-    }
+private class ApiClient {
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .build()
 
-    MaterialTheme(
-        colorScheme = scheme,
-        typography = Typography(
-            headlineMedium = MaterialTheme.typography.headlineMedium.copy(
-                fontWeight = FontWeight.Bold
-            ),
-            titleLarge = MaterialTheme.typography.titleLarge.copy(
-                fontWeight = FontWeight.Bold
-            ),
-            titleMedium = MaterialTheme.typography.titleMedium.copy(
-                fontWeight = FontWeight.SemiBold
-            ),
-            bodyLarge = MaterialTheme.typography.bodyLarge.copy(
-                fontSize = 16.sp
-            ),
-            bodyMedium = MaterialTheme.typography.bodyMedium.copy(
-                fontSize = 14.sp
-            )
-        ),
-        content = content
-    )
-}
+    var baseUrl = "http://127.0.0.1:8080"
 
-private data class ApiResponse(
-    val code: Int,
-    val body: String
-)
-
-private object AuthHeaders {
-    fun apply(connection: HttpURLConnection, apiKey: String) {
-        connection.setRequestProperty("Accept", "application/json")
-        connection.setRequestProperty("Content-Type", "application/json")
-        if (apiKey.isNotBlank()) {
-            connection.setRequestProperty("Authorization", "Bearer $apiKey")
-            connection.setRequestProperty("x-api-key", apiKey)
-        }
-    }
-}
-
-private class Backend(
-    baseUrl: String,
-    private val apiKey: String
-) {
-    private val base = baseUrl.trim().trimEnd('/')
-
-    suspend fun get(path: String): ApiResponse =
-        request("GET", path, null)
-
-    suspend fun post(path: String, body: JSONObject): ApiResponse =
-        request("POST", path, body.toString())
-
-    private suspend fun request(
+    fun request(
         method: String,
         path: String,
-        body: String?
-    ): ApiResponse = withContext(Dispatchers.IO) {
-        val connection = (URL(base + path).openConnection() as HttpURLConnection)
-        try {
-            connection.requestMethod = method
-            connection.connectTimeout = 10000
-            connection.readTimeout = 30000
-            connection.instanceFollowRedirects = true
-            AuthHeaders.apply(connection, apiKey)
+        body: JSONObject? = null,
+        apiKey: String = ""
+    ): JSONObject {
+        val url = baseUrl.trimEnd('/') + path
+        val builder = Request.Builder().url(url)
 
-            if (body != null) {
-                connection.doOutput = true
-                connection.outputStream.use {
-                    it.write(body.toByteArray(Charsets.UTF_8))
-                }
+        if (apiKey.isNotBlank()) {
+            builder.header("Authorization", "Bearer $apiKey")
+        }
+
+        when (method.uppercase()) {
+            "POST" -> builder.post(
+                (body ?: JSONObject()).toString().toRequestBody(JsonMedia)
+            )
+            "PUT" -> builder.put(
+                (body ?: JSONObject()).toString().toRequestBody(JsonMedia)
+            )
+            "DELETE" -> builder.delete(
+                (body ?: JSONObject()).toString().toRequestBody(JsonMedia)
+            )
+            else -> builder.get()
+        }
+
+        client.newCall(builder.build()).execute().use { response ->
+            val text = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw Exception("HTTP ${response.code}: $text")
             }
-
-            val code = connection.responseCode
-            val stream = if (code in 200..399) {
-                connection.inputStream
-            } else {
-                connection.errorStream
+            return try {
+                JSONObject(text)
+            } catch (_: Exception) {
+                JSONObject().put("raw", text)
             }
+        }
+    }
 
-            val response = stream?.bufferedReader()?.use {
-                it.readText()
-            } ?: ""
-
-            ApiResponse(code, response)
-        } finally {
-            connection.disconnect()
+    fun array(
+        path: String,
+        apiKey: String = ""
+    ): JSONArray {
+        val url = baseUrl.trimEnd('/') + path
+        val builder = Request.Builder().url(url)
+        if (apiKey.isNotBlank()) {
+            builder.header("Authorization", "Bearer $apiKey")
+        }
+        client.newCall(builder.build()).execute().use { response ->
+            val text = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw Exception("HTTP ${response.code}: $text")
+            }
+            return try {
+                JSONArray(text)
+            } catch (_: Exception) {
+                JSONObject(text).optJSONArray("data") ?: JSONArray()
+            }
         }
     }
 }
 
-private data class LatencyPoint(
-    val label: String,
-    val millis: Long
-)
-
-private data class ToolItem(
-    val name: String,
-    val description: String,
-    val schema: JSONObject,
-    val group: String
-)
-
-private data class ToolCallRecord(
-    val name: String,
-    val elapsed: Long,
-    val success: Boolean,
-    val result: String
-)
-
-private data class AppState(
-    val online: Boolean = false,
-    val health: JSONObject = JSONObject(),
-    val models: JSONArray = JSONArray(),
-    val tools: List<ToolItem> = emptyList(),
-    val resources: JSONArray = JSONArray(),
-    val hook: JSONObject = JSONObject(),
-    val events: JSONArray = JSONArray(),
-    val latency: List<LatencyPoint> = emptyList(),
-    val history: List<ToolCallRecord> = emptyList(),
-    val loading: Boolean = false,
-    val error: String? = null
-)
-
 @Composable
-private fun DshApp(
-    context: Context,
-    baseUrl: String,
-    initialKey: String,
-    onConfigChange: (String, String) -> Unit,
-    dark: Boolean,
-    onDarkChange: (Boolean) -> Unit
-) {
-    var endpoint by remember { mutableStateOf(baseUrl) }
-    var apiKey by remember { mutableStateOf(initialKey) }
-    var currentTab by remember { mutableIntStateOf(0) }
-    var state by remember { mutableStateOf(AppState()) }
-    var configExpanded by remember { mutableStateOf(false) }
-    var toast by remember { mutableStateOf<String?>(null) }
-
+private fun DshApp(context: Context) {
     val scope = rememberCoroutineScope()
-    val backend = remember(endpoint, apiKey) {
-        Backend(endpoint, apiKey)
-    }
+    val api = remember { ApiClient() }
 
-    fun notify(message: String) {
-        toast = message
-        Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
-    }
+    var selectedTab by remember { mutableIntStateOf(0) }
+    var baseUrl by remember { mutableStateOf(api.baseUrl) }
+    var apiKey by remember { mutableStateOf("") }
 
-    suspend fun refresh() {
-        state = state.copy(loading = true, error = null)
+    var loading by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf("") }
+    var message by remember { mutableStateOf("") }
 
-        try {
-            val health = backend.get("/health")
-            val models = backend.get("/v1/models")
-            val hook = backend.get("/v1/hook/status")
+    var health by remember { mutableStateOf(JSONObject()) }
+    var status by remember { mutableStateOf(JSONObject()) }
+    var config by remember { mutableStateOf(JSONObject()) }
+    var models by remember { mutableStateOf(JSONArray()) }
 
-            state = state.copy(
-                online = health.code in 200..299,
-                health = JSONObjectOrEmpty(health.body),
-                models = extractArray(models.body, "data", "models"),
-                hook = JSONObjectOrEmpty(hook.body),
-                loading = false
-            )
-        } catch (e: Exception) {
-            state = state.copy(
-                online = false,
-                loading = false,
-                error = readableError(e)
-            )
-        }
-    }
+    var conversations by remember { mutableStateOf(JSONArray()) }
+    var selectedConversation by remember { mutableStateOf("") }
+    var chatInput by remember { mutableStateOf("") }
+    var chatMessages by remember { mutableStateOf(JSONArray()) }
 
-    suspend fun loadTools() {
-        val result = backend.get("/v1/mcp/tools")
-        if (result.code !in 200..299) {
-            throw Exception("工具列表获取失败：HTTP ${result.code}")
-        }
+    var upstreamConversations by remember { mutableStateOf(JSONArray()) }
+    var upstreamDetail by remember { mutableStateOf(JSONObject()) }
+    var upstreamId by remember { mutableStateOf("") }
 
-        val array = extractArray(result.body, "tools", "data")
-        val tools = mutableListOf<ToolItem>()
+    var tools by remember { mutableStateOf(JSONArray()) }
+    var toolSearch by remember { mutableStateOf("") }
+    var selectedTool by remember { mutableStateOf(JSONObject()) }
+    var toolDialog by remember { mutableStateOf(false) }
+    var toolArguments by remember { mutableStateOf("{}") }
+    var toolResult by remember { mutableStateOf("") }
 
-        for (i in 0 until array.length()) {
-            val item = array.optJSONObject(i) ?: continue
-            val name = item.optString("name").ifBlank {
-                item.optString("title")
-            }
-            if (name.isBlank()) continue
+    var webUrl by remember { mutableStateOf("") }
+    var webContent by remember { mutableStateOf("") }
+    var history by remember { mutableStateOf(listOf<JSONObject>()) }
 
-            val group = item.optString("server")
-                .ifBlank { item.optString("group") }
-                .ifBlank {
-                    when {
-                        name.contains("github", true) -> "GitHub"
-                        name.contains("web", true) -> "网页读取"
-                        else -> "其他工具"
-                    }
+    var hookStatus by remember { mutableStateOf(JSONObject()) }
+    var hookEvents by remember { mutableStateOf(JSONArray()) }
+    var hookReport by remember { mutableStateOf(JSONObject()) }
+    var hookReportExpanded by remember { mutableStateOf(false) }
+    var hookRules by remember { mutableStateOf(JSONArray()) }
+
+    var scanning by remember { mutableStateOf(false) }
+    var scanProgress by remember { mutableFloatStateOf(0f) }
+    var scanResult by remember { mutableStateOf("") }
+
+    var ruleClass by remember { mutableStateOf("") }
+    var ruleMethod by remember { mutableStateOf("") }
+    var ruleMode by remember { mutableStateOf("BEFORE") }
+    var ruleParams by remember { mutableStateOf("[]") }
+
+    var localIp by remember { mutableStateOf("127.0.0.1") }
+    var lanEnabled by remember { mutableStateOf(false) }
+    var temporaryChat by remember { mutableStateOf(false) }
+
+    fun call(
+        method: String,
+        path: String,
+        body: JSONObject? = null,
+        success: ((JSONObject) -> Unit)? = null
+    ) {
+        if (loading && path == "/v1/start") return
+        scope.launch {
+            loading = true
+            error = ""
+            try {
+                api.baseUrl = baseUrl
+                val result = kotlinx.coroutines.withContext(
+                    kotlinx.coroutines.Dispatchers.IO
+                ) {
+                    api.request(method, path, body, apiKey)
                 }
-
-            tools.add(
-                ToolItem(
-                    name = name,
-                    description = item.optString("description"),
-                    schema = item.optJSONObject("inputSchema")
-                        ?: item.optJSONObject("schema")
-                        ?: JSONObject(),
-                    group = group
-                )
-            )
+                success?.invoke(result)
+                message = result.optString("message", "操作成功")
+            } catch (e: Exception) {
+                error = e.message ?: "请求失败"
+            } finally {
+                loading = false
+            }
         }
-
-        state = state.copy(tools = tools)
     }
 
-    LaunchedEffect(endpoint, apiKey) {
-        refresh()
-        try {
-            loadTools()
-            val resources = backend.get("/v1/mcp/resources")
-            state = state.copy(
-                resources = extractArray(resources.body, "resources", "data")
-            )
-        } catch (_: Exception) {
+    fun fetchArray(
+        path: String,
+        success: (JSONArray) -> Unit
+    ) {
+        scope.launch {
+            try {
+                api.baseUrl = baseUrl
+                val result = kotlinx.coroutines.withContext(
+                    kotlinx.coroutines.Dispatchers.IO
+                ) {
+                    api.array(path, apiKey)
+                }
+                success(result)
+            } catch (e: Exception) {
+                error = e.message ?: "请求失败"
+            }
         }
+    }
+
+    fun refreshAll() {
+        call("GET", "/health") { health = it }
+        call("GET", "/v1/status") { status = it }
+        call("GET", "/v1/config") {
+            config = it
+            lanEnabled = it.optBoolean("allow_lan", false)
+            temporaryChat = it.optBoolean("temporary_chat", false)
+            localIp = it.optString("lan_ip", localIp)
+        }
+        fetchArray("/v1/models") { models = it }
+    }
+
+    fun refreshConversations() {
+        fetchArray("/v1/conversations") { conversations = it }
+    }
+
+    fun refreshUpstream() {
+        fetchArray("/backend-api/conversations") {
+            upstreamConversations = it
+        }
+    }
+
+    fun refreshTools() {
+        fetchArray("/v1/mcp/tools") { tools = it }
+    }
+
+    fun refreshHook() {
+        call("GET", "/v1/hook/status") { hookStatus = it }
+        fetchArray("/v1/hook/events") { hookEvents = it }
+        call("GET", "/v1/hook/config") {
+            hookRules = it.optJSONArray("rules") ?: JSONArray()
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        refreshAll()
+        refreshConversations()
+        refreshTools()
+        refreshHook()
     }
 
     Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
+        containerColor = Background,
         topBar = {
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.background)
+                    .background(Color.White)
+                    .padding(horizontal = 20.dp, vertical = 14.dp)
             ) {
                 Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 22.dp, vertical = 15.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column(Modifier.weight(1f)) {
+                    Box(
+                        Modifier
+                            .size(34.dp)
+                            .background(Green, RoundedCornerShape(10.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("D", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Column {
                         Text(
                             "DSH-GPT",
-                            fontSize = 23.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = (-0.8).sp
+                            fontSize = 19.sp,
+                            fontWeight = FontWeight.Bold
                         )
                         Text(
-                            "OpenAI API Gateway",
-                            color = Muted,
-                            fontSize = 12.sp
+                            "Personal AI Gateway",
+                            fontSize = 11.sp,
+                            color = Gray
                         )
                     }
-
-                    IconButton(onClick = { onDarkChange(!dark) }) {
-                        Icon(
-                            if (dark) Icons.Outlined.LightMode
-                            else Icons.Outlined.DarkMode,
-                            contentDescription = "切换主题"
+                    Spacer(Modifier.weight(1f))
+                    if (loading) {
+                        CircularProgressIndicator(
+                            Modifier.size(20.dp),
+                            strokeWidth = 2.dp,
+                            color = Green
                         )
-                    }
-
-                    IconButton(
-                        onClick = {
-                            scope.launch {
-                                refresh()
-                                notify(if (state.online) "状态已更新" else "连接失败")
-                            }
+                    } else {
+                        IconButton(onClick = { refreshAll() }) {
+                            Icon(Icons.Default.Refresh, null)
                         }
-                    ) {
-                        Icon(
-                            Icons.Outlined.Refresh,
-                            contentDescription = "刷新"
-                        )
                     }
                 }
-
+                Spacer(Modifier.height(12.dp))
                 Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    listOf(
-                        "状态" to Icons.Outlined.Dashboard,
-                        "API" to Icons.Outlined.Api,
-                        "工具" to Icons.Outlined.Build,
-                        "Hook" to Icons.Outlined.Extension
-                    ).forEachIndexed { index, item ->
-                        val selected = currentTab == index
+                    val tabs = listOf(
+                        "状态", "API", "对话", "工具", "Hook"
+                    )
+                    tabs.forEachIndexed { index, name ->
                         Column(
-                            Modifier
+                            modifier = Modifier
                                 .weight(1f)
-                                .clickable { currentTab = index }
-                                .padding(vertical = 11.dp),
+                                .clickable { selectedTab = index }
+                                .padding(vertical = 8.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(5.dp)
-                            ) {
-                                Icon(
-                                    item.second,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(18.dp),
-                                    tint = if (selected) Green else Muted
-                                )
-                                Text(
-                                    item.first,
-                                    color = if (selected) Green else Muted,
-                                    fontSize = 14.sp,
-                                    fontWeight = if (selected) FontWeight.Bold
-                                    else FontWeight.Medium
-                                )
-                            }
-                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                name,
+                                color = if (selectedTab == index) Green else Gray,
+                                fontWeight = if (selectedTab == index)
+                                    FontWeight.Bold else FontWeight.Normal,
+                                fontSize = 14.sp
+                            )
+                            Spacer(Modifier.height(6.dp))
                             Box(
                                 Modifier
-                                    .fillMaxWidth(0.6f)
+                                    .width(28.dp)
                                     .height(3.dp)
                                     .background(
-                                        if (selected) Green else Color.Transparent,
+                                        if (selectedTab == index) Green
+                                        else Color.Transparent,
                                         CircleShape
                                     )
                             )
                         }
                     }
                 }
-
-                HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
             }
         },
-        snackbarHost = {
-            SnackbarHost(remember { SnackbarHostState() })
+        bottomBar = {
+            if (error.isNotBlank() || message.isNotBlank()) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(Color.White)
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        if (error.isNotBlank()) error else message,
+                        modifier = Modifier.weight(1f),
+                        color = if (error.isNotBlank()) Color.Red else Green,
+                        fontSize = 12.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    TextButton(onClick = {
+                        error = ""
+                        message = ""
+                    }) {
+                        Text("关闭")
+                    }
+                }
+            }
         }
     ) { padding ->
         Box(
@@ -449,677 +393,1033 @@ private fun DshApp(
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            when (currentTab) {
+            when (selectedTab) {
                 0 -> StatusPage(
-                    state = state,
-                    endpoint = endpoint,
+                    health, status, models, loading,
+                    onRefresh = { refreshAll() },
                     onCopy = {
-                        copyText(context, endpoint)
-                        notify("接入地址已复制")
-                    },
-                    onRefresh = {
-                        scope.launch {
-                            refresh()
-                            notify("状态刷新完成")
-                        }
+                        copyText(context, baseUrl)
+                        message = "接入地址已复制"
                     }
                 )
 
                 1 -> ApiPage(
-                    endpoint = endpoint,
+                    status = status,
+                    config = config,
+                    baseUrl = baseUrl,
+                    onBaseUrl = { baseUrl = it },
                     apiKey = apiKey,
-                    expanded = configExpanded,
-                    latency = state.latency,
-                    onExpand = { configExpanded = !configExpanded },
-                    onEndpointChange = { endpoint = it },
-                    onKeyChange = { apiKey = it },
+                    onApiKey = { apiKey = it },
+                    lanEnabled = lanEnabled,
+                    onLan = {
+                        lanEnabled = it
+                        call(
+                            "POST", "/v1/config",
+                            JSONObject().put("allow_lan", it)
+                        ) { config = it }
+                    },
+                    temporaryChat = temporaryChat,
+                    onTemporaryChat = {
+                        temporaryChat = it
+                        call(
+                            "POST", "/v1/config",
+                            JSONObject().put("temporary_chat", it)
+                        ) { config = it }
+                    },
+                    localIp = localIp,
+                    onStart = { call("POST", "/v1/start") },
+                    onStop = { call("POST", "/v1/stop") },
                     onSave = {
-                        onConfigChange(endpoint, apiKey)
-                        notify("配置已保存")
+                        call("POST", "/v1/config", config)
                     },
-                    onCopy = {
-                        copyText(context, it)
-                        notify("已复制")
-                    },
-                    onTest = {
-                        scope.launch {
-                            val start = System.currentTimeMillis()
+                    onImport = {
+                        val clipboard = context.getSystemService(
+                            Context.CLIPBOARD_SERVICE
+                        ) as ClipboardManager
+                        val text = clipboard.primaryClip
+                            ?.getItemAt(0)?.coerceToText(context)?.toString()
+                        if (text.isNullOrBlank()) {
+                            error = "剪贴板没有 kit.json 内容"
+                        } else {
                             try {
-                                val response = backend.get("/health")
-                                val elapsed = System.currentTimeMillis() - start
-                                state = state.copy(
-                                    latency = (
-                                        state.latency + LatencyPoint(
-                                            System.currentTimeMillis().toString().takeLast(5),
-                                            elapsed
-                                        )
-                                    ).takeLast(10)
-                                )
-                                notify(
-                                    if (response.code in 200..299) {
-                                        "连接成功 · ${elapsed}ms"
-                                    } else {
-                                        "连接失败 · HTTP ${response.code}"
-                                    }
-                                )
+                                val json = JSONObject(text)
+                                call("POST", "/v1/kit/import", json)
                             } catch (e: Exception) {
-                                notify(readableError(e))
+                                error = "JSON 格式错误：${e.message}"
                             }
                         }
+                    },
+                    onCopyCommand = {
+                        copyText(
+                            context,
+                            "curl -X POST '${baseUrl.trimEnd('/')}/v1/chat/completions' " +
+                                "-H 'Content-Type: application/json' " +
+                                "-H 'Authorization: Bearer $apiKey' " +
+                                "-d '{\"model\":\"gpt-4o\",\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}]}'"
+                        )
+                        message = "测试命令已复制"
                     }
                 )
 
-                2 -> ToolsPage(
-                    tools = state.tools,
-                    history = state.history,
-                    backend = backend,
-                    onCall = { name, arguments ->
-                        scope.launch {
-                            val start = System.currentTimeMillis()
-                            try {
-                                val result = backend.post(
-                                    "/v1/mcp/call",
-                                    JSONObject().apply {
-                                        put("name", name)
-                                        put("arguments", arguments)
-                                    }
-                                )
-                                val elapsed = System.currentTimeMillis() - start
-                                val success = result.code in 200..299
-                                val record = ToolCallRecord(
-                                    name,
-                                    elapsed,
-                                    success,
-                                    result.body
-                                )
-                                state = state.copy(
-                                    history = (listOf(record) + state.history).take(50)
-                                )
-                                notify(
-                                    if (success) "调用成功 · ${elapsed}ms"
-                                    else "调用失败 · HTTP ${result.code}"
-                                )
-                            } catch (e: Exception) {
-                                val record = ToolCallRecord(
-                                    name,
-                                    System.currentTimeMillis() - start,
-                                    false,
-                                    readableError(e)
-                                )
-                                state = state.copy(
-                                    history = (listOf(record) + state.history).take(50)
-                                )
-                                notify(record.result)
-                            }
+                2 -> ConversationPage(
+                    conversations = conversations,
+                    selectedConversation = selectedConversation,
+                    chatMessages = chatMessages,
+                    chatInput = chatInput,
+                    onInput = { chatInput = it },
+                    onRefresh = { refreshConversations() },
+                    onNew = {
+                        call(
+                            "POST", "/v1/conversations",
+                            JSONObject().put("title", "新对话")
+                        ) {
+                            selectedConversation = it.optString(
+                                "id", it.optString("conversation_id")
+                            )
+                            refreshConversations()
                         }
                     },
-                    onReadWeb = { url ->
-                        val start = System.currentTimeMillis()
-                        try {
-                            val response = backend.post(
-                                "/v1/web/open",
-                                JSONObject().put("url", url)
-                            )
-                            val elapsed = System.currentTimeMillis() - start
-                            val record = ToolCallRecord(
-                                "web.open",
-                                elapsed,
-                                response.code in 200..299,
-                                response.body
-                            )
-                            state = state.copy(
-                                history = (listOf(record) + state.history).take(50)
-                            )
-                            record
-                        } catch (e: Exception) {
-                            ToolCallRecord(
-                                "web.open",
-                                System.currentTimeMillis() - start,
-                                false,
-                                readableError(e)
-                            )
-                        }
+                    onSelect = { id ->
+                        selectedConversation = id
+                        chatMessages = JSONArray()
                     },
-                    onReload = {
-                        scope.launch {
-                            try {
-                                loadTools()
-                                notify("工具列表已更新")
-                            } catch (e: Exception) {
-                                notify(readableError(e))
-                            }
-                        }
-                    }
-                )
-
-                3 -> HookPage(
-                    backend = backend,
-                    hook = state.hook,
-                    events = state.events,
-                    onRefresh = {
-                        scope.launch {
-                            try {
-                                val result = backend.get("/v1/hook/status")
-                                val events = backend.get("/v1/hook/events")
-                                state = state.copy(
-                                    hook = JSONObjectOrEmpty(result.body),
-                                    events = extractArray(
-                                        events.body,
-                                        "events",
-                                        "data"
+                    onSend = {
+                        val text = chatInput.trim()
+                        if (text.isNotEmpty() && selectedConversation.isNotBlank()) {
+                            val body = JSONObject()
+                                .put("conversation_id", selectedConversation)
+                                .put("model", "gpt-4o")
+                                .put(
+                                    "messages",
+                                    JSONArray().put(
+                                        JSONObject()
+                                            .put("role", "user")
+                                            .put("content", text)
                                     )
                                 )
-                                notify("Hook 状态已更新")
-                            } catch (e: Exception) {
-                                notify(readableError(e))
+                            call("POST", "/v1/chat/completions", body) {
+                                val messages = JSONArray()
+                                for (i in 0 until chatMessages.length()) {
+                                    messages.put(chatMessages.get(i))
+                                }
+                                messages.put(
+                                    JSONObject()
+                                        .put("role", "user")
+                                        .put("content", text)
+                                )
+                                val choices = it.optJSONArray("choices")
+                                val response = choices?.optJSONObject(0)
+                                    ?.optJSONObject("message")
+                                messages.put(
+                                    response ?: JSONObject()
+                                        .put(
+                                            "role", "assistant"
+                                        )
+                                        .put(
+                                            "content",
+                                            it.optString("content", it.toString())
+                                        )
+                                )
+                                chatMessages = messages
+                                chatInput = ""
                             }
+                        } else {
+                            error = "请先创建或选择一个本地会话"
                         }
                     },
-                    onSaveRule = { rule ->
-                        scope.launch {
-                            try {
-                                val response = backend.post(
-                                    "/v1/hook/config",
-                                    rule
+                    upstreamConversations = upstreamConversations,
+                    upstreamId = upstreamId,
+                    upstreamDetail = upstreamDetail,
+                    onUpstreamRefresh = { refreshUpstream() },
+                    onUpstreamSelect = { id ->
+                        upstreamId = id
+                        call(
+                            "GET",
+                            "/backend-api/conversation/$id"
+                        ) { upstreamDetail = it }
+                    }
+                )
+
+                3 -> ToolsPage(
+                    tools = tools,
+                    search = toolSearch,
+                    onSearch = { toolSearch = it },
+                    selectedTool = selectedTool,
+                    dialog = toolDialog,
+                    onOpenTool = {
+                        selectedTool = it
+                        toolArguments = "{}"
+                        toolResult = ""
+                        toolDialog = true
+                    },
+                    onCloseTool = { toolDialog = false },
+                    arguments = toolArguments,
+                    onArguments = { toolArguments = it },
+                    result = toolResult,
+                    onExecute = {
+                        try {
+                            val body = JSONObject()
+                                .put(
+                                    "name",
+                                    selectedTool.optString(
+                                        "name",
+                                        selectedTool.optString("tool_name")
+                                    )
                                 )
-                                notify(
-                                    if (response.code in 200..299) "规则提交成功"
-                                    else "规则提交失败：HTTP ${response.code}"
-                                )
-                            } catch (e: Exception) {
-                                notify(readableError(e))
+                                .put("arguments", JSONObject(toolArguments))
+                            val start = System.currentTimeMillis()
+                            call("POST", "/v1/mcp/call", body) {
+                                toolResult = it.toString(2)
+                                history = history + JSONObject()
+                                    .put("name", body.optString("name"))
+                                    .put(
+                                        "duration",
+                                        System.currentTimeMillis() - start
+                                    )
+                                    .put("success", true)
                             }
+                        } catch (e: Exception) {
+                            toolResult = e.message ?: "参数错误"
                         }
-                    }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun StatusPage(
-    state: AppState,
-    endpoint: String,
-    onCopy: () -> Unit,
-    onRefresh: () -> Unit
-) {
-    LazyColumn(
-        Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        item {
-            Text(
-                "运行状态",
-                fontSize = 27.sp,
-                fontWeight = FontWeight.Bold
-            )
-            Text(
-                "服务、模型和连接状态",
-                color = Muted,
-                fontSize = 14.sp
-            )
-        }
-
-        item {
-            Surface(
-                shape = RoundedCornerShape(18.dp),
-                color = MaterialTheme.colorScheme.surface,
-                shadowElevation = 3.dp,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(Modifier.padding(21.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            Modifier
-                                .size(10.dp)
-                                .background(
-                                    if (state.online) Green else Color(0xFFE05252),
-                                    CircleShape
-                                )
-                        )
-                        Spacer(Modifier.width(9.dp))
-                        Text(
-                            if (state.online) "正常运行" else "服务不可用",
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Spacer(Modifier.weight(1f))
-                        if (state.loading) {
-                            CircularProgressIndicator(
-                                Modifier.size(19.dp),
-                                strokeWidth = 2.dp
-                            )
-                        }
-                    }
-
-                    Spacer(Modifier.height(24.dp))
-
-                    val model = state.health.optString("model")
-                        .ifBlank { "gpt-6-mini" }
-                    val latency = state.health.optString("latency")
-                        .ifBlank { "--" }
-                    val remaining = state.health.optLong(
-                        "remaining_seconds",
-                        state.health.optLong("quota_remaining", -1)
-                    )
-
-                    StatusValue("模型", model)
-                    StatusValue("延迟", latency)
-                    StatusValue(
-                        "额度",
-                        if (remaining >= 0) "还剩 ${remaining} 秒" else "服务端未提供"
-                    )
-
-                    Spacer(Modifier.height(23.dp))
-
-                    Button(
-                        onClick = onCopy,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Green
-                        )
-                    ) {
-                        Icon(
-                            Icons.Outlined.ContentCopy,
-                            null,
-                            Modifier.size(18.dp)
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text("复制接入地址")
-                    }
-
-                    Text(
-                        endpoint,
-                        color = Muted,
-                        fontSize = 11.sp,
-                        modifier = Modifier.align(Alignment.CenterHorizontally)
-                    )
-                }
-            }
-        }
-
-        item {
-            Text(
-                "服务概览",
-                fontWeight = FontWeight.Bold,
-                fontSize = 18.sp
-            )
-        }
-
-        item {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                MiniStatusCard(
-                    "Hook",
-                    if (state.hook.optBoolean("enabled", false)) "已启用" else "状态未知",
-                    Icons.Outlined.Extension,
-                    Modifier.weight(1f)
-                )
-                MiniStatusCard(
-                    "API",
-                    if (state.online) "已连接" else "未连接",
-                    Icons.Outlined.CloudDone,
-                    Modifier.weight(1f)
-                )
-                MiniStatusCard(
-                    "今日用量",
-                    state.health.optString("today_usage")
-                        .ifBlank { "--" },
-                    Icons.Outlined.Bolt,
-                    Modifier.weight(1f)
-                )
-            }
-        }
-
-        item {
-            CardBlock {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("模型档位", fontWeight = FontWeight.Bold)
-                        Text(
-                            "${state.models.length()} 个模型",
-                            color = Muted,
-                            fontSize = 12.sp
-                        )
-                    }
-                    IconButton(onClick = onRefresh) {
-                        Icon(Icons.Outlined.Refresh, null)
-                    }
-                }
-
-                for (i in 0 until state.models.length()) {
-                    val model = state.models.optJSONObject(i)
-                    val name = model?.optString("id")
-                        ?: model?.optString("name")
-                        ?: state.models.optString(i)
-                    if (name.isNotBlank()) {
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                    },
+                    webUrl = webUrl,
+                    onWebUrl = { webUrl = it },
+                    webContent = webContent,
+                    onWebOpen = {
+                        call(
+                            "POST", "/v1/web/open",
+                            JSONObject().put("url", webUrl)
                         ) {
-                            Icon(
-                                Icons.Outlined.Memory,
-                                null,
-                                tint = Green,
-                                modifier = Modifier.size(19.dp)
+                            webContent = it.optString(
+                                "content",
+                                it.optString("text", it.toString(2))
                             )
-                            Spacer(Modifier.width(10.dp))
-                            Text(name, fontSize = 14.sp)
                         }
-                    }
-                }
-            }
-        }
+                    },
+                    history = history,
+                    onRefresh = { refreshTools() }
+                )
 
-        item {
-            state.error?.let {
-                Text(it, color = Color(0xFFE05252))
+                4 -> HookPage(
+                    status = hookStatus,
+                    events = hookEvents,
+                    report = hookReport,
+                    reportExpanded = hookReportExpanded,
+                    onToggleReport = {
+                        hookReportExpanded = !hookReportExpanded
+                    },
+                    scanning = scanning,
+                    progress = scanProgress,
+                    scanResult = scanResult,
+                    onScan = {
+                        scanning = true
+                        scanProgress = 0.05f
+                        call(
+                            "POST",
+                            "/v1/hook/discover",
+                            JSONObject().put("action", "start")
+                        ) {
+                            scanning = false
+                            scanProgress = 1f
+                            scanResult = it.toString(2)
+                            hookReport = it
+                            hookRules = it.optJSONArray("rules") ?: hookRules
+                        }
+                    },
+                    onCancelScan = {
+                        call(
+                            "POST", "/v1/hook/discover",
+                            JSONObject().put("action", "cancel")
+                        ) {
+                            scanning = false
+                        }
+                    },
+                    onSaveScan = {
+                        copyText(context, scanResult)
+                        message = "扫描结果已复制到剪贴板"
+                    },
+                    ruleClass = ruleClass,
+                    onRuleClass = { ruleClass = it },
+                    ruleMethod = ruleMethod,
+                    onRuleMethod = { ruleMethod = it },
+                    ruleMode = ruleMode,
+                    onRuleMode = { ruleMode = it },
+                    ruleParams = ruleParams,
+                    onRuleParams = { ruleParams = it },
+                    onCreateRule = {
+                        try {
+                            val params = JSONArray(ruleParams)
+                            val rule = JSONObject()
+                                .put("class_name", ruleClass)
+                                .put("method_name", ruleMethod)
+                                .put("mode", ruleMode)
+                                .put("parameter_types", params)
+                                .put("enabled", true)
+                            call("POST", "/v1/hook/config", rule) {
+                                refreshHook()
+                                ruleClass = ""
+                                ruleMethod = ""
+                            }
+                        } catch (e: Exception) {
+                            error = "参数类型必须是 JSON 数组"
+                        }
+                    },
+                    rules = hookRules,
+                    onRuleAction = { id, action ->
+                        call(
+                            "POST", "/v1/hook/config",
+                            JSONObject()
+                                .put("id", id)
+                                .put("action", action)
+                        ) { refreshHook() }
+                    },
+                    onRefresh = { refreshHook() }
+                )
             }
         }
     }
-}
 
-@Composable
-private fun StatusValue(label: String, value: String) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(vertical = 7.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(label, color = Muted, fontSize = 14.sp)
-        Spacer(Modifier.weight(1f))
-        Text(
-            value,
-            fontSize = 15.sp,
-            fontWeight = FontWeight.SemiBold
+    if (toolDialog) {
+        AlertDialog(
+            onDismissRequest = { toolDialog = false },
+            title = {
+                Text(
+                    selectedTool.optString(
+                        "name",
+                        selectedTool.optString("tool_name", "工具调用")
+                    )
+                )
+            },
+            text = {
+                Column(
+                    Modifier.verticalScroll(rememberScrollState())
+                ) {
+                    Text("参数 JSON", fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = toolArguments,
+                        onValueChange = { toolArguments = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 5,
+                        maxLines = 10
+                    )
+                    if (toolResult.isNotBlank()) {
+                        Spacer(Modifier.height(12.dp))
+                        Text("执行结果", fontWeight = FontWeight.Bold)
+                        Text(toolResult, fontSize = 11.sp)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = { 
+                    try {
+                        val body = JSONObject()
+                            .put(
+                                "name",
+                                selectedTool.optString("name")
+                            )
+                            .put("arguments", JSONObject(toolArguments))
+                        call("POST", "/v1/mcp/call", body) {
+                            toolResult = it.toString(2)
+                        }
+                    } catch (e: Exception) {
+                        toolResult = "JSON 错误：${e.message}"
+                    }
+                }) {
+                    Text("执行")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { toolDialog = false }) {
+                    Text("关闭")
+                }
+            }
         )
     }
 }
 
 @Composable
-private fun MiniStatusCard(
-    title: String,
-    value: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    modifier: Modifier = Modifier
+private fun StatusPage(
+    health: JSONObject,
+    status: JSONObject,
+    models: JSONArray,
+    loading: Boolean,
+    onRefresh: () -> Unit,
+    onCopy: () -> Unit
 ) {
-    Card(
-        modifier = modifier.height(115.dp),
-        shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        ),
-        elevation = CardDefaults.cardElevation(2.dp)
+    LazyColumn(
+        Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Column(
-            Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(9.dp)
-        ) {
-            Icon(icon, null, tint = Green, modifier = Modifier.size(21.dp))
-            Text(title, color = Muted, fontSize = 11.sp)
-            Text(
-                value,
-                fontWeight = FontWeight.Bold,
-                fontSize = 13.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+        item {
+            SectionTitle("服务概览", "SERVICE OVERVIEW")
+            SurfaceCard {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    val available = health.optBoolean(
+                        "ok",
+                        health.optBoolean(
+                            "healthy",
+                            status.optBoolean("running", false)
+                        )
+                    )
+                    StatusDot(if (available) Green else Color.Red)
+                    Spacer(Modifier.width(8.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            if (available) "服务运行正常" else "服务不可用",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 17.sp
+                        )
+                        Text(
+                            status.optString(
+                                "message",
+                                health.optString("status", "等待状态")
+                            ),
+                            color = Gray,
+                            fontSize = 12.sp
+                        )
+                    }
+                    IconButton(onClick = onRefresh) {
+                        Icon(Icons.Default.Refresh, null)
+                    }
+                }
+                HorizontalDivider(
+                    Modifier.padding(vertical = 14.dp),
+                    color = Background
+                )
+                Row(Modifier.fillMaxWidth()) {
+                    Metric(
+                        "当前模型",
+                        status.optString("model", "未指定"),
+                        Modifier.weight(1f)
+                    )
+                    Metric(
+                        "延迟",
+                        "${status.optLong("latency", 0)} ms",
+                        Modifier.weight(1f)
+                    )
+                    Metric(
+                        "额度倒计时",
+                        status.optString(
+                            "quota_countdown",
+                            status.optString("reset_in", "--")
+                        ),
+                        Modifier.weight(1f)
+                    )
+                }
+                Spacer(Modifier.height(16.dp))
+                Button(
+                    onClick = onCopy,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.ContentCopy, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("复制接入地址")
+                }
+            }
+        }
+
+        item {
+            SectionTitle("运行指标", "SYSTEM METRICS")
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                SmallMetricCard(
+                    "Hook 状态",
+                    status.optString("hook_status", "未知"),
+                    Modifier.weight(1f)
+                )
+                SmallMetricCard(
+                    "API 状态",
+                    status.optString("api_status", "未知"),
+                    Modifier.weight(1f)
+                )
+                SmallMetricCard(
+                    "今日用量",
+                    status.optString(
+                        "today_usage",
+                        status.optString("usage_today", "0")
+                    ),
+                    Modifier.weight(1f)
+                )
+            }
+        }
+
+        item {
+            SectionTitle("模型档位", "AVAILABLE MODELS")
+        }
+
+        items(models.length()) { index ->
+            val model = models.optJSONObject(index)
+            if (model != null) {
+                SurfaceCard {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            Modifier
+                                .size(36.dp)
+                                .background(
+                                    Color(0xFFE9F7F2),
+                                    RoundedCornerShape(10.dp)
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Default.AutoAwesome,
+                                null,
+                                tint = Green
+                            )
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                model.optString(
+                                    "id",
+                                    model.optString("name", "Model")
+                                ),
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                model.optString(
+                                    "description",
+                                    model.optString("tier", "模型")
+                                ),
+                                fontSize = 11.sp,
+                                color = Gray
+                            )
+                        }
+                        if (model.optBoolean("active", false)) {
+                            Text("当前", color = Green, fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            OutlinedButton(
+                onClick = onRefresh,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Default.Refresh, null)
+                Spacer(Modifier.width(6.dp))
+                Text("刷新状态与模型")
+            }
         }
     }
 }
 
 @Composable
 private fun ApiPage(
-    endpoint: String,
+    status: JSONObject,
+    config: JSONObject,
+    baseUrl: String,
+    onBaseUrl: (String) -> Unit,
     apiKey: String,
-    expanded: Boolean,
-    latency: List<LatencyPoint>,
-    onExpand: () -> Unit,
-    onEndpointChange: (String) -> Unit,
-    onKeyChange: (String) -> Unit,
+    onApiKey: (String) -> Unit,
+    lanEnabled: Boolean,
+    onLan: (Boolean) -> Unit,
+    temporaryChat: Boolean,
+    onTemporaryChat: (Boolean) -> Unit,
+    localIp: String,
+    onStart: () -> Unit,
+    onStop: () -> Unit,
     onSave: () -> Unit,
-    onCopy: (String) -> Unit,
-    onTest: () -> Unit
+    onImport: () -> Unit,
+    onCopyCommand: () -> Unit
 ) {
-    var showKey by remember { mutableStateOf(false) }
+    var port by remember(config) {
+        mutableStateOf(config.optString("port", "8080"))
+    }
+    var clientKey by remember(config) {
+        mutableStateOf(config.optString("client_api_key", apiKey))
+    }
+    var did by remember(config) {
+        mutableStateOf(config.optString("oai_did", ""))
+    }
+    var accessToken by remember(config) {
+        mutableStateOf(config.optString("access_token", ""))
+    }
+    var connectorId by remember(config) {
+        mutableStateOf(config.optString("connector_id", ""))
+    }
+    var upstreamCredential by remember(config) {
+        mutableStateOf(
+            config.optString("upstream_credential", "未配置")
+        )
+    }
+    var listenAddress by remember(config) {
+        mutableStateOf(
+            config.optString("listen_address", "0.0.0.0")
+        )
+    }
+
+    val running = status.optBoolean(
+        "running",
+        status.optString("status").equals("running", true)
+    )
 
     LazyColumn(
         Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(20.dp),
-        verticalArrangement = Arrangement.spacedBy(17.dp)
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
-            Text("API 接入", fontSize = 27.sp, fontWeight = FontWeight.Bold)
-            Text("连接配置与实际请求性能", color = Muted)
+            SectionTitle("服务状态", "SERVICE CONTROL")
+            SurfaceCard {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    StatusDot(if (running) Green else Color.Red)
+                    Spacer(Modifier.width(8.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            if (running) "正在运行" else "已停止",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 17.sp
+                        )
+                        Text(
+                            status.optString("state", "API Gateway"),
+                            color = Gray,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+                InfoLine("监听地址", listenAddress)
+                InfoLine("上游凭据", upstreamCredential)
+                InfoLine(
+                    "配置状态",
+                    if (config.length() > 0) "已加载" else "未加载"
+                )
+                InfoLine(
+                    "实际运行状态",
+                    status.optString(
+                        "runtime_status",
+                        if (running) "RUNNING" else "STOPPED"
+                    )
+                )
+                Spacer(Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(
+                        onClick = onStart,
+                        modifier = Modifier.weight(1f),
+                        enabled = !running
+                    ) {
+                        Icon(Icons.Default.PlayArrow, null)
+                        Text("启动")
+                    }
+                    OutlinedButton(
+                        onClick = onStop,
+                        modifier = Modifier.weight(1f),
+                        enabled = running
+                    ) {
+                        Icon(Icons.Default.Stop, null)
+                        Text("停止")
+                    }
+                }
+            }
         }
 
         item {
-            CardBlock {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("接入信息", fontWeight = FontWeight.Bold, fontSize = 17.sp)
-                        Text("API 地址和访问密钥", color = Muted, fontSize = 12.sp)
+            SectionTitle("连接配置", "CONNECTION SETTINGS")
+            SurfaceCard {
+                ConfigField("服务地址", baseUrl, onBaseUrl)
+                ConfigField("监听地址", listenAddress) { listenAddress = it }
+                ConfigField("端口", port) { port = it }
+                ConfigField(
+                    "客户端 API Key",
+                    clientKey,
+                    {
+                        clientKey = it
+                        onApiKey(it)
                     }
-                    IconButton(onClick = onExpand) {
+                )
+                ConfigField("oai-did", did) { did = it }
+                ConfigField("access_token", accessToken) { accessToken = it }
+                ConfigField("connector id", connectorId) {
+                    connectorId = it
+                }
+                ConfigField("上游凭据", upstreamCredential) {
+                    upstreamCredential = it
+                }
+
+                HorizontalDivider(
+                    Modifier.padding(vertical = 10.dp),
+                    color = Background
+                )
+
+                SettingSwitch(
+                    "临时对话",
+                    "不保留本地对话历史",
+                    temporaryChat,
+                    onTemporaryChat
+                )
+                SettingSwitch(
+                    "允许局域网访问",
+                    "允许同一网络内的设备连接",
+                    lanEnabled,
+                    onLan
+                )
+
+                Spacer(Modifier.height(12.dp))
+                Button(
+                    onClick = {
+                        val json = JSONObject()
+                            .put("base_url", baseUrl)
+                            .put("listen_address", listenAddress)
+                            .put("port", port.toIntOrNull() ?: 8080)
+                            .put("client_api_key", clientKey)
+                            .put("oai_did", did)
+                            .put("access_token", accessToken)
+                            .put("connector_id", connectorId)
+                            .put("upstream_credential", upstreamCredential)
+                            .put("allow_lan", lanEnabled)
+                            .put("temporary_chat", temporaryChat)
+                        onSave()
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Save, null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("保存连接配置")
+                }
+                OutlinedButton(
+                    onClick = onImport,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.FileOpen, null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("从剪贴板导入 kit.json")
+                }
+            }
+        }
+
+        item {
+            SectionTitle("OpenAI 接入地址", "ENDPOINTS")
+            SurfaceCard {
+                Text("手机本机地址", fontWeight = FontWeight.SemiBold)
+                Text(
+                    "$baseUrl/v1",
+                    color = Green,
+                    fontSize = 13.sp
+                )
+                Spacer(Modifier.height(12.dp))
+                Text("局域网地址", fontWeight = FontWeight.SemiBold)
+                Text(
+                    "http://$localIp:${port}/v1",
+                    color = Green,
+                    fontSize = 13.sp
+                )
+                Spacer(Modifier.height(12.dp))
+                Text("完整 Chat Completions 地址", fontWeight = FontWeight.SemiBold)
+                Text(
+                    "${baseUrl.trimEnd('/')}/v1/chat/completions",
+                    color = Gray,
+                    fontSize = 12.sp
+                )
+                Spacer(Modifier.height(12.dp))
+                OutlinedButton(
+                    onClick = onCopyCommand,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.ContentCopy, null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("复制测试命令")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConversationPage(
+    conversations: JSONArray,
+    selectedConversation: String,
+    chatMessages: JSONArray,
+    chatInput: String,
+    onInput: (String) -> Unit,
+    onRefresh: () -> Unit,
+    onNew: () -> Unit,
+    onSelect: (String) -> Unit,
+    onSend: () -> Unit,
+    upstreamConversations: JSONArray,
+    upstreamId: String,
+    upstreamDetail: JSONObject,
+    onUpstreamRefresh: () -> Unit,
+    onUpstreamSelect: (String) -> Unit
+) {
+    var showLocal by remember { mutableStateOf(true) }
+    var showUpstream by remember { mutableStateOf(true) }
+
+    LazyColumn(
+        Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        item {
+            SectionTitle("本地会话中心", "LOCAL CONVERSATIONS")
+            SurfaceCard {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "本地会话",
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(onClick = onRefresh) {
+                        Icon(Icons.Default.Refresh, null)
+                    }
+                    IconButton(onClick = onNew) {
+                        Icon(Icons.Default.Add, null, tint = Green)
+                    }
+                    IconButton(onClick = {
+                        showLocal = !showLocal
+                    }) {
                         Icon(
-                            if (expanded) Icons.Outlined.ExpandLess
-                            else Icons.Outlined.ExpandMore,
+                            if (showLocal) Icons.Default.ExpandLess
+                            else Icons.Default.ExpandMore,
                             null
                         )
                     }
                 }
 
-                AnimatedVisibility(expanded) {
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        FieldLabel("Base URL")
-                        AppTextField(
-                            endpoint,
-                            onEndpointChange,
-                            "http://127.0.0.1:8766"
-                        )
-
-                        FieldLabel("API Key")
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.weight(1f)) {
-                                AppTextField(
-                                    if (showKey) apiKey else "•".repeat(apiKey.length),
-                                    onKeyChange,
-                                    "sk-..."
-                                )
-                            }
-                            IconButton(onClick = { showKey = !showKey }) {
-                                Icon(
-                                    if (showKey) Icons.Outlined.VisibilityOff
-                                    else Icons.Outlined.Visibility,
-                                    null
-                                )
-                            }
-                            IconButton(onClick = { onCopy(apiKey) }) {
-                                Icon(Icons.Outlined.ContentCopy, null)
-                            }
-                        }
-
-                        Button(
-                            onClick = onSave,
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Text("保存配置")
-                        }
-                    }
-                }
-
-                OutlinedButton(
-                    onClick = onTest,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Icon(Icons.Outlined.NetworkCheck, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("测试连接并记录延迟")
-                }
-            }
-        }
-
-        item {
-            CardBlock {
-                Text("请求延迟", fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                Text(
-                    "最近 10 次实际连接测试 · 毫秒",
-                    color = Muted,
-                    fontSize = 12.sp
-                )
-                Spacer(Modifier.height(18.dp))
-
-                if (latency.isEmpty()) {
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .height(150.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            "点击测试连接，记录真实请求耗时",
-                            color = Muted,
-                            fontSize = 13.sp
-                        )
-                    }
-                } else {
-                    LatencyChart(latency)
-                }
-
-                if (latency.isNotEmpty()) {
-                    val avg = latency.map { it.millis }.average().toLong()
-                    val maxValue = latency.maxOf { it.millis }
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Metric("平均延迟", "${avg}ms")
-                        Metric("最高延迟", "${maxValue}ms")
-                        Metric("请求次数", "${latency.size}")
-                    }
-                }
-            }
-        }
-
-        item {
-            UpstreamConfig()
-        }
-    }
-}
-
-@Composable
-private fun LatencyChart(data: List<LatencyPoint>) {
-    val maxValue = max(1L, data.maxOf { it.millis })
-    Canvas(
-        Modifier
-            .fillMaxWidth()
-            .height(170.dp)
-    ) {
-        val chartBottom = size.height - 24.dp.toPx()
-        val chartTop = 8.dp.toPx()
-        val chartHeight = chartBottom - chartTop
-        val count = data.size
-        val gap = 9.dp.toPx()
-        val barWidth = (size.width - gap * (count + 1)) / count
-
-        repeat(4) { i ->
-            val y = chartTop + chartHeight * i / 3f
-            drawLine(
-                Color.Gray.copy(alpha = 0.15f),
-                Offset(0f, y),
-                Offset(size.width, y),
-                strokeWidth = 1.dp.toPx()
-            )
-        }
-
-        data.forEachIndexed { index, point ->
-            val height = chartHeight * point.millis.toFloat() / maxValue
-            val left = gap + index * (barWidth + gap)
-            val top = chartBottom - height
-
-            drawRoundRect(
-                color = Green.copy(alpha = 0.25f),
-                topLeft = Offset(left, chartTop),
-                size = androidx.compose.ui.geometry.Size(
-                    barWidth,
-                    chartHeight
-                ),
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(5.dp.toPx())
-            )
-
-            drawRoundRect(
-                color = Green,
-                topLeft = Offset(left, top),
-                size = androidx.compose.ui.geometry.Size(
-                    barWidth,
-                    height.coerceAtLeast(2.dp.toPx())
-                ),
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(5.dp.toPx())
-            )
-
-            drawLine(
-                Color.Gray.copy(alpha = 0.3f),
-                Offset(left, chartBottom),
-                Offset(left + barWidth, chartBottom),
-                strokeWidth = 1.dp.toPx()
-            )
-        }
-    }
-}
-
-@Composable
-private fun UpstreamConfig() {
-    var expanded by remember { mutableStateOf(false) }
-    var token by remember { mutableStateOf("") }
-    var did by remember { mutableStateOf("") }
-    var connector by remember { mutableStateOf("") }
-    var temporary by remember { mutableStateOf(false) }
-
-    CardBlock {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .clickable { expanded = !expanded },
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text("上游配置", fontWeight = FontWeight.Bold)
-                Text("Token、设备标识与连接器", color = Muted, fontSize = 12.sp)
-            }
-            Icon(
-                if (expanded) Icons.Outlined.ExpandLess
-                else Icons.Outlined.ExpandMore,
-                null
-            )
-        }
-
-        AnimatedVisibility(expanded) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                FieldLabel("上游 Token")
-                AppTextField(token, { token = it }, "Token")
-                FieldLabel("设备 DID")
-                AppTextField(did, { did = it }, "DID")
-                FieldLabel("Connector")
-                AppTextField(connector, { connector = it }, "Connector ID")
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("临时对话", Modifier.weight(1f))
-                    Switch(
-                        checked = temporary,
-                        onCheckedChange = { temporary = it }
+                if (showLocal) {
+                    Text(
+                        "${conversations.length()} 个会话",
+                        color = Gray,
+                        fontSize = 12.sp
                     )
+                    for (i in 0 until conversations.length()) {
+                        val item = conversations.optJSONObject(i) ?: continue
+                        val id = item.optString(
+                            "id",
+                            item.optString("conversation_id")
+                        )
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable { onSelect(id) }
+                                .background(
+                                    if (id == selectedConversation)
+                                        Color(0xFFE9F7F2)
+                                    else Color.Transparent,
+                                    RoundedCornerShape(10.dp)
+                                )
+                                .padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.ChatBubbleOutline,
+                                null,
+                                tint = Green
+                            )
+                            Spacer(Modifier.width(10.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    item.optString("title", "新对话"),
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Text(
+                                    id,
+                                    color = Gray,
+                                    fontSize = 10.sp,
+                                    maxLines = 1
+                                )
+                            }
+                            if (id == selectedConversation) {
+                                Icon(
+                                    Icons.Default.CheckCircle,
+                                    null,
+                                    tint = Green
+                                )
+                            }
+                        }
+                    }
                 }
+            }
+        }
+
+        item {
+            SectionTitle("本地消息", "CHAT")
+            SurfaceCard {
                 Text(
-                    "以上配置仅在本地编辑。后端未提供对应配置读写接口，因此不会伪造保存成功状态。",
-                    color = Muted,
+                    if (selectedConversation.isBlank())
+                        "请选择一个会话或新建对话"
+                    else "会话 ID：$selectedConversation",
+                    color = Gray,
                     fontSize = 11.sp
                 )
+                for (i in 0 until chatMessages.length()) {
+                    val item = chatMessages.optJSONObject(i) ?: continue
+                    MessageBubble(
+                        item.optString("role", "assistant"),
+                        item.optString("content", item.toString())
+                    )
+                }
+                OutlinedTextField(
+                    value = chatInput,
+                    onValueChange = onInput,
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("输入消息…") },
+                    minLines = 2,
+                    maxLines = 5
+                )
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = onSend,
+                    enabled = selectedConversation.isNotBlank() &&
+                        chatInput.isNotBlank(),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Send, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("发送消息")
+                }
+            }
+        }
+
+        item {
+            SectionTitle("ChatGPT 真实对话", "UPSTREAM CONVERSATIONS")
+            SurfaceCard {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "账号对话列表",
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(onClick = onUpstreamRefresh) {
+                        Icon(Icons.Default.Refresh, null)
+                    }
+                    IconButton(onClick = {
+                        showUpstream = !showUpstream
+                    }) {
+                        Icon(
+                            if (showUpstream) Icons.Default.ExpandLess
+                            else Icons.Default.ExpandMore,
+                            null
+                        )
+                    }
+                }
+
+                if (showUpstream) {
+                    Text(
+                        "${upstreamConversations.length()} 个账号对话",
+                        color = Gray,
+                        fontSize = 12.sp
+                    )
+                    for (i in 0 until upstreamConversations.length()) {
+                        val item = upstreamConversations.optJSONObject(i)
+                            ?: continue
+                        val id = item.optString(
+                            "id",
+                            item.optString("conversation_id")
+                        )
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable { onUpstreamSelect(id) }
+                                .padding(vertical = 9.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.Cloud,
+                                null,
+                                tint = Green
+                            )
+                            Spacer(Modifier.width(10.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    item.optString(
+                                        "title",
+                                        "ChatGPT 对话"
+                                    ),
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Text(
+                                    id,
+                                    fontSize = 10.sp,
+                                    color = Gray
+                                )
+                            }
+                            Icon(
+                                Icons.Default.ChevronRight,
+                                null,
+                                tint = Gray
+                            )
+                        }
+                        HorizontalDivider(color = Background)
+                    }
+                }
+            }
+        }
+
+        if (upstreamId.isNotBlank()) {
+            item {
+                SectionTitle("真实对话详情", "CONVERSATION DETAIL")
+                SurfaceCard {
+                    Text("ID：$upstreamId", fontSize = 11.sp, color = Gray)
+                    val messages = upstreamDetail.optJSONArray("messages")
+                        ?: upstreamDetail.optJSONObject("mapping")
+                            ?.let { mapping ->
+                                JSONArray().also { arr ->
+                                    val keys = mapping.keys()
+                                    while (keys.hasNext()) {
+                                        val node = mapping.optJSONObject(
+                                            keys.next()
+                                        ) ?: continue
+                                        val msg = node.optJSONObject("message")
+                                            ?: continue
+                                        arr.put(msg)
+                                    }
+                                }
+                            } ?: JSONArray()
+
+                    for (i in 0 until messages.length()) {
+                        val item = messages.optJSONObject(i) ?: continue
+                        val author = item.optJSONObject("author")
+                        val content = item.optJSONObject("content")
+                        val parts = content?.optJSONArray("parts")
+                        val text = if (parts != null) {
+                            (0 until parts.length()).joinToString("\n") {
+                                parts.optString(it)
+                            }
+                        } else {
+                            item.optString(
+                                "content",
+                                content?.toString() ?: item.toString()
+                            )
+                        }
+                        MessageBubble(
+                            author?.optString("role", "assistant")
+                                ?: item.optString("role", "assistant"),
+                            text
+                        )
+                        InfoLine(
+                            "模型",
+                            item.optString(
+                                "model",
+                                item.optString("model_slug", "--")
+                            )
+                        )
+                        InfoLine(
+                            "思考时长",
+                            item.optString(
+                                "thinking_duration",
+                                item.optString("duration", "--")
+                            )
+                        )
+                        val metadata = item.optJSONObject("metadata")
+                        if (metadata != null &&
+                            (metadata.has("tool") ||
+                                metadata.has("tool_name") ||
+                                metadata.has("tool_calls"))
+                        ) {
+                            Text(
+                                "⚙ 工具调用：${metadata.optString("tool_name", metadata.toString())}",
+                                color = Green,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -1127,459 +1427,218 @@ private fun UpstreamConfig() {
 
 @Composable
 private fun ToolsPage(
-    tools: List<ToolItem>,
-    history: List<ToolCallRecord>,
-    backend: Backend,
-    onCall: (String, JSONObject) -> Unit,
-    onReadWeb: suspend (String) -> ToolCallRecord,
-    onReload: () -> Unit
+    tools: JSONArray,
+    search: String,
+    onSearch: (String) -> Unit,
+    selectedTool: JSONObject,
+    dialog: Boolean,
+    onOpenTool: (JSONObject) -> Unit,
+    onCloseTool: () -> Unit,
+    arguments: String,
+    onArguments: (String) -> Unit,
+    result: String,
+    onExecute: () -> Unit,
+    webUrl: String,
+    onWebUrl: (String) -> Unit,
+    webContent: String,
+    onWebOpen: () -> Unit,
+    history: List<JSONObject>,
+    onRefresh: () -> Unit
 ) {
-    var subTab by remember { mutableIntStateOf(0) }
-
-    Column(Modifier.fillMaxSize()) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            listOf("工具列表", "网页读取", "调用历史").forEachIndexed { index, title ->
-                FilterChip(
-                    selected = subTab == index,
-                    onClick = { subTab = index },
-                    label = { Text(title) },
-                    shape = RoundedCornerShape(12.dp)
-                )
-            }
-        }
-
-        when (subTab) {
-            0 -> ToolListPage(tools, onCall, onReload)
-            1 -> WebReaderPage(onReadWeb)
-            2 -> ToolHistoryPage(history)
-        }
-    }
-}
-
-@Composable
-private fun ToolListPage(
-    tools: List<ToolItem>,
-    onCall: (String, JSONObject) -> Unit,
-    onReload: () -> Unit
-) {
-    var search by remember { mutableStateOf("") }
-    var selected by remember { mutableStateOf<ToolItem?>(null) }
-
-    val filtered = tools.filter {
-        it.name.contains(search, true) ||
-            it.group.contains(search, true) ||
-            it.description.contains(search, true)
+    val filtered = (0 until tools.length()).mapNotNull {
+        tools.optJSONObject(it)
+    }.filter {
+        it.toString().contains(search, ignoreCase = true)
     }
 
-    Column(Modifier.fillMaxSize()) {
-        Row(
-            Modifier.padding(horizontal = 20.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(Modifier.weight(1f)) {
-                AppTextField(search, { search = it }, "搜索工具名称或描述")
-            }
-            IconButton(onClick = onReload) {
-                Icon(Icons.Outlined.Refresh, null)
-            }
-        }
-
-        Row(
-            Modifier.padding(horizontal = 22.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                "${filtered.size} 个工具",
-                color = Muted,
-                fontSize = 12.sp
-            )
-            Spacer(Modifier.weight(1f))
-            Text("来自 MCP", color = Muted, fontSize = 12.sp)
-        }
-
-        LazyColumn(
-            contentPadding = PaddingValues(
-                start = 20.dp,
-                end = 20.dp,
-                bottom = 24.dp
-            ),
-            verticalArrangement = Arrangement.spacedBy(9.dp)
-        ) {
-            val groups = filtered.groupBy { it.group }
-            groups.forEach { (group, itemsInGroup) ->
-                item(key = "group_$group") {
-                    Row(
-                        Modifier.padding(top = 10.dp, bottom = 5.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(group, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                        Spacer(Modifier.weight(1f))
-                        Text("${itemsInGroup.size}", color = Muted)
-                    }
-                }
-
-                items(itemsInGroup, key = { it.name }) { tool ->
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { selected = tool },
-                        shape = RoundedCornerShape(13.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surface
-                        ),
-                        elevation = CardDefaults.cardElevation(1.dp)
-                    ) {
-                        Row(
-                            Modifier.padding(15.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    tool.name,
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = 14.sp
-                                )
-                                if (tool.description.isNotBlank()) {
-                                    Text(
-                                        tool.description,
-                                        color = Muted,
-                                        fontSize = 12.sp,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
-                            Icon(
-                                Icons.Outlined.ChevronRight,
-                                null,
-                                tint = Muted
-                            )
-                        }
-                    }
-                }
-            }
-
-            if (filtered.isEmpty()) {
-                item {
-                    Text(
-                        if (tools.isEmpty()) "正在等待后端工具数据，或接口暂不可用"
-                        else "没有匹配的工具",
-                        color = Muted,
-                        modifier = Modifier.padding(24.dp)
-                    )
-                }
-            }
-        }
-    }
-
-    selected?.let { tool ->
-        ToolCallDialog(
-            tool = tool,
-            onDismiss = { selected = null },
-            onCall = { args ->
-                onCall(tool.name, args)
-                selected = null
-            }
+    val groups = filtered.groupBy {
+        it.optString(
+            "namespace",
+            it.optString("server", "default")
         )
     }
-}
 
-@Composable
-private fun ToolCallDialog(
-    tool: ToolItem,
-    onDismiss: () -> Unit,
-    onCall: (JSONObject) -> Unit
-) {
-    var arguments by remember {
-        mutableStateOf(
-            tool.schema.optJSONObject("properties")?.let { properties ->
-                val obj = JSONObject()
-                for (key in properties.keys()) {
-                    val property = properties.optJSONObject(key)
-                    if (property?.has("default") == true) {
-                        obj.put(key, property.opt("default"))
-                    }
-                }
-                obj.toString(2)
-            } ?: "{}"
-        )
-    }
-    var error by remember { mutableStateOf<String?>(null) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Text(tool.name, fontWeight = FontWeight.Bold)
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    tool.description.ifBlank { "MCP 工具调用" },
-                    color = Muted,
-                    fontSize = 13.sp
-                )
-                Text("Arguments · JSON", fontWeight = FontWeight.SemiBold)
-                OutlinedTextField(
-                    value = arguments,
-                    onValueChange = {
-                        arguments = it
-                        error = null
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    minLines = 5,
-                    maxLines = 9,
-                    shape = RoundedCornerShape(12.dp)
-                )
-                error?.let {
-                    Text(it, color = Color.Red, fontSize = 12.sp)
-                }
-            }
-        },
-        confirmButton = {
-            Button(onClick = {
-                try {
-                    onCall(JSONObject(arguments))
-                } catch (_: Exception) {
-                    error = "JSON 格式错误，请检查参数"
-                }
-            }) {
-                Text("执行调用")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("取消")
-            }
-        }
-    )
-}
-
-@Composable
-private fun WebReaderPage(
-    onReadWeb: suspend (String) -> ToolCallRecord
-) {
-    var url by remember { mutableStateOf("") }
-    var loading by remember { mutableStateOf(false) }
-    var result by remember { mutableStateOf<ToolCallRecord?>(null) }
-    var readerText by remember { mutableStateOf("") }
-    val scope = rememberCoroutineScope()
-
-    Column(
-        Modifier
-            .fillMaxSize()
-            .padding(horizontal = 20.dp)
-    ) {
-        Text("网页读取器", fontSize = 23.sp, fontWeight = FontWeight.Bold)
-        Text(
-            "通过后端读取网页内容并提取正文",
-            color = Muted,
-            fontSize = 13.sp
-        )
-
-        Spacer(Modifier.height(17.dp))
-
-        AppTextField(
-            url,
-            { url = it },
-            "https://example.com"
-        )
-
-        Spacer(Modifier.height(10.dp))
-
-        Button(
-            onClick = {
-                if (url.isBlank()) return@Button
-                loading = true
-                result = null
-                readerText = ""
-                scope.launch {
-                    val record = onReadWeb(url.trim())
-                    result = record
-                    loading = false
-                    if (record.success) {
-                        readerText = extractReadableText(record.result)
-                    }
-                }
-            },
-            enabled = !loading && url.startsWith("https://") || (
-                !loading && url.startsWith("http://")
-            ),
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp)
-        ) {
-            if (loading) {
-                CircularProgressIndicator(
-                    Modifier.size(18.dp),
-                    color = Color.White,
-                    strokeWidth = 2.dp
-                )
-            } else {
-                Icon(Icons.Outlined.Language, null)
-                Spacer(Modifier.width(8.dp))
-                Text("读取网页")
-            }
-        }
-
-        result?.let {
-            Spacer(Modifier.height(13.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier
-                        .size(8.dp)
-                        .background(
-                            if (it.success) Green else Color.Red,
-                            CircleShape
-                        )
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    if (it.success) "读取成功 · ${it.elapsed}ms" else "读取失败",
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 13.sp
-                )
-            }
-        }
-
-        Spacer(Modifier.height(14.dp))
-
-        if (readerText.isNotBlank()) {
-            Text(
-                "正文",
-                fontWeight = FontWeight.Bold,
-                fontSize = 18.sp
-            )
-            Spacer(Modifier.height(10.dp))
-            Surface(
-                modifier = Modifier.weight(1f),
-                color = MaterialTheme.colorScheme.surface,
-                shape = RoundedCornerShape(14.dp),
-                shadowElevation = 2.dp
-            ) {
-                LazyColumn(
-                    contentPadding = PaddingValues(13.dp)
-                ) {
-                    val lines = readerText.lines()
-                    items(lines.size) { index ->
-                        Row(
-                            Modifier.padding(vertical = 3.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            Text(
-                                "${index + 1}",
-                                color = Muted,
-                                fontSize = 11.sp,
-                                modifier = Modifier.width(25.dp)
-                            )
-                            Text(
-                                lines[index],
-                                fontSize = 14.sp,
-                                lineHeight = 23.sp,
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-                    }
-                }
-            }
-        } else if (result != null) {
-            Text(
-                result!!.result,
-                fontSize = 12.sp,
-                color = Muted
-            )
-        } else {
-            Box(
-                Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        Icons.Outlined.Article,
-                        null,
-                        tint = Muted,
-                        modifier = Modifier.size(40.dp)
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    Text("输入网址开始阅读", color = Muted)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ToolHistoryPage(history: List<ToolCallRecord>) {
     LazyColumn(
         Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(20.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
-            Text("调用历史", fontSize = 23.sp, fontWeight = FontWeight.Bold)
-            Text("本次运行期间的工具调用记录", color = Muted, fontSize = 13.sp)
-        }
-
-        if (history.isEmpty()) {
-            item {
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(200.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("还没有工具调用记录", color = Muted)
+            SectionTitle("工具目录", "MCP TOOL DIRECTORY")
+            SurfaceCard {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "${filtered.size} 个工具",
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(onClick = onRefresh) {
+                        Icon(Icons.Default.Refresh, null)
+                    }
                 }
+                OutlinedTextField(
+                    value = search,
+                    onValueChange = onSearch,
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    placeholder = { Text("搜索工具名称或命名空间") },
+                    leadingIcon = {
+                        Icon(Icons.Default.Search, null)
+                    }
+                )
             }
         }
 
-        items(history) { record ->
-            var expanded by remember { mutableStateOf(false) }
-            Card(
-                shape = RoundedCornerShape(13.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                ),
-                elevation = CardDefaults.cardElevation(1.dp)
-            ) {
-                Column(
-                    Modifier
-                        .fillMaxWidth()
-                        .clickable { expanded = !expanded }
-                        .padding(15.dp)
+        groups.forEach { (namespace, entries) ->
+            item(key = "group_$namespace") {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        namespace,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "${entries.size}",
+                        color = Green,
+                        fontSize = 12.sp
+                    )
+                }
+            }
+
+            items(entries) { tool ->
+                SurfaceCard(
+                    modifier = Modifier.clickable {
+                        onOpenTool(tool)
+                    }
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
                             Modifier
-                                .size(9.dp)
+                                .size(38.dp)
                                 .background(
-                                    if (record.success) Green else Color.Red,
-                                    CircleShape
-                                )
-                        )
-                        Spacer(Modifier.width(9.dp))
-                        Text(
-                            record.name,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Text("${record.elapsed}ms", color = Muted, fontSize = 12.sp)
-                    }
-
-                    AnimatedVisibility(expanded) {
-                        Column {
-                            Spacer(Modifier.height(10.dp))
-                            Text(
-                                record.result,
-                                fontSize = 12.sp,
-                                lineHeight = 18.sp
+                                    Color(0xFFE9F7F2),
+                                    RoundedCornerShape(10.dp)
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Default.Extension,
+                                null,
+                                tint = Green
                             )
                         }
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                tool.optString(
+                                    "name",
+                                    tool.optString("tool_name")
+                                ),
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                tool.optString(
+                                    "description",
+                                    tool.optString("title", "")
+                                ),
+                                color = Gray,
+                                fontSize = 11.sp,
+                                maxLines = 2
+                            )
+                        }
+                        Icon(
+                            Icons.Default.ChevronRight,
+                            null,
+                            tint = Gray
+                        )
+                    }
+                }
+            }
+        }
+
+        item {
+            SectionTitle("网页读取器", "WEB READER")
+            SurfaceCard {
+                OutlinedTextField(
+                    value = webUrl,
+                    onValueChange = onWebUrl,
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    placeholder = { Text("https://example.com") },
+                    leadingIcon = {
+                        Icon(Icons.Default.Language, null)
+                    }
+                )
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = onWebOpen,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = webUrl.startsWith("http")
+                ) {
+                    Icon(Icons.Default.Download, null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("读取网页")
+                }
+                if (webContent.isNotBlank()) {
+                    HorizontalDivider(
+                        Modifier.padding(vertical = 10.dp),
+                        color = Background
+                    )
+                    Text(
+                        "网页正文",
+                        fontWeight = FontWeight.Bold
+                    )
+                    webContent.lines().forEachIndexed { index, line ->
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Text(
+                                "${index + 1}",
+                                color = Gray,
+                                fontSize = 10.sp
+                            )
+                            Text(line, fontSize = 11.sp)
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            SectionTitle("调用历史", "CALL HISTORY")
+            SurfaceCard {
+                if (history.isEmpty()) {
+                    Text("暂无调用记录", color = Gray, fontSize = 12.sp)
+                } else {
+                    history.reversed().forEach { item ->
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    item.optString("name"),
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Text(
+                                    "${item.optLong("duration")} ms",
+                                    color = Gray,
+                                    fontSize = 11.sp
+                                )
+                            }
+                            Text(
+                                if (item.optBoolean("success")) "成功" else "失败",
+                                color = if (item.optBoolean("success"))
+                                    Green else Color.Red,
+                                fontSize = 12.sp
+                            )
+                        }
+                        HorizontalDivider(color = Background)
                     }
                 }
             }
@@ -1589,234 +1648,348 @@ private fun ToolHistoryPage(history: List<ToolCallRecord>) {
 
 @Composable
 private fun HookPage(
-    backend: Backend,
-    hook: JSONObject,
+    status: JSONObject,
     events: JSONArray,
-    onRefresh: () -> Unit,
-    onSaveRule: (JSONObject) -> Unit
+    report: JSONObject,
+    reportExpanded: Boolean,
+    onToggleReport: () -> Unit,
+    scanning: Boolean,
+    progress: Float,
+    scanResult: String,
+    onScan: () -> Unit,
+    onCancelScan: () -> Unit,
+    onSaveScan: () -> Unit,
+    ruleClass: String,
+    onRuleClass: (String) -> Unit,
+    ruleMethod: String,
+    onRuleMethod: (String) -> Unit,
+    ruleMode: String,
+    onRuleMode: (String) -> Unit,
+    ruleParams: String,
+    onRuleParams: (String) -> Unit,
+    onCreateRule: () -> Unit,
+    rules: JSONArray,
+    onRuleAction: (String, String) -> Unit,
+    onRefresh: () -> Unit
 ) {
-    var className by remember { mutableStateOf("") }
-    var methodName by remember { mutableStateOf("") }
-    var mode by remember { mutableStateOf("BEFORE") }
-    var parameters by remember { mutableStateOf("[]") }
-    var rawExpanded by remember { mutableStateOf(false) }
-    var eventExpanded by remember { mutableStateOf(false) }
-
-    val enabled = hook.optBoolean("enabled", false)
-    val ruleCount = hook.optInt(
-        "rule_count",
-        hook.optInt("rules_count", 0)
-    )
-    val lastApplied = hook.optString("last_applied")
-        .ifBlank { hook.optString("updated_at") }
-        .ifBlank { "暂无记录" }
-
     LazyColumn(
         Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(20.dp),
-        verticalArrangement = Arrangement.spacedBy(15.dp)
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
-            Text("Hook 管理", fontSize = 27.sp, fontWeight = FontWeight.Bold)
-            Text("动态规则与运行观察", color = Muted, fontSize = 13.sp)
+            SectionTitle("Hook 运行状态", "RUNTIME STATUS")
+            SurfaceCard {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    StatusDot(
+                        if (status.optBoolean("running", true))
+                            Green else Color.Red
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        status.optString("status", "Hook Runtime"),
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(onClick = onRefresh) {
+                        Icon(Icons.Default.Refresh, null)
+                    }
+                }
+                InfoLine(
+                    "LSPosed 版本",
+                    status.optString("lsposed_version", "--")
+                )
+                InfoLine(
+                    "API 版本",
+                    status.optString("api_version", "--")
+                )
+                InfoLine(
+                    "已安装方法数",
+                    status.optString(
+                        "installed_methods",
+                        status.optString("method_count", "0")
+                    )
+                )
+                InfoLine(
+                    "已加载类数",
+                    status.optString("class_count", "--")
+                )
+            }
         }
 
         item {
-            CardBlock {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        Modifier
-                            .size(10.dp)
-                            .background(
-                                if (enabled) Green else Color(0xFFE0A43C),
-                                CircleShape
-                            )
+            SectionTitle("类扫描", "CLASS DISCOVERY")
+            SurfaceCard {
+                Text(
+                    "扫描运行时类与可用方法",
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(Modifier.height(12.dp))
+                if (scanning) {
+                    LinearProgressIndicator(
+                        progress = { progress.coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth(),
+                        color = Green
                     )
-                    Spacer(Modifier.width(9.dp))
+                    Spacer(Modifier.height(6.dp))
                     Text(
-                        if (enabled) "Hook 正在运行" else "Hook 未启用或状态未知",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 17.sp
+                        "${(progress * 100).toInt()}%",
+                        color = Gray,
+                        fontSize = 11.sp
                     )
-                    Spacer(Modifier.weight(1f))
-                    IconButton(onClick = onRefresh) {
-                        Icon(Icons.Outlined.Refresh, null)
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = onScan,
+                        modifier = Modifier.weight(1f),
+                        enabled = !scanning
+                    ) {
+                        Icon(Icons.Default.Search, null)
+                        Text("开始扫描")
+                    }
+                    OutlinedButton(
+                        onClick = onCancelScan,
+                        modifier = Modifier.weight(1f),
+                        enabled = scanning
+                    ) {
+                        Icon(Icons.Default.Cancel, null)
+                        Text("取消")
                     }
                 }
-
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                OutlinedButton(
+                    onClick = onSaveScan,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = scanResult.isNotBlank()
                 ) {
-                    Metric("动态规则", "$ruleCount 条")
-                    Metric("最近应用", lastApplied)
+                    Icon(Icons.Default.SaveAlt, null)
+                    Text("导出扫描结果")
+                }
+                if (scanResult.isNotBlank()) {
+                    Text(
+                        scanResult,
+                        fontSize = 10.sp,
+                        color = Gray
+                    )
                 }
             }
         }
 
         item {
-            CardBlock {
-                Text("创建动态规则", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            SectionTitle("运行时观察报告", "RUNTIME OBSERVATION")
+            SurfaceCard {
                 Text(
-                    "提交规则到 Hook 后端",
-                    color = Muted,
+                    report.optString(
+                        "summary",
+                        report.optString(
+                            "human_summary",
+                            "运行时报告"
+                        )
+                    ),
+                    fontSize = 13.sp
+                )
+                TextButton(onClick = onToggleReport) {
+                    Icon(
+                        if (reportExpanded) Icons.Default.ExpandLess
+                        else Icons.Default.ExpandMore,
+                        null
+                    )
+                    Text(
+                        if (reportExpanded) "收起原始 JSON"
+                        else "查看原始 JSON"
+                    )
+                }
+                if (reportExpanded) {
+                    Text(
+                        report.toString(2),
+                        fontSize = 10.sp,
+                        color = Gray
+                    )
+                }
+            }
+        }
+
+        item {
+            SectionTitle("动态规则创建", "DYNAMIC RULES")
+            SurfaceCard {
+                ConfigField("类名", ruleClass, onRuleClass)
+                ConfigField("方法名", ruleMethod, onRuleMethod)
+                Text(
+                    "匹配模式",
+                    fontWeight = FontWeight.SemiBold,
                     fontSize = 12.sp
                 )
-
-                FieldLabel("类名")
-                AppTextField(className, { className = it }, "com.example.Target")
-
-                FieldLabel("方法名")
-                AppTextField(methodName, { methodName = it }, "targetMethod")
-
-                FieldLabel("Hook 模式")
                 var expanded by remember { mutableStateOf(false) }
-
-                ExposedDropdownMenuBox(
-                    expanded = expanded,
-                    onExpandedChange = { expanded = !expanded }
-                ) {
-                    OutlinedTextField(
-                        value = mode,
-                        onValueChange = {},
-                        readOnly = true,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .menuAnchor(),
-                        trailingIcon = {
-                            ExposedDropdownMenuDefaults.TrailingIcon(expanded)
-                        },
-                        shape = RoundedCornerShape(12.dp)
-                    )
-                    ExposedDropdownMenu(
+                Box {
+                    OutlinedButton(
+                        onClick = { expanded = true },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(ruleMode)
+                        Spacer(Modifier.weight(1f))
+                        Icon(Icons.Default.ArrowDropDown, null)
+                    }
+                    DropdownMenu(
                         expanded = expanded,
                         onDismissRequest = { expanded = false }
                     ) {
-                        listOf("BEFORE", "AFTER", "REPLACE").forEach {
+                        listOf(
+                            "BEFORE",
+                            "AFTER",
+                            "REPLACE",
+                            "HOOK",
+                            "ALL"
+                        ).forEach { mode ->
                             DropdownMenuItem(
-                                text = { Text(it) },
+                                text = { Text(mode) },
                                 onClick = {
-                                    mode = it
+                                    onRuleMode(mode)
                                     expanded = false
                                 }
                             )
                         }
                     }
                 }
-
-                FieldLabel("参数类型（JSON 数组）")
-                AppTextField(
-                    parameters,
-                    { parameters = it },
-                    """["java.lang.String"]"""
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "参数类型 JSON 数组",
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 12.sp
                 )
-
-                Button(
-                    onClick = {
-                        try {
-                            val args = JSONArray(parameters)
-                            onSaveRule(
-                                JSONObject().apply {
-                                    put("class_name", className)
-                                    put("className", className)
-                                    put("method_name", methodName)
-                                    put("methodName", methodName)
-                                    put("mode", mode)
-                                    put("parameters", args)
-                                }
-                            )
-                        } catch (_: Exception) {
-                            // 参数不是合法 JSON 时静默忽略，输入框保持原样
-                        }
-                    },
-                    enabled = className.isNotBlank() && methodName.isNotBlank(),
+                OutlinedTextField(
+                    value = ruleParams,
+                    onValueChange = onRuleParams,
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
+                    minLines = 3,
+                    maxLines = 6
+                )
+                Spacer(Modifier.height(10.dp))
+                Button(
+                    onClick = onCreateRule,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = ruleClass.isNotBlank() &&
+                        ruleMethod.isNotBlank()
                 ) {
-                    Icon(Icons.Outlined.Add, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("提交 Hook 规则")
+                    Icon(Icons.Default.Add, null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("提交动态规则")
                 }
             }
         }
 
         item {
-            CardBlock {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .clickable { eventExpanded = !eventExpanded },
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text("最近观察事件", fontWeight = FontWeight.Bold)
-                        Text("${events.length()} 条事件", color = Muted, fontSize = 12.sp)
-                    }
-                    Icon(
-                        if (eventExpanded) Icons.Outlined.ExpandLess
-                        else Icons.Outlined.ExpandMore,
-                        null
-                    )
+            SectionTitle("规则列表", "ACTIVE RULES")
+            SurfaceCard {
+                if (rules.length() == 0) {
+                    Text("暂无规则", color = Gray, fontSize = 12.sp)
                 }
-
-                AnimatedVisibility(eventExpanded) {
+                for (i in 0 until rules.length()) {
+                    val rule = rules.optJSONObject(i) ?: continue
+                    val id = rule.optString(
+                        "id",
+                        rule.optString("rule_id", i.toString())
+                    )
+                    val enabled = rule.optBoolean("enabled", true)
                     Column {
-                        for (i in 0 until events.length()) {
-                            val event = events.optJSONObject(i) ?: continue
-                            HorizontalDivider(
-                                color = MaterialTheme.colorScheme.surfaceVariant
-                            )
-                            Column(Modifier.padding(vertical = 10.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f)) {
                                 Text(
-                                    event.optString("method")
-                                        .ifBlank {
-                                            event.optString("name")
-                                        },
+                                    rule.optString("class_name"),
                                     fontWeight = FontWeight.SemiBold
                                 )
                                 Text(
-                                    event.optString("class")
-                                        .ifBlank { event.optString("class_name") },
-                                    color = Muted,
-                                    fontSize = 12.sp
-                                )
-                                Text(
-                                    event.optString("timestamp"),
-                                    color = Muted,
+                                    rule.optString("method_name"),
+                                    color = Gray,
                                     fontSize = 11.sp
                                 )
+                                Text(
+                                    rule.optString("mode"),
+                                    color = Green,
+                                    fontSize = 10.sp
+                                )
+                            }
+                            Switch(
+                                checked = enabled,
+                                onCheckedChange = {
+                                    onRuleAction(
+                                        id,
+                                        if (it) "enable" else "disable"
+                                    )
+                                }
+                            )
+                        }
+                        Row(
+                            horizontalArrangement = Arrangement.End,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            TextButton(
+                                onClick = {
+                                    onRuleAction(id, "delete")
+                                }
+                            ) {
+                                Icon(
+                                    Icons.Default.Delete,
+                                    null,
+                                    tint = Color.Red
+                                )
+                                Text("删除", color = Color.Red)
                             }
                         }
+                        HorizontalDivider(color = Background)
                     }
                 }
             }
         }
 
         item {
-            CardBlock {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .clickable { rawExpanded = !rawExpanded },
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("原始观察报告 JSON", Modifier.weight(1f), fontWeight = FontWeight.Bold)
-                    Icon(
-                        if (rawExpanded) Icons.Outlined.ExpandLess
-                        else Icons.Outlined.ExpandMore,
-                        null
-                    )
+            SectionTitle("最近事件流", "RECENT EVENTS")
+            SurfaceCard {
+                if (events.length() == 0) {
+                    Text("暂无 Hook 事件", color = Gray, fontSize = 12.sp)
                 }
-
-                AnimatedVisibility(rawExpanded) {
-                    Column {
-                        Text(
-                            hook.toString(2),
-                            fontSize = 11.sp,
-                            lineHeight = 17.sp,
-                            color = Muted
-                        )
+                for (i in 0 until events.length()) {
+                    val event = events.optJSONObject(i) ?: continue
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        StatusDot(Green)
+                        Spacer(Modifier.width(8.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                event.optString(
+                                    "name",
+                                    event.optString(
+                                        "method",
+                                        event.optString("type", "Hook Event")
+                                    )
+                                ),
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 12.sp
+                            )
+                            Text(
+                                event.optString(
+                                    "timestamp",
+                                    event.optString("time", "")
+                                ),
+                                color = Gray,
+                                fontSize = 10.sp
+                            )
+                            Text(
+                                event.optString(
+                                    "message",
+                                    event.optString("class_name", "")
+                                ),
+                                color = Gray,
+                                fontSize = 11.sp
+                            )
+                        }
                     }
+                    HorizontalDivider(
+                        Modifier.padding(vertical = 8.dp),
+                        color = Background
+                    )
                 }
             }
         }
@@ -1824,35 +1997,65 @@ private fun HookPage(
 }
 
 @Composable
-private fun CardBlock(
+private fun SectionTitle(
+    title: String,
+    subtitle: String
+) {
+    Column(Modifier.padding(top = 4.dp, bottom = 2.dp)) {
+        Text(
+            title,
+            fontSize = 19.sp,
+            fontWeight = FontWeight.Bold,
+            color = Dark
+        )
+        Text(
+            subtitle,
+            fontSize = 9.sp,
+            letterSpacing = 1.4.sp,
+            color = Gray
+        )
+    }
+}
+
+@Composable
+private fun SurfaceCard(
+    modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .animateContentSize(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        ),
-        elevation = CardDefaults.cardElevation(2.dp)
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = CardColor,
+        shape = RoundedCornerShape(14.dp),
+        shadowElevation = 0.dp
     ) {
         Column(
-            Modifier.padding(17.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            Modifier.padding(16.dp),
             content = content
         )
     }
 }
 
 @Composable
-private fun Metric(label: String, value: String) {
-    Column {
-        Text(label, color = Muted, fontSize = 11.sp)
+private fun StatusDot(color: Color) {
+    Box(
+        Modifier
+            .size(9.dp)
+            .background(color, CircleShape)
+    )
+}
+
+@Composable
+private fun Metric(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier.padding(end = 4.dp)) {
+        Text(label, color = Gray, fontSize = 10.sp)
         Text(
             value,
-            fontSize = 15.sp,
             fontWeight = FontWeight.Bold,
+            fontSize = 13.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
@@ -1860,105 +2063,153 @@ private fun Metric(label: String, value: String) {
 }
 
 @Composable
-private fun FieldLabel(value: String) {
-    Text(
-        value,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 13.sp
-    )
+private fun SmallMetricCard(
+    title: String,
+    value: String,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier,
+        color = Color.White,
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(Modifier.padding(10.dp)) {
+            Text(
+                title,
+                color = Gray,
+                fontSize = 10.sp
+            )
+            Spacer(Modifier.height(7.dp))
+            Text(
+                value,
+                fontWeight = FontWeight.Bold,
+                fontSize = 12.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
 }
 
 @Composable
-private fun AppTextField(
-    value: String,
-    onValueChange: (String) -> Unit,
-    placeholder: String,
-    modifier: Modifier = Modifier
+private fun InfoLine(
+    label: String,
+    value: String
 ) {
-    OutlinedTextField(
-        value = value,
-        onValueChange = onValueChange,
-        modifier = modifier.fillMaxWidth(),
-        placeholder = {
-            Text(placeholder, color = Muted, fontSize = 13.sp)
-        },
-        singleLine = true,
-        shape = RoundedCornerShape(12.dp),
-        textStyle = MaterialTheme.typography.bodyMedium
-    )
-}
-
-private fun JSONObjectOrEmpty(value: String): JSONObject =
-    try {
-        JSONObject(value)
-    } catch (_: Exception) {
-        JSONObject()
-    }
-
-private fun extractArray(
-    value: String,
-    vararg keys: String
-): JSONArray {
-    return try {
-        val root = JSONObject(value)
-        for (key in keys) {
-            val array = root.optJSONArray(key)
-            if (array != null) return array
-        }
-        JSONArray()
-    } catch (_: Exception) {
-        try {
-            JSONArray(value)
-        } catch (_: Exception) {
-            JSONArray()
-        }
-    }
-}
-
-private fun extractReadableText(raw: String): String {
-    return try {
-        val json = JSONObject(raw)
-        val candidates = listOf(
-            "content",
-            "text",
-            "markdown",
-            "body",
-            "article",
-            "readable_text"
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            label,
+            color = Gray,
+            fontSize = 12.sp,
+            modifier = Modifier.weight(1f)
         )
-        for (key in candidates) {
-            val value = json.optString(key)
-            if (value.isNotBlank() && value != "null") return value
-        }
+        Text(
+            value,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 2
+        )
+    }
+}
 
-        val result = json.optJSONObject("result")
-        if (result != null) {
-            for (key in candidates) {
-                val value = result.optString(key)
-                if (value.isNotBlank() && value != "null") return value
+@Composable
+private fun ConfigField(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit
+) {
+    Column(Modifier.padding(bottom = 10.dp)) {
+        Text(
+            label,
+            fontWeight = FontWeight.Medium,
+            fontSize = 12.sp
+        )
+        Spacer(Modifier.height(5.dp))
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            textStyle = androidx.compose.ui.text.TextStyle(
+                fontSize = 13.sp
+            )
+        )
+    }
+}
+
+@Composable
+private fun SettingSwitch(
+    title: String,
+    description: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, fontWeight = FontWeight.Medium)
+            Text(description, color = Gray, fontSize = 11.sp)
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange
+        )
+    }
+}
+
+@Composable
+private fun MessageBubble(
+    role: String,
+    content: String
+) {
+    val user = role.equals("user", true)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        horizontalArrangement = if (user)
+            Arrangement.End else Arrangement.Start
+    ) {
+        Surface(
+            color = if (user) Color(0xFFE9F7F2) else Background,
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.widthIn(max = 310.dp)
+        ) {
+            Column(Modifier.padding(12.dp)) {
+                Text(
+                    if (user) "你" else role,
+                    fontSize = 10.sp,
+                    color = Green,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    content,
+                    fontSize = 13.sp
+                )
             }
         }
-        json.toString(2)
-    } catch (_: Exception) {
-        raw
     }
 }
 
-private fun readableError(e: Exception): String {
-    val message = e.localizedMessage ?: "未知错误"
-    return when {
-        message.contains("timeout", true) -> "连接超时，请检查服务是否运行"
-        message.contains("refused", true) -> "连接被拒绝，请检查服务地址和端口"
-        message.contains("UnknownHost", true) -> "无法解析服务器地址"
-        else -> "请求失败：$message"
-    }
-}
-
-private fun copyText(context: Context, value: String) {
+private fun copyText(
+    context: Context,
+    text: String
+) {
     val clipboard = context.getSystemService(
         Context.CLIPBOARD_SERVICE
     ) as ClipboardManager
     clipboard.setPrimaryClip(
-        ClipData.newPlainText("DSH-GPT", value)
+        ClipData.newPlainText("DSH-GPT", text)
     )
+    Toast.makeText(context, "已复制", Toast.LENGTH_SHORT).show()
 }

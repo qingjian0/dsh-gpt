@@ -167,8 +167,12 @@ object OpenAiCompat {
             return "JSON object/schema constrained output is not supported by this adapter"
         }
         if (request.optInt("n", 1) != 1) return "only n=1 is supported"
-        if (request.has("functions") || request.has("function_call") || request.has("tool_choice")) {
-            return "legacy function calling and tool_choice are not supported; use the tools array with automatic selection"
+        if (request.has("functions") || request.has("function_call")) {
+            return "legacy function calling is not supported; use the tools array"
+        }
+        val toolChoice = request.opt("tool_choice")
+        if (toolChoice != null && toolChoice != JSONObject.NULL && toolChoice != "auto") {
+            return "forced tool_choice is not supported; automatic tool selection is supported"
         }
         val modalities = request.optJSONArray("modalities")
         if (modalities != null && (0 until modalities.length()).any { modalities.optString(it) != "text" }) {
@@ -223,7 +227,7 @@ object OpenAiCompat {
         .put("unsupported", JSONArray()
             .put("image_input").put("audio_input").put("audio_output")
             .put("video_input").put("file_input")
-            .put("legacy_function_calling").put("tool_choice")
+            .put("legacy_function_calling").put("forced_tool_choice")
             .put("json_schema_constrained_output"))
         .put("upstream", "ChatGPT Android conversation backend")
         .toString()

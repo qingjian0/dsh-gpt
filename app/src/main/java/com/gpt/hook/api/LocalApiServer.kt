@@ -727,6 +727,11 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                 } else {
                     val full = textOut.toString()
                     val calls = if (ToolBridge.hasTools(req)) ToolBridge.parseAll(full) else emptyList()
+                    val toolError = ToolBridge.validateCalls(req, calls, full)
+                    if (toolError != null) {
+                        json(out, 502, err("invalid_tool_call", toolError), responseHeaders)
+                        return
+                    }
                     if (calls.isNotEmpty()) {
                         if (deferredToolStream) {
                             writeHead(out, 200, "text/event-stream; charset=utf-8", null, responseHeaders)
@@ -771,6 +776,11 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                 }
                 val full = textOut.toString()
                 val calls = if (ToolBridge.hasTools(req)) ToolBridge.parseAll(full) else emptyList()
+                val toolError = ToolBridge.validateCalls(req, calls, full)
+                if (toolError != null) {
+                    json(out, 502, err("invalid_tool_call", toolError), responseHeaders)
+                    return
+                }
                 json(out, 200,
                     if (responsesMode) OpenAiCompat.responseObject(id, model, full).toString()
                     else OpenAiCompat.completion(id, model, full, 0, calls),

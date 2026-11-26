@@ -38,7 +38,8 @@ object ToolBridge {
             if (name.isBlank()) continue
             sb.append("- ").append(name).append(": ")
             sb.append(fn.optString("description").replace("\n", " ").take(160))
-            val props = fn.optJSONObject("parameters")?.optJSONObject("properties")
+            val parameters = fn.optJSONObject("parameters") ?: JSONObject().put("type", "object")
+            val props = parameters.optJSONObject("properties")
             if (props != null && props.length() > 0) {
                 val keys = props.keys()
                 val names = ArrayList<String>()
@@ -48,6 +49,9 @@ object ToolBridge {
                 }
                 sb.append(" 参数(").append(names.joinToString(", ")).append(")")
             }
+            // Preserve required fields, nested objects, enums and additionalProperties
+            // instead of reducing a tool schema to a lossy list of property names.
+            sb.append("\n  JSON Schema: ").append(parameters.toString().take(4000))
             sb.append("\n")
         }
         sb.append("\n规则：\n")

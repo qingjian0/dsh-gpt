@@ -1,7 +1,7 @@
 # DSH-GPT Delivery Status
 
-Last reviewed: 2026-11-26 (post-PR #40 merge)
-Main baseline reviewed: `f0530efc4c67e392aeb622c6b5709bc90baaf291`
+Last reviewed: 2026-11-26 (post-PR #41 merge)
+Main baseline reviewed: `247413a2fc6f8f3b15bee464be47ee17ec7ed97a`
 Latest delivery fix merged: PR #40 (`6790e22798231859f0c09ee6e7bf8e7b5a12b569`)
 
 This document is the delivery truth source. Source presence and CI success are not substitutes for live upstream, DSH-host, or physical-device acceptance.
@@ -15,7 +15,7 @@ This document is the delivery truth source. Source presence and CI success are n
 | Dynamic Hook runtime | PR #14 merged: authenticated `/v1/hook/*` routes, full config snapshots, revision polling, late ClassLoader attachment, HookHandle inventory and apply reports | Constrained dynamic execution exists; actual device application and end-to-end AI feedback loop unverified |
 | Hook action policy | Runtime parser supports `observe`, `dump`, `return`, `args`, `noop`, and `throw`; behavior-changing actions are blocked for sensitive authentication, session, credential, network, payment, security and cryptographic targets | Policy exists in source; keep the console's default workflow metadata-only |
 | Hook console | Mainline PR #38 four-tab UI had a protocol mismatch: it used POST, legacy mode names and legacy parameter keys. PR #40 merged the console fix: GET current config → append a valid rule → PUT the complete snapshot | Merged; PR CI passed Debug build, JVM tests, LSPosed metadata verification and APK artifact upload |
-| OpenAI-compatible gateway | Local API exposes models, Chat Completions, text Responses, SSE and local conversation routes | Text-oriented compatibility only; images, audio and full standard Function Calling are not established |
+| OpenAI-compatible gateway | Local API exposes models, authenticated `/v1/capabilities`, Chat Completions, text Responses, SSE, ToolBridge-mediated tool calls and local conversation routes | Text and ToolBridge are supported; image/audio/video/file inputs and structured JSON output are explicitly rejected with HTTP 400 rather than silently flattened |
 | MCP gateway | PR #37 merged MCP tool/resource listing and calls plus web reading | MCP routes exist; this is not equivalent to OpenAI standard Function Calling |
 | DSH Agent plugin | PR #12 merged plugin package, 9 modes, task-state tools and 7 Skills | Package/source present; real DSH Profile installation, tool visibility and workflow execution unverified |
 | DSH host bridge | Host implementation was identified on `qingjian0/Deepseek-Harness-Local-Android:refactor/dsh-gpt-hook-bridge-hardening`; host PR #35 is draft and divergent | Not release-integrated; reconcile and validate host branch before merge |
@@ -47,10 +47,11 @@ The merged PR #40 console fix uses metadata-only `observe` and `dump` modes, val
 
 ## Branch and PR triage (2026-11-26, post-PR #40)
 
-The reviewed snapshot had 46 branches and 8 open PRs. PR #40 has since been merged; PRs #36, #29 and #39 were closed as superseded after confirming their relevant behavior is already present in main or their UI is obsolete.
+The reviewed snapshot had 46 branches and 8 open PRs. PR #40 and PR #41 have since been merged; PRs #36, #29 and #39 were closed as superseded after confirming their relevant behavior is already present in main or their UI is obsolete.
 
 | PR | Branch/topic | Current assessment | Action |
 |---|---|---|---|
+| #41 | API capability discovery and unsupported-media guardrails | Merged as `247413a2`; PR CI passed build, JVM tests, LSPosed metadata verification and APK artifact upload | Complete |
 | #40 | Hook UI config contract | Merged as `6790e227`; PR CI passed | Complete |
 | #36 | Rate-limit awareness | The same `sendBlockedUntil()` probe/cache and `Retry-After` behavior is already in main | Closed as superseded; do not merge the stale branch |
 | #29 | Keep-alive revert | Explicit upstream `disconnect()` is already in main | Closed as superseded; do not merge the stale branch |
@@ -70,7 +71,7 @@ Remote branch deletion was not performed: the available GitHub connection expose
 1. Validate the merged Hook console against a live target process and confirm installed HookHandle inventory.
 2. Reconcile the DSH host bridge branch against host main; its PR #35 is still Draft and 38 ahead / 12 behind. Validate Provider authorization, capability negotiation, status/events/rules/discovery/cancel routes, retry and timeout semantics.
 3. Install the Agent plugin into a real DSH Profile and verify tool visibility, Skill loading, native workflow/subagent execution, cancellation and result aggregation.
-4. Validate the gateway from phone loopback and a desktop on the same LAN against the configured upstream, including authentication, text Chat Completions, Responses, SSE and consecutive turns.
+4. Validate the gateway from phone loopback and a desktop on the same LAN against the configured upstream, including authentication, text Chat Completions, Responses, SSE, ToolBridge tool-call round trips and consecutive turns.
 5. Run [DEVICE-ACCEPTANCE.md](DEVICE-ACCEPTANCE.md) on the supported Android/KernelSU/LSPosed/ChatGPT device, covering module injection, Provider Binder identity, discovery, dynamic Hook apply/replace/unhook, process restart, privacy and performance.
 6. Record the full controlled feedback loop: AI decision → bounded discovery → candidate review → authorized rule update → target HookHandle confirmation → metadata-only feedback → next AI iteration.
 

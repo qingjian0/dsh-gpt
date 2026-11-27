@@ -121,8 +121,10 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                     cfg.apiKey.isBlank() -> json(out, 503, err("configuration_required", "configure a gateway API key before using protected API routes"))
                     !authorized(headers) -> json(out, 401, err("invalid_api_key", "missing or bad Authorization"))
                     target == "/v1/models" -> json(out, 200, OpenAiCompat.modelsJson(OpenAiCompat.DEFAULT_MODELS))
-                    target == "/v1/capabilities" && method == "GET" -> json(out, 200, OpenAiCompat.capabilitiesJson())
                     // MCP 通道：不消耗每小时消息额度，可直接调工具/读网页
+                    // Codex 通道：模型名 codex-* 时走 /backend-api/codex/responses
+                    target == "/v1/codex/status" && method == "GET" -> json(out, 200,
+                        JSONObject().put("configured", CodexBridge(cfg).available()).toString())
                     target == "/v1/mcp/tools" && method == "GET" -> mcpTools(out)
                     target == "/v1/mcp/resources" && method == "GET" -> mcpResources(out)
                     target == "/v1/mcp/resource" && method == "POST" -> mcpResourceRead(out, body)
@@ -501,9 +503,6 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         val request = try { JSONObject(String(body, Charsets.UTF_8)) } catch (t: Throwable) {
             json(out, 400, err("invalid_request", "body is not JSON")); return
         }
-        OpenAiCompat.unsupportedResponsesFeature(request)?.let {
-            json(out, 400, err("unsupported_feature", it)); return
-        }
         val messages = org.json.JSONArray()
         val instructions = request.optString("instructions").trim()
         if (instructions.isNotEmpty()) messages.put(JSONObject().put("role", "system").put("content", instructions))
@@ -572,18 +571,11 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         val req = try { JSONObject(String(body, Charsets.UTF_8)) } catch (t: Throwable) {
             json(out, 400, err("invalid_request", "body is not JSON")); return
         }
-        OpenAiCompat.unsupportedChatFeature(req)?.let {
-            json(out, 400, err("unsupported_feature", it)); return
-        }
         val caller = callerId(headers)
         val model = req.optString("model", "auto").ifBlank { "auto" }
         val userText = OpenAiCompat.lastUserText(req)
         if (userText.isBlank()) {
             json(out, 400, err("invalid_request", "messages must contain a non-empty user message")); return
-        }
-        if (!cfg.ready) {
-            json(out, 503, err("upstream_not_configured", "本地 API 网关已运行，但尚未配置上游 access_token / oai-did"))
-            return
         }
         val requestedConversationId = headers["x-dsh-conversation-id"]?.takeIf { it.isNotBlank() }
         // 隐式会话绑定：显式头 > 客户端 user 字段 > 首条 user 消息指纹
@@ -630,6 +622,12 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
             )
         } catch (e: IllegalArgumentException) {
             json(out, 413, err("conversation_limit", e.message ?: "conversation limit reached"), responseHeaders); return
+        }
+
+        val codexModel = req.optString("model").startsWith("codex-")
+        if (codexModel) {
+            codexChat(out, req, responseHeaders)
+            return
         }
 
         // 先看账号是否被限流，被限时直接回带 Retry-After 的 429
@@ -817,6 +815,48 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
      * 返回 blocked_features[].resets_after 精确到秒。
      * "send" 被 block 时，生成请求必定 429，提前告诉客户端比让它干等更好。
      */
+    /** 走 Codex 通道的对话，与 ChatGPT 消费端互不影响 */
+    private fun codexChat(out: OutputStream, req: JSONObject, headers: Map<String, String>) {
+        val bridge = CodexBridge(cfg)
+        if (!bridge.available()) {
+            json(out, 503, err("codex_not_configured",
+                "Codex 通道需要单独 OAuth token，ChatGPT 的 token 无权限。在 API 页填写 codex token 后启用。"), headers)
+            return
+        }
+        val id = "chatcmpl-" + java.util.UUID.randomUUID().toString().replace("-", "").take(24)
+        val model = req.optString("model", "codex-gpt-5.1").removePrefix("codex-")
+        val stream = req.optBoolean("stream", false)
+        val copy = JSONObject(req.toString()).put("model", model)
+        runCatching {
+            if (stream) {
+                val input = bridge.chatStream(copy)
+                writeHead(out, 200, "text/event-stream; charset=utf-8", null, headers)
+                var acc = ""
+                input.bufferedReader().forEachLine { line ->
+                    if (!line.startsWith("data:")) return@forEachLine
+                    val payload = line.removePrefix("data:").trim()
+                    if (payload == "[DONE]" || payload.isEmpty()) return@forEachLine
+                    val obj = runCatching { JSONObject(payload) }.getOrNull() ?: return@forEachLine
+                    if (obj.optString("type") == "response.output_text.delta") {
+                        val d = obj.optString("delta")
+                        if (d.isNotEmpty()) {
+                            acc += d
+                            writeChunk(out, "data: " + OpenAiCompat.chunk(id, model, d) + "\n\n")
+                        }
+                    }
+                }
+                writeChunk(out, "data: " + OpenAiCompat.chunk(id, model, "", "stop") + "\n\n")
+                writeChunk(out, "data: [DONE]\n\n")
+                out.flush()
+            } else {
+                val resp = bridge.chat(copy)
+                json(out, 200, bridge.toChatCompletion(resp, id, model).toString(), headers)
+            }
+        }.onFailure {
+            json(out, 502, err("codex_error", it.message ?: "codex call failed"), headers)
+        }
+    }
+
     private fun mcpTools(out: OutputStream) {
         runCatching { McpBridge(cfg).listTools() }
             .onSuccess { json(out, 200, JSONObject().put("object", "list").put("data", it).toString()) }

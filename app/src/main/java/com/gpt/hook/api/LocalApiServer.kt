@@ -158,7 +158,6 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
 
 
     private fun measureUsage(body: ByteArray, action: () -> Unit) {
-        val started = System.currentTimeMillis()
         val request = runCatching { JSONObject(String(body, Charsets.UTF_8)) }.getOrNull()
         val model = request?.optString("model", "unknown")?.ifBlank { "unknown" } ?: "unknown"
         UsageMeter.begin(model, "chatgpt", body.size)
@@ -596,7 +595,8 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
             json(out, 400, err("unsupported_feature", it)); return
         }
         val caller = callerId(headers)
-        val model = req.optString("model", "auto").ifBlank { "auto" }
+        val requestedModel = req.optString("model", "auto").ifBlank { "auto" }
+        val model = if (requestedModel == "auto") cfg.model else requestedModel
         val userText = OpenAiCompat.lastUserText(req)
         if (userText.isBlank()) {
             json(out, 400, err("invalid_request", "messages must contain a non-empty user message")); return

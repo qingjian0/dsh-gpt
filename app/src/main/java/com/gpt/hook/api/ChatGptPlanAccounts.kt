@@ -9,7 +9,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -142,9 +141,11 @@ internal fun ChatGptPlanAccounts(context: Context) {
         busy = ChatGptPlanLoginRegistry.inFlight
         ChatGptPlanLoginRegistry.lastStatus?.let { status = it }
     }
-    DisposableEffect(pending) {
-        onDispose { pending?.close() }
-    }
+    // 注意：这里不能写 DisposableEffect(pending) { onDispose { pending?.close() } }。
+    // key 跟着 pending 走，startLogin 把 pending 从 null 换成刚建好的 login 后会立刻
+    // 触发旧 effect 的 onDispose，把新绑定的回环端口 close 掉，浏览器回调必然
+    // ERR_CONNECTION_REFUSED（界面会显示 "OAuth callback listener was cancelled"）。
+    // listener 的生命周期由 ChatGptPlanLoginRegistry 的等待协程负责关闭。
 
     Card(
         modifier = Modifier.fillMaxWidth(),

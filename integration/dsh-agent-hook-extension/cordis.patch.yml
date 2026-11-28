@@ -1,5 +1,5 @@
-# Adds the Hook controls to the DSH Agent tool registry.
-# The Android host bridge routes must be installed before these tools can execute.
+# Optional DSH profile bundle. Provisioning and activation are controlled by
+# DSH Developer Options; this patch does not alter the LSPosed runtime state.
 - insert:
     - id: dsh-gpt-hook-agent
       name: '@dsh-external/dsh-gpt-hook-agent'

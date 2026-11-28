@@ -1806,7 +1806,6 @@ private fun ToolHistoryPage(history: List<ToolCallRecord>) {
 }
 
 @Composable
-@Composable
 private fun HookPage(
     hook: JSONObject,
     events: JSONArray,
@@ -1879,7 +1878,7 @@ private fun HookPage(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(if (targetOnline) "目标进程在线" else "目标进程未确认在线", fontWeight = FontWeight.Bold, fontSize = 17.sp)
-                        Text(if (reportAt == 0L) "尚未收到目标进程报告" else if (targetOnline) "最近报告 \${ageMs / 1000} 秒前" else "最近报告已过期 · \${ageMs / 1000} 秒前", color = Muted, fontSize = 12.sp)
+                        Text(if (reportAt == 0L) "尚未收到目标进程报告" else if (targetOnline) "最近报告 ${ageMs / 1000} 秒前" else "最近报告已过期 · ${ageMs / 1000} 秒前", color = Muted, fontSize = 12.sp)
                     }
                     StatusPill(if (targetOnline) "在线" else "未知 / 离线")
                 }
@@ -1934,7 +1933,7 @@ private fun HookPage(
             item { CardBlock { Text("状态边界", fontWeight = FontWeight.SemiBold); Text("需要目标进程逐项上报安装成功、类未找到、方法未匹配或安装失败，才能显示真实运行状态。当前页面不推测安装结果。", color = Muted, fontSize = 12.sp) } }
         }
         if (section == "动态 Hook") {
-            item { Row(verticalAlignment = Alignment.CenterVertically) { Text("动态规则 · \${ruleItems.size}", fontWeight = FontWeight.Bold, fontSize = 18.sp, modifier = Modifier.weight(1f)); TextButton(onClick = { beginEdit() }) { Icon(Icons.Outlined.Add, null); Text("新增") } } }
+            item { Row(verticalAlignment = Alignment.CenterVertically) { Text("动态规则 · ${ruleItems.size}", fontWeight = FontWeight.Bold, fontSize = 18.sp, modifier = Modifier.weight(1f)); TextButton(onClick = { beginEdit() }) { Icon(Icons.Outlined.Add, null); Text("新增") } } }
             item { OutlinedTextField(value = search, onValueChange = { search = it }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("搜索类名、方法名或规则 ID") }, leadingIcon = { Icon(Icons.Outlined.Search, null) }) }
             if (filteredRules.isEmpty()) item { CardBlock { Text(if (ruleItems.isEmpty()) "暂无动态规则" else "没有匹配的规则"); Text("配置会立即显示；实际安装状态以目标进程回报为准。", color = Muted, fontSize = 12.sp) } }
             else items(filteredRules, key = { it.optString("id") }) { rule ->
@@ -1946,7 +1945,7 @@ private fun HookPage(
                         Column(Modifier.weight(1f)) {
                             Text(rule.optString("methodName", "未命名方法"), fontWeight = FontWeight.SemiBold)
                             Text(rule.optString("className"), color = Muted, fontSize = 11.sp)
-                            Text("模式 \${rule.optString("mode", "observe")} · 安装方法 \${actualCount} · \${if (!enabled) "总开关关闭" else if (!isEnabled) "规则禁用" else if (!targetOnline) "等待新报告" else if (id in observedRuleIds) "已上报安装" else "尚未确认安装"}", color = Muted, fontSize = 11.sp)
+                            Text("模式 ${rule.optString("mode", "observe")} · 安装方法 ${actualCount} · ${if (!enabled) "总开关关闭" else if (!isEnabled) "规则禁用" else if (!targetOnline) "等待新报告" else if (id in observedRuleIds) "已上报安装" else "尚未确认安装"}", color = Muted, fontSize = 11.sp)
                         }
                         Switch(checked = isEnabled, onCheckedChange = { value -> onSaveRule(JSONObject(rule.toString()).put("enabled", value)) })
                     }
@@ -2055,14 +2054,14 @@ private fun HookPage(
             }
         }
         if (section == "事件") {
-            item { Text("事件中心 · \${eventItems.size}", fontSize = 20.sp, fontWeight = FontWeight.Bold); OutlinedTextField(value = search, onValueChange = { search = it }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("搜索规则、类名或方法") }) }
+            item { Text("事件中心 · ${eventItems.size}", fontSize = 20.sp, fontWeight = FontWeight.Bold); OutlinedTextField(value = search, onValueChange = { search = it }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("搜索规则、类名或方法") }) }
             if (filteredEvents.isEmpty()) item { CardBlock { Text("暂无匹配事件"); Text("事件仅包含规则、类 / 方法元数据、耗时和异常，不包含参数和凭证。", color = Muted, fontSize = 12.sp) } }
             else items(filteredEvents.takeLast(100).reversed()) { event ->
                 CardBlock {
                     Text(event.optString("method", "未知方法"), fontWeight = FontWeight.SemiBold)
                     Text(event.optString("class", "未知类"), color = Muted, fontSize = 11.sp)
                     StatusValue("规则", event.optString("ruleId", event.optString("rule_id", "—")))
-                    StatusValue("耗时", "\${event.optLong("elapsedMs", event.optLong("durationMs", 0L))} ms")
+                    StatusValue("耗时", "${event.optLong("elapsedMs", event.optLong("durationMs", 0L))} ms")
                     StatusValue("异常", event.optString("exception", "无"))
                     StatusValue("时间", event.optString("timestamp", "—"))
                 }
@@ -2078,7 +2077,7 @@ private fun HookPage(
                     StatusValue("运行时状态", hook.optString("runtimeState", "unavailable"))
                     StatusValue("运行时快照", hook.optLong("runtimeSnapshotAtMs", 0L).toString())
                     StatusValue("配置 revision", hook.optLong("configRevision", 0L).toString())
-                    StatusValue("安装清单", "\${installed.length()} 条")
+                    StatusValue("安装清单", "${installed.length()} 条")
                     StatusValue("清单截断", if (hook.optBoolean("hookInventoryTruncated", false)) "是" else "否")
                 }
             }

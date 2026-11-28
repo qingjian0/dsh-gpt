@@ -129,7 +129,7 @@ internal class ChatGptPlanLoopbackServer private constructor(
     }
 
     companion object {
-        private const val DEFAULT_TIMEOUT_MS = 3 * 60 * 1000L
+        private const val DEFAULT_TIMEOUT_MS = 15 * 60 * 1000L
         private const val MAX_REQUEST_LINE_BYTES = 8 * 1024
         private const val MAX_HEADER_LINE_BYTES = 4 * 1024
         private const val MAX_HEADER_BYTES = 16 * 1024

@@ -61,7 +61,7 @@ internal class ChatGptPlanLoginCoordinator(
         fun attempt(): ChatGptPlanOAuth.Attempt = listener.attempt
 
         @Synchronized
-        fun complete(timeoutMillis: Long = 3 * 60 * 1000L): ChatGptPlanProfile {
+        fun complete(timeoutMillis: Long = 15 * 60 * 1000L): ChatGptPlanProfile {
             check(!completed) { "This ChatGPT sign-in attempt has already been consumed" }
             completed = true
             try {

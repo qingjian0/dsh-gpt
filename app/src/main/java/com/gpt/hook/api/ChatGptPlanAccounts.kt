@@ -82,7 +82,7 @@ internal fun ChatGptPlanAccounts(context: Context) {
             status = "已打开系统浏览器，等待 ChatGPT 完成授权……"
             // 关键：等待协程跑在进程级作用域，否则打开浏览器导致 composable 销毁时
             // 协程被取消，回环 socket 随之关闭，浏览器回调只会看到 ERR_CONNECTION_REFUSED。
-            ChatGptPlanLoginRegistry.launchWait(login) { outcome, message ->
+            ChatGptPlanLoginRegistry.launchWait(context, login) { outcome, message ->
                 pending = null
                 busy = false
                 status = message
@@ -251,6 +251,21 @@ internal fun ChatGptPlanAccounts(context: Context) {
             Spacer(Modifier.height(2.dp))
         }
     }
+
+
+    /** 授权完成后把主界面拉回前台，避免用户以为“卡在浏览器”。 */
+    private fun bringToFront(context: android.content.Context) {
+        runCatching {
+            val intent = android.content.Intent(context, com.gpt.hook.MainActivity::class.java).apply {
+                addFlags(
+                    android.content.Intent.FLAG_ACTIVITY_NEW_TASK or
+                        android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+                        android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP
+                )
+            }
+            context.startActivity(intent)
+        }
+    }
 }
 
 /**
@@ -276,6 +291,7 @@ internal object ChatGptPlanLoginRegistry {
     var lastStatus: String? = null
 
     fun launchWait(
+        context: android.content.Context,
         login: ChatGptPlanLoginCoordinator.PendingLogin,
         onDone: (success: Boolean, message: String) -> Unit,
     ) {
@@ -294,6 +310,9 @@ internal object ChatGptPlanLoginRegistry {
             pending = null
             inFlight = false
             lastStatus = message
+            // 浏览器不会自己切回 App：http 回调页没有能力把后台应用拉到前台，
+            // 必须由 App 主动启动 MainActivity（网关前台服务在跑时允许后台启动）。
+            if (success) bringToFront(context)
             onDone(success, message)
         }
     }

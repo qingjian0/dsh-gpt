@@ -1303,8 +1303,12 @@ private fun UpstreamConfig(
                 } else if (proxyMode == "web") {
                     OutlinedButton(
                         modifier = Modifier.fillMaxWidth(),
+                        onClick = { com.gpt.hook.api.ChatGptWebToken.openHome(appContext) },
+                    ) { Text("打开 ChatGPT（登录）") }
+                    OutlinedButton(
+                        modifier = Modifier.fillMaxWidth(),
                         onClick = { com.gpt.hook.api.ChatGptWebToken.openSessionPage(appContext) },
-                    ) { Text("在 Chrome 中打开凭证页") }
+                    ) { Text("打开凭证页（自动落到 accessToken）") }
                     OutlinedButton(
                         modifier = Modifier.fillMaxWidth(),
                         onClick = {

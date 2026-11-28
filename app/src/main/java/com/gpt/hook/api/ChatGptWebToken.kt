@@ -19,20 +19,28 @@ object ChatGptWebToken {
      */
     const val SESSION_URL = "https://chatgpt.com/auth/login_with?callback_path=%2Fapi%2Fauth%2Fsession"
 
-    fun openSessionPage(context: Context): Boolean {
+    const val HOME_URL = "https://chatgpt.com/"
+
+    /** 打开首页：用户可以在 Custom Tab 里正常登录。 */
+    fun openHome(context: Context): Boolean = launch(context, HOME_URL)
+
+    /** 打开登录入口，完成后自动落到显示 accessToken 的 JSON 页。 */
+    fun openSessionPage(context: Context): Boolean = launch(context, SESSION_URL)
+
+    private fun launch(context: Context, url: String): Boolean {
         val viaTabs = runCatching {
             val tabs = androidx.browser.customtabs.CustomTabsIntent.Builder()
                 .setShowTitle(true)
                 .setUrlBarHidingEnabled(true)
                 .build()
             tabs.intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-            tabs.launchUrl(context, Uri.parse(SESSION_URL))
+            tabs.launchUrl(context, Uri.parse(url))
             true
         }.getOrDefault(false)
         if (viaTabs) return true
         return runCatching {
             context.startActivity(
-                android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(SESSION_URL))
+                android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(url))
                     .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
             )
             true

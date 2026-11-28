@@ -68,7 +68,7 @@ enables Hook callbacks.
 ## Validation
 
 Run `node --check integration/dsh-agent-hook-extension/index.mjs` and validate
-the npm package metadata. End-to-end acceptance additionally requires the DSH
-profile plugin, app-private config writer, local API authentication, LSPosed
-Provider IPC and a real target-process Hook test. Do not mark the integration
+the npm package metadata. End-to-end acceptance additionally requires a built DSH APK, the Keystore-backed
+Developer Options config UI, local API authentication, LSPosed Provider IPC and
+a real target-process Hook test. Do not mark the integration
 complete until those layers are tested together.

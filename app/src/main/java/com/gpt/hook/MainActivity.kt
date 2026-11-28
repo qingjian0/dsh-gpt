@@ -1248,6 +1248,35 @@ private fun UpstreamConfig(
     var effortExpanded by remember { mutableStateOf(false) }
     var importStatus by remember { mutableStateOf("") }
 
+    // 从浏览器切回来自动读剪贴板：拿到 accessToken 就保存，不用再点按钮
+    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME && proxyMode == "web") {
+                val token = com.gpt.hook.api.ChatGptWebToken.fromClipboard(appContext)
+                if (token != null && token != webToken) {
+                    webToken = token
+                    importStatus = "已自动读取并保存"
+                    onSave(
+                        initialConfig.copy(
+                            proxyMode = "web",
+                            webAccessToken = token,
+                            webSessionToken = webSession.trim(),
+                            connectorId = connector.trim(),
+                            model = model,
+                            fastMode = fastMode,
+                            reasoningEffort = effort,
+                            searchEnabled = search,
+                            temporaryChat = temporary,
+                        )
+                    )
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
 
 
     CardBlock {
@@ -1301,20 +1330,10 @@ private fun UpstreamConfig(
                     FieldLabel("Session ID（可选）")
                     OutlinedTextField(value = sessionId, onValueChange = { sessionId = it }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                 } else if (proxyMode == "web") {
-                    // 只有一个按钮：点它 → 浏览器授权 → 回调页显示登录成功
                     Button(
                         modifier = Modifier.fillMaxWidth(),
-                        onClick = {
-                            com.gpt.hook.api.ChatGptOAuthLogin.start(appContext) { ok, msg ->
-                                importStatus = msg
-                                if (ok) {
-                                    com.gpt.hook.api.ChatGptCredentialStore.load()?.let {
-                                        webToken = it.accessToken
-                                    }
-                                }
-                            }
-                        },
-                    ) { Text("登录") }
+                        onClick = { com.gpt.hook.api.ChatGptWebToken.openSessionPage(appContext) },
+                    ) { Text("登录 ChatGPT") }
                     if (importStatus.isNotBlank()) {
                         Text(importStatus, fontSize = 12.sp, color = Color(0xFF2F6FEB))
                     }

@@ -90,7 +90,7 @@ internal class ChatGptPlanSessionManager(
                 if (status != null && status in 400..499 && status != 429) break
                 if (attempt < REVOCATION_ATTEMPTS - 1) {
                     try {
-                        Thread.sleep(REVOCATION_BACKOFF_MS shl attempt)
+                        Thread.sleep(REVOCATION_BACKOFF_MS * (attempt + 1))
                     } catch (_: InterruptedException) {
                         Thread.currentThread().interrupt()
                         break

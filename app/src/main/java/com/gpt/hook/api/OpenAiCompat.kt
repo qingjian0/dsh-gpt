@@ -247,7 +247,12 @@ object OpenAiCompat {
         .put("upstream", "ChatGPT Android conversation backend")
         .toString()
 
-    fun modelsJson(upstreamIds: List<String>): String {
+    fun modelsJson(
+        upstreamIds: List<String>,
+        active: String = "auto",
+        mode: String = "hook",
+        latencyMs: (String) -> Long = { 0L },
+    ): String {
         val arr = JSONArray()
         upstreamIds.forEachIndexed { i, id ->
             arr.put(
@@ -262,8 +267,9 @@ object OpenAiCompat {
                     })
                     .put("reasoning", id.contains("think") || id.contains("deep") || id == "auto")
                     .put("search", id.contains("search"))
-                    .put("active", true)
-                    .put("latency_ms", JSONObject.NULL)
+                    .put("mode", mode)
+                    .put("active", id == active || (active == "auto" && id == "auto"))
+                    .put("latency_ms", latencyMs(id).takeIf { it > 0 } ?: JSONObject.NULL)
             )
         }
         return JSONObject().put("object", "list").put("data", arr).toString()

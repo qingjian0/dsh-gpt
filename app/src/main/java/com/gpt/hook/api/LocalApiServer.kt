@@ -12,6 +12,7 @@ import java.io.InputStreamReader
 import java.io.OutputStream
 import java.net.InetAddress
 import java.net.ServerSocket
+import java.net.HttpURLConnection
 import java.net.Socket
 import java.util.UUID
 import java.security.MessageDigest
@@ -1237,6 +1238,16 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
      * 模型目录：web 通道优先用 Codex 上游真实目录（30 分钟缓存），失败回落内建档位；
      * hook 通道仍用内建档位（Android 端能力由 system_hints 决定）。
      */
+    /** 从用量快照里取该模型最近一次的耗时（没有则 0）。 */
+    private fun lastLatencyMs(model: String): Long {
+        val recent = UsageMeter.snapshot(context).optJSONArray("recent") ?: return 0L
+        for (i in 0 until recent.length()) {
+            val row = recent.optJSONObject(i) ?: continue
+            if (row.optString("model") == model) return row.optLong("total_ms", 0L)
+        }
+        return 0L
+    }
+
     private fun modelsPayload(): String {
         val active = cfg.model.ifBlank { "auto" }
         val ids = if (cfg.proxyMode == "web") {
@@ -1250,7 +1261,7 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
             ids.distinct(),
             active = active,
             mode = cfg.proxyMode,
-            latencyMs = { 0L }
+            latencyMs = { id -> lastLatencyMs(id) }
         )
     }
 

@@ -495,6 +495,7 @@ private fun DshApp(
                     usage = state.usage,
                     initialRelayConfig = relayConfig,
                     modelIds = modelIds,
+                    oauth = state.oauth,
                     onOauthLogin = {
                         runOauth("POST", "/v1/oauth/login", null) { body ->
                             val url = JSONObjectOrEmpty(body).optString("auth_url")
@@ -965,6 +966,7 @@ private fun ApiPage(
     usage: JSONObject,
     initialRelayConfig: RelayConfig,
     modelIds: List<String>,
+    oauth: JSONObject,
     onRelayConfigSave: (RelayConfig) -> Unit,
     onOauthLogin: () -> Unit = {},
     onOauthLogout: () -> Unit = {},
@@ -1140,7 +1142,7 @@ private fun ApiPage(
         item {
             if (initialRelayConfig.proxyMode == "web") {
                 OAuthLoginCard(
-                    oauth = state.oauth,
+                    oauth = oauth,
                     onLogin = onOauthLogin,
                     onLogout = onOauthLogout,
                     onCallback = onOauthCallback
@@ -1347,8 +1349,6 @@ private fun UpstreamConfig(
     var hookToken by remember(initialConfig) { mutableStateOf(initialConfig.accessToken) }
     var did by remember(initialConfig) { mutableStateOf(initialConfig.oaiDid) }
     var sessionId by remember(initialConfig) { mutableStateOf(initialConfig.sessionId) }
-    var webToken by remember(initialConfig) { mutableStateOf(initialConfig.webAccessToken) }
-    var webSession by remember(initialConfig) { mutableStateOf(initialConfig.webSessionToken) }
     var connector by remember(initialConfig) { mutableStateOf(initialConfig.connectorId) }
     var model by remember(initialConfig) { mutableStateOf(initialConfig.model) }
     var fastMode by remember(initialConfig) { mutableStateOf(initialConfig.fastMode) }
@@ -2308,16 +2308,6 @@ private fun readableError(e: Exception): String {
         message.contains("refused", true) -> "连接被拒绝，请检查服务地址和端口"
         message.contains("UnknownHost", true) -> "无法解析服务器地址"
         else -> "请求失败：$message"
-    }
-}
-
-/** 用系统浏览器打开授权页（不内嵌 WebView：OAuth 登录页会被上游拒绝内嵌）。 */
-private fun openBrowser(context: Context, url: String) {
-    runCatching {
-        context.startActivity(
-            android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
-                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-        )
     }
 }
 

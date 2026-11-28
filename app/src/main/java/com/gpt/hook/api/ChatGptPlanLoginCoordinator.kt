@@ -22,10 +22,14 @@ internal class ChatGptPlanLoginCoordinator(
             store.snapshot().profiles.firstOrNull { it.id == id }
                 ?: throw IllegalArgumentException("Selected ChatGPT profile was not found")
         }
+        // 只在「已有成功保存的账号」时复用 issued client_id。
+        // pending 里存的是上一次未完成注册的 id，而服务端每次注册都会签发新的
+        // oaiapp_...，复用它会触发 finish 里的 client 匹配校验失败
+        // （表现为一直拿不到 token，且 pending_client_id 每次都变）。
         val savedRegistration = when {
             forceNewRegistration -> null
             previous != null -> previous.clientId
-            else -> store.pendingClientId()
+            else -> null
         }
         val listener = ChatGptPlanLoopbackServer.create(store.hostId(), savedRegistration, store.callbackPort())
         try {
@@ -95,7 +99,7 @@ internal class ChatGptPlanLoginCoordinator(
         val savedRegistration = when {
             forceNewRegistration -> null
             previous != null -> previous.clientId
-            else -> store.pendingClientId()
+            else -> null
         }
         // 端口只为了让 redirect_uri 合法；WebView 在请求发出前就截获它，端口不会被真正监听。
         val port = store.callbackPort()
@@ -163,48 +167,14 @@ internal class ChatGptPlanLoginCoordinator(
         private var completedProfile: ChatGptPlanProfile? = null
 
         private fun finish(callback: ChatGptPlanOAuth.Callback) {
-            run {
-                // Save a newly issued registration before the one-time code exchange.
-                if (previous == null || callback.clientId != previous.clientId) {
-                    store.savePendingClientId(callback.clientId)
-                }
-                val tokenResponse = http.exchangeCode(listener.attempt, callback)
-                require(tokenResponse.status in 200..299) {
-                    "ChatGPT token exchange failed (HTTP ${tokenResponse.status})" +
-                        tokenResponse.requestId?.let { ", request_id=$it" }.orEmpty()
-                }
-                val tokenSet = ChatGptPlanOAuth.parseTokenResponse(tokenResponse.body, System.currentTimeMillis())
-                require(tokenSet.idToken.isNotBlank()) { "ChatGPT did not return an ID token; sign-in cannot be verified" }
-                val metadata = http.discover()
-                val jwks = http.fetchJwks(metadata)
-                val identity = ChatGptPlanOidcVerifier.verify(
-                    tokenSet.idToken,
-                    callback.clientId,
-                    listener.attempt.nonce,
-                    jwks,
-                )
-                if (previous != null) {
-                    require(previous.subject == identity.subject && previous.clientId == callback.clientId) {
-                        "This sign-in returned a different ChatGPT account or registration"
-                    }
-                }
-                val profile = ChatGptPlanProfile(
-                    id = previous?.id ?: UUID.randomUUID().toString(),
-                    clientId = callback.clientId,
-                    subject = identity.subject,
-                    email = identity.email,
-                    name = identity.name,
-                    idToken = tokenSet.idToken,
-                    accessToken = tokenSet.accessToken,
-                    refreshToken = tokenSet.refreshToken,
-                    scopes = tokenSet.scopes,
-                    expiresAtMillis = tokenSet.expiresAtMillis,
-                    earliestRefreshAtMillis = tokenSet.earliestRefreshAtMillis,
-                )
-                store.save(profile, makeActive = true)
-                store.clearPendingClientId()
-                completedProfile = profile
-            }
+            // 与 WebView 路径共用同一套交换逻辑，避免两处实现漂移（诊断也只有一处）。
+            completedProfile = ChatGptPlanExchange.complete(
+                listener.attempt,
+                callback,
+                store,
+                http,
+                previous,
+            )
         }
 
         override fun close() {

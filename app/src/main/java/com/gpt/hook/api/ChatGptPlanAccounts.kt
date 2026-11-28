@@ -124,7 +124,7 @@ internal fun ChatGptPlanAccounts(context: Context) {
             ChatGptPlanLoginWaitService.start(context.applicationContext)
             // 关键：等待协程跑在进程级作用域，否则打开浏览器导致 composable 销毁时
             // 协程被取消，回环 socket 随之关闭，浏览器回调只会看到 ERR_CONNECTION_REFUSED。
-            ChatGptPlanLoginRegistry.launchWait(context, login) { outcome, message ->
+            ChatGptPlanLoginRegistry.launchWait(context, coordinator, login) { outcome, message ->
                 pending = null
                 busy = false
                 status = message
@@ -358,6 +358,7 @@ internal object ChatGptPlanLoginRegistry {
 
     fun launchWait(
         context: android.content.Context,
+        coordinator: ChatGptPlanLoginCoordinator,
         login: ChatGptPlanLoginCoordinator.PendingLogin,
         onDone: (success: Boolean, message: String) -> Unit,
     ) {
@@ -370,6 +371,21 @@ internal object ChatGptPlanLoginRegistry {
                 withContext(Dispatchers.IO) { login.complete() }
                 success = true
                 "ChatGPT 授权成功，凭证已加密保存"
+            } catch (completed: ChatGptPlanRegistrationCompleted) {
+                // 首次注册只完成"注册"，其 code 换不到 token。用刚签发的 client_id
+                // 自动再走一次授权 —— 已注册账号的重授权通常无需再次确认。
+                lastStatus = "身份注册完成，正在用新身份重新授权…"
+                withContext(Dispatchers.IO) { login.close() }
+                val retried = runCatching {
+                    val next = coordinator.begin(context, null, forceNewRegistration = false)
+                    withContext(Dispatchers.IO) { next.complete() }
+                }
+                if (retried.isSuccess) {
+                    success = true
+                    "ChatGPT 授权成功，凭证已加密保存"
+                } else {
+                    "授权未完成：" + (retried.exceptionOrNull()?.message ?: "重新授权失败")
+                }
             } catch (error: Throwable) {
                 "授权未完成：${error.message ?: error.javaClass.simpleName}"
             }

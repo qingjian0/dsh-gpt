@@ -11,6 +11,10 @@ import java.util.UUID
  *
  * 后者不监听任何端口，也不依赖进程存活，是 MIUI 上最稳的路径。
  */
+/** 首次注册已完成：服务端签发了 client_id，但这一轮的 code 不能换 token。 */
+internal class ChatGptPlanRegistrationCompleted(val clientId: String) :
+    IllegalStateException("registration completed; reauthorize with the issued client id")
+
 internal object ChatGptPlanExchange {
 
     fun complete(
@@ -22,6 +26,8 @@ internal object ChatGptPlanExchange {
     ): ChatGptPlanProfile {
         try {
             return completeInner(attempt, callback, store, http, previous)
+        } catch (error: ChatGptPlanRegistrationCompleted) {
+            throw error
         } catch (error: Throwable) {
             // release 包没有 logcat：把失败类型、消息和堆栈写进 prefs，便于设备上直接读。
             store.recordDiagnostic(
@@ -59,6 +65,16 @@ internal object ChatGptPlanExchange {
                 " first=" + attempt.isFirstRegistration +
                 " body=" + tokenResponse.body.take(300)
         )
+        // 官方文档：首次注册拿到的 code 换 token 会返回 invalid_grant，
+        // 此时应丢弃该 code，用这次签发的 client_id 重新发起一次授权。
+        if (tokenResponse.status == 400 &&
+            tokenResponse.body.contains("invalid_grant") &&
+            attempt.isFirstRegistration
+        ) {
+            store.savePendingClientId(callback.clientId)
+            store.recordDiagnostic("registration-completed", "client=" + callback.clientId)
+            throw ChatGptPlanRegistrationCompleted(callback.clientId)
+        }
         require(tokenResponse.status in 200..299) {
             "ChatGPT token exchange failed (HTTP ${tokenResponse.status})" +
                 tokenResponse.requestId?.let { ", request_id=$it" }.orEmpty()

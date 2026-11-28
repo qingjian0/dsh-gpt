@@ -178,6 +178,16 @@ internal object ChatGptPlanOAuth {
         ))
     }
 
+    fun revocationForm(clientId: String, refreshToken: String): String {
+        validateIssuedClientId(clientId)
+        require(refreshToken.isNotBlank())
+        return form(linkedMapOf(
+            "token" to refreshToken,
+            "token_type_hint" to "refresh_token",
+            "client_id" to clientId,
+        ))
+    }
+
     fun parseTokenResponse(raw: String, nowMillis: Long, previousScopes: Set<String>? = null): TokenSet {
         val json = JSONObject(raw)
         val access = json.optString("access_token")

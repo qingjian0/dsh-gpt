@@ -296,7 +296,7 @@ private fun DshApp(
                 online = health.code in 200..299,
                 health = JSONObjectOrEmpty(health.body),
                 models = if (models.code in 200..299) extractArray(models.body, "data", "models") else JSONArray(),
-                hook = JSONObjectOrEmpty(hook.body),
+                hook = if (hook.code in 200..299) JSONObjectOrEmpty(hook.body) else JSONObject().put("statusUnavailable", true).put("error", "HTTP ${hook.code}"),
                 usage = JSONObjectOrEmpty(usage.body),
                 loading = false
             )
@@ -623,7 +623,7 @@ private fun DshApp(
                                 val result = backend.get("/v1/hook/status")
                                 val eventResult = backend.get("/v1/hook/events")
                                 state = state.copy(
-                                    hook = JSONObjectOrEmpty(result.body),
+                                    hook = if (result.code in 200..299) JSONObjectOrEmpty(result.body) else JSONObject().put("statusUnavailable", true).put("error", "HTTP ${result.code}"),
                                     events = extractArray(eventResult.body, "events", "data")
                                 )
                                 notify("Hook 状态已更新")
@@ -1256,6 +1256,9 @@ private fun UpstreamConfig(
                         }
                     }
                 }
+                if (modelIds.isEmpty()) {
+                    Text("尚未获取模型列表。请确认网关已启动，然后点击页面右上角刷新。", color = Muted, fontSize = 12.sp)
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("快速模式", fontWeight = FontWeight.Medium)
@@ -1785,6 +1788,7 @@ private fun HookPage(
     var methodName by remember { mutableStateOf("") }
     var parameters by remember { mutableStateOf("[]") }
     var showCreate by remember { mutableStateOf(false) }
+    val unavailable = hook.optBoolean("statusUnavailable", false)
     val rules = hook.optJSONArray("configuredHooks") ?: hook.optJSONArray("configuredRules") ?: JSONArray()
     val installed = hook.optJSONArray("installedHooks") ?: JSONArray()
     val enabled = hook.optBoolean("enabled", false)
@@ -1859,6 +1863,9 @@ private fun HookPage(
     }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        if (unavailable) {
+            item { CardBlock { Text("Hook 状态暂不可用", fontWeight = FontWeight.Bold); Text(hook.optString("error", "无法读取 Hook 控制接口"), color = Muted, fontSize = 12.sp); Text("检查网关 API Key、模块进程和 LSPosed 安装状态后刷新。", color = Muted, fontSize = 12.sp) } }
+        }
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {

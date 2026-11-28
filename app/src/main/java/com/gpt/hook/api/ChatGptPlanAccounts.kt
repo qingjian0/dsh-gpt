@@ -50,6 +50,17 @@ internal fun ChatGptPlanAccounts(context: Context) {
         }
     }
 
+    suspend fun syncGatewayProfile() {
+        val activeId = withContext(Dispatchers.IO) { store.snapshot().activeProfileId.orEmpty() }
+        val current = withContext(Dispatchers.IO) { RelayConfig.load(context) }
+        if (current.proxyMode == "siwc") {
+            withContext(Dispatchers.IO) {
+                RelayConfig.save(context, current.copy(siwcProfileId = activeId))
+            }
+            ApiService.start(context)
+        }
+    }
+
     fun startLogin(selectedProfileId: String?, forceNewRegistration: Boolean = false) {
         try {
             val login = coordinator.begin(context, selectedProfileId, forceNewRegistration)
@@ -61,6 +72,7 @@ internal fun ChatGptPlanAccounts(context: Context) {
                     withContext(Dispatchers.IO) { login.complete() }
                     status = "ChatGPT 授权成功，凭证已加密保存"
                     reload()
+                    syncGatewayProfile()
                 } catch (error: Throwable) {
                     status = "授权未完成：${error.message ?: error.javaClass.simpleName}"
                 } finally {
@@ -127,6 +139,7 @@ internal fun ChatGptPlanAccounts(context: Context) {
                                         try {
                                             withContext(Dispatchers.IO) { store.setActive(profile.id) }
                                             reload()
+                                            syncGatewayProfile()
                                         } finally { busy = false }
                                     }
                                 },

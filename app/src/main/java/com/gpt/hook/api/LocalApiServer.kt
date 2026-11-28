@@ -141,10 +141,11 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                     target.startsWith("/v1/hook/discovery/") -> hookDiscovery(out, method, target)
                     target == "/v1/conversations" || target.startsWith("/v1/conversations/") ->
                         conversationRoute(out, method, target, body, headers)
+                    target == "/v1/usage" && method == "GET" -> json(out, 200, UsageMeter.snapshot(context).toString())
                     method == "POST" && target == "/v1/chat/completions" ->
-                        chat(out, body ?: ByteArray(0), headers)
+                        measureUsage(body ?: ByteArray(0)) { chat(out, body ?: ByteArray(0), headers) }
                     method == "POST" && target == "/v1/responses" ->
-                        responses(out, body ?: ByteArray(0), headers)
+                        measureUsage(body ?: ByteArray(0)) { responses(out, body ?: ByteArray(0), headers) }
                     target.startsWith("/backend-api") -> passthrough(out, method, target, body, headers)
                     else -> json(out, 404, err("not_found", "route not found"))
                 }
@@ -154,6 +155,18 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         }
     }
 
+
+    private fun measureUsage(body: ByteArray, action: () -> Unit) {
+        val started = System.currentTimeMillis()
+        val request = runCatching { JSONObject(String(body, Charsets.UTF_8)) }.getOrNull()
+        val model = request?.optString("model", "unknown")?.ifBlank { "unknown" } ?: "unknown"
+        val channel = if (model.startsWith("codex-")) "codex" else "chatgpt"
+        try {
+            action()
+        } finally {
+            UsageMeter.record(context, model, channel, System.currentTimeMillis() - started)
+        }
+    }
 
     private fun providerCall(method: String, extras: Bundle? = null): Bundle? =
         context.contentResolver.call(HOOK_PROVIDER_URI, method, null, extras)

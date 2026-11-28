@@ -52,3 +52,19 @@ The local gateway now has a selectable `siwc` upstream mode:
 - `/backend-api/*`, MCP bridge routes, and the ChatGPT web-reader route are explicitly blocked in SIWC mode because they depend on the separate backend-api channel. Existing Android DPoP and Web modes retain their previous routes.
 
 The adapter is intentionally text-only and does not claim full Responses API feature parity: tools, structured output, and multimodal input are rejected. CI and device acceptance remain separate gates; real-device OAuth, model listing, streaming, and account switching still require validation on an Android device.
+
+## ChatGPT Web session channel: explicit limitation
+
+The legacy `web` mode is a separate, compatibility-oriented `chatgpt.com/backend-api` relay. It currently consumes a user-supplied Web access token and optional session-cookie value; it is not an OAuth flow and does not automatically obtain browser credentials.
+
+There is no documented public third-party OAuth flow that exchanges a ChatGPT website login for the website's private `backend-api` session credentials. SIWC credentials are not interchangeable with those website credentials and must never be copied into the Web relay. The supported integration path for subscription-backed app inference is SIWC and the public Responses API.
+
+For the legacy Web mode:
+
+- Web access/session credentials are stored in a separate AES-GCM encrypted document using an Android Keystore key.
+- On upgrade, existing plaintext `webAccessToken` and `webSessionToken` preferences are migrated to encrypted storage, then removed from ordinary preferences after a successful encrypted write.
+- If Keystore encryption fails, the migration does not silently fall back to persisting new plaintext credentials.
+- This protects credentials at rest; it does not make the private Web API stable or guarantee that manually supplied credentials remain valid.
+- No hidden WebView interception, password collection, or background cookie scraping is implemented.
+
+A future first-party Web login feature requires a documented provider authorization mechanism for the specific Web API scope. Until such a mechanism exists, the supported one-login experience in this app is SIWC, not automatic acquisition of private ChatGPT website session cookies.

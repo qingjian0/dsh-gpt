@@ -1938,7 +1938,7 @@ private fun HookPage(
         }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
-                listOf("总览", "内置 Hook", "动态 Hook", "类发现", "事件", "请求抓取", "诊断").forEach { name ->
+                listOf("总览", "内置 Hook", "动态 Hook", "类发现", "事件", "网关请求", "诊断").forEach { name ->
                     FilterChip(selected = section == name, onClick = { section = name }, label = { Text(name, fontSize = 10.sp) })
                 }
             }
@@ -2134,14 +2134,14 @@ private fun HookPage(
                 }
             }
         }
-        if (section == "请求抓取") {
+        if (section == "网关请求") {
             val dumpEnabled = requestDump.optBoolean("enabled", false)
             val dumpRecords = requestDump.optJSONArray("records") ?: JSONArray()
             item {
                 CardBlock {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
-                            Text("请求抓取", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                            Text("网关请求抓取", fontWeight = FontWeight.Bold, fontSize = 18.sp)
                             Text("默认关闭 · 仅记录网关请求，不采集认证请求头", color = Muted, fontSize = 11.sp)
                         }
                         Switch(checked = dumpEnabled, onCheckedChange = onSetDumpEnabled)
@@ -2150,7 +2150,8 @@ private fun HookPage(
                     StatusValue("当前状态", if (dumpEnabled) "已启用" else "已关闭")
                     StatusValue("记录数量", "${dumpRecords.length()} / ${requestDump.optInt("maxRecords", 50)}")
                     StatusValue("保留时间", "${requestDump.optInt("retentionHours", 24)} 小时")
-                    Text("只抓取 /v1/chat/completions、/v1/responses 和 /backend-api/ 请求。请求体会递归脱敏凭证字段并截断；不记录 Authorization、Cookie 等请求头。", color = Muted, fontSize = 11.sp)
+                    Text("只抓取进入本地 DSH 网关的 /v1/chat/completions、/v1/responses 和 /backend-api/ 请求。请求体会递归脱敏凭证字段并截断；不记录 Authorization、Cookie 等请求头。", color = Muted, fontSize = 11.sp)
+                    Text("这不是 ChatGPT 目标进程内部 OkHttp / Cronet 流量抓取，也不包含上游响应正文。", color = Muted, fontSize = 11.sp)
                     Text("提示：请求正文可能包含你的对话内容。仅在需要排查问题时开启，完成后建议关闭并清理。", color = MaterialTheme.colorScheme.error, fontSize = 11.sp)
                     TextButton(onClick = onClearDump, enabled = dumpRecords.length() > 0) { Text("清空全部记录") }
                 }
@@ -2191,7 +2192,7 @@ private fun HookPage(
                 CardBlock {
                     Text("高级能力", fontWeight = FontWeight.SemiBold)
                     StatusValue("类加载监听", if (hook.optBoolean("classLoadWatcherEnabled", false)) "已启用" else "未启用 / 未报告")
-                    StatusValue("请求抓取", if (requestDump.optBoolean("enabled", false)) "已启用" else "已关闭")
+                    StatusValue("网关请求抓取", if (requestDump.optBoolean("enabled", false)) "已启用" else "已关闭")
                     Text("独立的请求抓取页面提供开关、记录列表与清理；默认关闭，受本地网关 API Key 保护。", color = Muted, fontSize = 12.sp)
                 }
             }

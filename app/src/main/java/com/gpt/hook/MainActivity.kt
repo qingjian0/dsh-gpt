@@ -1827,7 +1827,7 @@ private fun HookPage(
                     )
                     Spacer(Modifier.width(9.dp))
                     Text(
-                        if (enabled) "Hook 正在运行" else "Hook 未启用或状态未知",
+                        if (enabled) "Hook 已启用" else "Hook 已停用",
                         fontWeight = FontWeight.Bold,
                         fontSize = 17.sp
                     )

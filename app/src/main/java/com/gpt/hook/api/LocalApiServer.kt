@@ -1107,7 +1107,7 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         if (method != "PUT") { json(out, 405, err("method_not_allowed", "use GET or PUT")); return }
         val request = runCatching { JSONObject(body?.toString(Charsets.UTF_8) ?: "") }.getOrNull()
         val mode = request?.optString("mode").orEmpty()
-        if (mode != "hook" && mode != "web") { json(out, 400, err("invalid_request", "mode must be hook or web")); return }
+        if (mode !in setOf("hook", "web", "siwc")) { json(out, 400, err("invalid_request", "mode must be hook, web or siwc")); return }
         cfg = cfg.copy(proxyMode = mode)
         RelayConfig.save(context, cfg)
         json(out, 200, JSONObject().put("ok", true).put("proxy_mode", mode).put("ready", cfg.ready).toString())

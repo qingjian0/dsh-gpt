@@ -162,6 +162,32 @@ internal class ChatGptPlanProfileStore(
         return generated
     }
 
+    /**
+     * 回调端口必须稳定。
+     *
+     * 上游会逐字符校验 redirect_uri，而注册出来的 `oaiapp_...` client 是绑定在
+     * 首次注册时那个 redirect_uri 上的。若每次登录都换随机端口，复用 client 时
+     * redirect_uri 就对不上，token 交换直接 400 —— 表现就是「授权成功但拿不到 token」。
+     */
+    @Synchronized
+    fun callbackPort(): Int {
+        val prefs = context.getSharedPreferences(HOST_PREFS, Context.MODE_PRIVATE)
+        val saved = prefs.getInt(CALLBACK_PORT, 0)
+        if (saved in 1024..65535) return saved
+        // 首次：优先用 SIWC 习惯的 1455，被占用再随机，一旦定了就永久复用。
+        val chosen = runCatching {
+            java.net.ServerSocket(PREFERRED_CALLBACK_PORT, 1, java.net.InetAddress.getByName("127.0.0.1"))
+                .use { PREFERRED_CALLBACK_PORT }
+        }.getOrElse {
+            java.net.ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1")).use { it.localPort }
+        }
+        check(prefs.edit().putInt(CALLBACK_PORT, chosen).commit()) { "Could not persist ChatGPT callback port" }
+        // 旧版本每次用随机端口，注册出来的 oaiapp_... 已绑在那个端口上，复用只会 400。
+        // 端口第一次确定时一并作废旧注册，让下次走全新注册并绑到固定端口。
+        runCatching { clearPendingClientId() }
+        return chosen
+    }
+
     @Synchronized
     fun pendingClientId(): String? =
         context.getSharedPreferences(HOST_PREFS, Context.MODE_PRIVATE)
@@ -264,5 +290,7 @@ internal class ChatGptPlanProfileStore(
         const val HOST_PREFS = "dsh_siwc_host"
         const val HOST_ID = "ext_agent_host_id"
         const val PENDING_CLIENT_ID = "pending_client_id"
+        const val CALLBACK_PORT = "callback_port"
+        const val PREFERRED_CALLBACK_PORT = 1455
     }
 }

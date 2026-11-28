@@ -27,7 +27,7 @@ internal class ChatGptPlanLoginCoordinator(
             previous != null -> previous.clientId
             else -> store.pendingClientId()
         }
-        val listener = ChatGptPlanLoopbackServer.create(store.hostId(), savedRegistration)
+        val listener = ChatGptPlanLoopbackServer.create(store.hostId(), savedRegistration, store.callbackPort())
         try {
             val attempt = listener.attempt
             val authorizationUrl = ChatGptPlanOAuth.buildAuthorizationUrl(
@@ -98,8 +98,7 @@ internal class ChatGptPlanLoginCoordinator(
             else -> store.pendingClientId()
         }
         // 端口只为了让 redirect_uri 合法；WebView 在请求发出前就截获它，端口不会被真正监听。
-        val probe = java.net.ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1"))
-        val port = probe.use { it.localPort }
+        val port = store.callbackPort()
         val attempt = ChatGptPlanOAuth.createAttempt(
             "http://127.0.0.1:$port/auth/callback",
             store.hostId(),

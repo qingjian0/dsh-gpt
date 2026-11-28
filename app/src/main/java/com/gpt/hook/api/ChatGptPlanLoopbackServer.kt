@@ -139,8 +139,11 @@ internal class ChatGptPlanLoopbackServer private constructor(
         fun create(
             hostId: String,
             issuedClientId: String? = null,
+            port: Int = 0,
         ): ChatGptPlanLoopbackServer {
-            val socket = ServerSocket(0, 4, InetAddress.getByName("127.0.0.1"))
+            // port 必须与首次注册时一致：上游逐字符校验 redirect_uri，
+            // 换端口会让已注册的 oaiapp_... client 在换 token 时报 400。
+            val socket = ServerSocket(port, 4, InetAddress.getByName("127.0.0.1"))
             return try {
                 val redirect = "http://127.0.0.1:${socket.localPort}${ChatGptPlanOAuth.CALLBACK_PATH}"
                 val attempt = ChatGptPlanOAuth.createAttempt(redirect, hostId, issuedClientId)

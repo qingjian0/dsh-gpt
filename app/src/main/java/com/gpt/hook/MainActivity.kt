@@ -175,6 +175,10 @@ private class Backend(
     suspend fun put(path: String, body: JSONObject): ApiResponse =
         request("PUT", path, body.toString())
 
+    /** 任意方法：OAuth 登录/回调/登出走这里。 */
+    suspend fun call(method: String, path: String, body: JSONObject? = null): ApiResponse =
+        request(method, path, body?.toString())
+
     private suspend fun request(
         method: String,
         path: String,
@@ -241,6 +245,7 @@ private data class AppState(
     val hook: JSONObject = JSONObject(),
     val events: JSONArray = JSONArray(),
     val usage: JSONObject = JSONObject(),
+    val oauth: JSONObject = JSONObject(),
     val latency: List<LatencyPoint> = emptyList(),
     val history: List<ToolCallRecord> = emptyList(),
     val loading: Boolean = false,
@@ -280,6 +285,40 @@ private fun DshApp(
         Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
     }
 
+    /** OAuth 请求：直连本机网关，失败统一提示，成功交给回调刷新状态。 */
+    fun runOauth(method: String, path: String, payload: JSONObject?, onDone: suspend (String) -> Unit) {
+        scope.launch {
+            try {
+                val response = backend.call(method, path, payload)
+                val body = response.body.orEmpty()
+                if (response.code !in 200..299) {
+                    notify("OAuth 失败（HTTP " + response.code + "）：" + readableError(Exception(body)))
+                    return@launch
+                }
+                onDone(body)
+            } catch (e: Exception) {
+                notify("OAuth 请求失败：" + readableError(e))
+            }
+        }
+    }
+
+    /** OAuth 相关请求：直接打到本机网关，成功后统一刷新状态。 */
+    fun runOauth(method: String, path: String, payload: JSONObject?, onDone: suspend (String) -> Unit) {
+        scope.launch {
+            try {
+                val response = backend.call(method, path, payload)
+                val body = response.body ?: ""
+                if (response.code !in 200..299) {
+                    notify("OAuth 失败（HTTP " + response.code + "）：" + readableError(Exception(body)))
+                    return@launch
+                }
+                onDone(body)
+            } catch (e: Exception) {
+                notify("OAuth 请求失败：" + readableError(e))
+            }
+        }
+    }
+
     suspend fun refresh() {
         state = state.copy(loading = true, error = null)
 
@@ -288,6 +327,7 @@ private fun DshApp(
             val models = backend.get("/v1/models")
             val hook = backend.get("/v1/hook/status")
             val usage = backend.get("/v1/usage")
+            val oauth = backend.get("/v1/oauth/status")
 
             state = state.copy(
                 online = health.code in 200..299,
@@ -295,6 +335,7 @@ private fun DshApp(
                 models = extractArray(models.body, "data", "models"),
                 hook = JSONObjectOrEmpty(hook.body),
                 usage = JSONObjectOrEmpty(usage.body),
+                oauth = JSONObjectOrEmpty(oauth.body),
                 loading = false
             )
         } catch (e: Exception) {
@@ -471,6 +512,22 @@ private fun DshApp(
                     usage = state.usage,
                     initialRelayConfig = relayConfig,
                     modelIds = modelIds,
+                    onOauthLogin = {
+                        runOauth("POST", "/v1/oauth/login", null) { body ->
+                            val url = JSONObjectOrEmpty(body).optString("auth_url")
+                            if (url.isNotBlank()) {
+                                openBrowser(context, url)
+                                notify("已打开 ChatGPT 登录页；完成后回到本页点“我已完成登录”")
+                            } else notify("登录发起失败：$body")
+                        }
+                    },
+                    onOauthLogout = {
+                        runOauth("POST", "/v1/oauth/logout", null) { refresh() }
+                    },
+                    onOauthCallback = { url ->
+                        runOauth("POST", "/v1/oauth/callback",
+                            JSONObject().put("callback_url", url)) { refresh() }
+                    },
                     onRelayConfigSave = { next ->
                         relayConfig = next
                         onRelayConfigChange(next)
@@ -926,6 +983,9 @@ private fun ApiPage(
     initialRelayConfig: RelayConfig,
     modelIds: List<String>,
     onRelayConfigSave: (RelayConfig) -> Unit,
+    onOauthLogin: () -> Unit = {},
+    onOauthLogout: () -> Unit = {},
+    onOauthCallback: (String) -> Unit = {},
     onImportKit: () -> Unit,
     onExpand: () -> Unit,
     onEndpointChange: (String) -> Unit,
@@ -1095,13 +1155,134 @@ private fun ApiPage(
         }
 
         item {
+            if (initialRelayConfig.proxyMode == "web") {
+                OAuthLoginCard(
+                    oauth = state.oauth,
+                    onLogin = onOauthLogin,
+                    onLogout = onOauthLogout,
+                    onCallback = onOauthCallback
+                )
+            }
+        }
+
+        item {
             UpstreamConfig(
                 initialConfig = initialRelayConfig,
                 modelIds = modelIds,
+                oauth = state.oauth,
                 onSave = onRelayConfigSave,
-                onImportKit = onImportKit
+                onImportKit = onImportKit,
+                onOauthLogin = { onOauthLogin() },
+                onOauthLogout = { onOauthLogout() },
+                onOauthCallback = { url -> onOauthCallback(url) }
             )
         }
+    }
+}
+
+/** OAuth 登录卡：一次登录 → 加密保存 → 自动刷新 → 显示真实账号状态。 */
+@Composable
+private fun OAuthLoginCard(
+    oauth: JSONObject,
+    onLogin: () -> Unit,
+    onLogout: () -> Unit,
+    onCallback: (String) -> Unit
+) {
+    var busy by remember { mutableStateOf(false) }
+    var manualUrl by remember { mutableStateOf("") }
+    val loggedIn = oauth.optBoolean("logged_in", false)
+    val revoked = oauth.optBoolean("revoked", false)
+    val email = oauth.optString("email")
+    val plan = oauth.optString("plan")
+    val expiresIn = oauth.optLong("expires_in_seconds", -1L)
+
+    CardBlock {
+        Text("ChatGPT 账号登录", fontWeight = FontWeight.Bold, fontSize = 17.sp)
+        Text(
+            "官方 OAuth（PKCE）· 凭证加密存本机 · 到期前自动刷新",
+            color = Muted,
+            fontSize = 12.sp
+        )
+        Spacer(Modifier.height(10.dp))
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.size(9.dp).background(
+                    if (loggedIn && !revoked) Green else Color(0xFFE0A43C),
+                    CircleShape
+                )
+            )
+            Spacer(Modifier.width(8.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    when {
+                        revoked -> "登录已失效，需重新登录"
+                        loggedIn -> "已登录" + (if (email.isNotBlank()) " · $email" else "")
+                        else -> "未登录"
+                    },
+                    fontWeight = FontWeight.Medium
+                )
+                if (loggedIn) {
+                    Text(
+                        buildString {
+                            if (plan.isNotBlank()) append(plan)
+                            if (expiresIn >= 0) {
+                                if (isNotEmpty()) append(" · ")
+                                append("token 剩余 ").append(expiresIn / 60).append(" 分钟")
+                            }
+                        },
+                        color = Muted,
+                        fontSize = 11.sp
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(10.dp))
+        Button(
+            onClick = {
+                busy = true
+                onLogin()
+                busy = false
+            },
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Icon(Icons.Outlined.Login, null)
+            Spacer(Modifier.width(8.dp))
+            Text(if (loggedIn) "重新登录" else "登录 ChatGPT")
+        }
+        if (loggedIn) {
+            OutlinedButton(
+                onClick = onLogout,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp)
+            ) { Text("退出登录（清除本机凭证）") }
+        }
+
+        Text(
+            "登录页在系统浏览器里完成，回到本页后如未自动更新，把浏览器地址栏整条 URL 粘到下面提交。",
+            color = Muted,
+            fontSize = 11.sp
+        )
+        Spacer(Modifier.height(6.dp))
+        OutlinedTextField(
+            value = manualUrl,
+            onValueChange = { manualUrl = it },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            placeholder = { Text("http://localhost:1455/auth/callback?code=...&state=...") }
+        )
+        OutlinedButton(
+            onClick = {
+                if (manualUrl.isNotBlank()) {
+                    onCallback(manualUrl.trim())
+                    manualUrl = ""
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp)
+        ) { Text("提交回调地址完成登录") }
     }
 }
 
@@ -1169,9 +1350,15 @@ private fun LatencyChart(data: List<LatencyPoint>) {
 private fun UpstreamConfig(
     initialConfig: RelayConfig,
     modelIds: List<String>,
+    oauth: JSONObject,
     onSave: (RelayConfig) -> Unit,
-    onImportKit: () -> Unit
+    onImportKit: () -> Unit,
+    onOauthLogin: () -> Unit,
+    onOauthLogout: () -> Unit,
+    onOauthCallback: (String) -> Unit
 ) {
+    var webToken by remember(initialConfig) { mutableStateOf(initialConfig.webAccessToken) }
+    var webSession by remember(initialConfig) { mutableStateOf(initialConfig.webSessionToken) }
     var expanded by remember { mutableStateOf(false) }
     var proxyMode by remember(initialConfig) { mutableStateOf(initialConfig.proxyMode) }
     var hookToken by remember(initialConfig) { mutableStateOf(initialConfig.accessToken) }
@@ -1232,18 +1419,11 @@ private fun UpstreamConfig(
                     FieldLabel("Session ID（可选）")
                     OutlinedTextField(value = sessionId, onValueChange = { sessionId = it }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                 } else {
-                    FieldLabel("Web Access Token")
-                    OutlinedTextField(
-                        value = webToken, onValueChange = { webToken = it },
-                        modifier = Modifier.fillMaxWidth(), singleLine = true,
-                        visualTransformation = if (revealSecrets) VisualTransformation.None else PasswordVisualTransformation(),
-                        placeholder = { Text("ChatGPT web access token") }
-                    )
-                    FieldLabel("Session Cookie（可选）")
-                    OutlinedTextField(
-                        value = webSession, onValueChange = { webSession = it },
-                        modifier = Modifier.fillMaxWidth(), singleLine = true,
-                        visualTransformation = if (revealSecrets) VisualTransformation.None else PasswordVisualTransformation()
+                    FieldLabel("网页版凭证")
+                    Text(
+                        "网页版通道使用 OAuth 登录得到的凭证（加密保存、自动刷新）。请在上方“ChatGPT 账号登录”完成登录，无需手工粘贴 token。",
+                        color = Muted,
+                        fontSize = 12.sp
                     )
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -2146,6 +2326,26 @@ private fun readableError(e: Exception): String {
         message.contains("UnknownHost", true) -> "无法解析服务器地址"
         else -> "请求失败：$message"
     }
+}
+
+/** 用系统浏览器打开授权页（不内嵌 WebView：OAuth 登录页会被上游拒绝内嵌）。 */
+private fun openBrowser(context: Context, url: String) {
+    runCatching {
+        context.startActivity(
+            android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
+    }
+}
+
+/** 用系统浏览器打开授权页（OAuth 页面拒绝内嵌 WebView）。 */
+private fun openBrowser(context: Context, url: String) {
+    runCatching {
+        context.startActivity(
+            android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
+    }.onFailure { Toast.makeText(context, "打不开浏览器：" + it.message, Toast.LENGTH_SHORT).show() }
 }
 
 private fun copyText(context: Context, value: String) {

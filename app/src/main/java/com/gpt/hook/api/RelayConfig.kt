@@ -14,6 +14,12 @@ data class RelayConfig(
     val accessToken: String = "",
     val oaiDid: String = "",
     val sessionId: String = "",
+    /**
+     * 网页版通道改为 **OAuth 授权码 + PKCE**（Sign in with ChatGPT）。
+     *
+     * 不能再复用 chatgpt.com 网页 cookie：官方订阅访问走 api.openai.com/v1/responses，
+     * 旧 webAccessToken 字段仅为兼容旧配置保留（迁移后由 OAuth 凭证接管）。
+     */
     val webBase: String = "https://chatgpt.com",
     val webAccessToken: String = "",
     val webSessionToken: String = "",
@@ -28,6 +34,11 @@ data class RelayConfig(
 ) {
     val ready: Boolean
         get() = if (proxyMode == "web") webAccessToken.isNotBlank()
+        else accessToken.isNotBlank() && oaiDid.isNotBlank()
+
+    /** web 通道的真实就绪判断：OAuth 凭证（加密存储）是否存在且未失效。 */
+    fun readyWithOauth(oauth: OAuthCredential?): Boolean =
+        if (proxyMode == "web") oauth != null && !ChatGptCredentialStore.isRevoked(oauth.accessToken)
         else accessToken.isNotBlank() && oaiDid.isNotBlank()
 
     companion object {
@@ -102,6 +113,9 @@ data class RelayConfig(
         fun importKit(ctx: Context, json: String): RelayConfig {
             val o = org.json.JSONObject(json)
             val cur = load(ctx)
+            // 兼容 oauth 形状：{oauth:{access_token,refresh_token,expires_at}} 或顶层 access_token+refresh_token
+            val oauthObj = o.optJSONObject("oauth") ?: o
+            OAuthCredential.fromJson(oauthObj.toString())?.let { ChatGptCredentialStore.save(it) }
             val next = cur.copy(
                 accessToken = o.optString("access_token", cur.accessToken),
                 oaiDid = o.optString("oai_did", o.optString("oai-did", cur.oaiDid)),

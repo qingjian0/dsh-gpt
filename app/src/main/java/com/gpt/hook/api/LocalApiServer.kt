@@ -38,6 +38,9 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
     /** (send 解禁时间戳, 查询时间) —— 30 秒内复用，避免每个请求都探测 */
     @Volatile private var blockedCache: Pair<Long, Long>? = null
     @Volatile private var running = false
+    /** 进行中的 OAuth 登录（verifier/state 只存内存，进程被杀即作废，宁可重登也不落盘 PKCE 秘密）。 */
+    private var pendingLogin: PendingLogin? = null
+    private val loginLock = Any()
 
     val port: Int get() = cfg.port
 
@@ -120,7 +123,7 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                     target == "/health" -> json(out, 200, health())
                     cfg.apiKey.isBlank() -> json(out, 503, err("configuration_required", "configure a gateway API key before using protected API routes"))
                     !authorized(headers) -> json(out, 401, err("invalid_api_key", "missing or bad Authorization"))
-                    target == "/v1/models" -> json(out, 200, OpenAiCompat.modelsJson(OpenAiCompat.DEFAULT_MODELS))
+                    target == "/v1/models" -> json(out, 200, modelsPayload())
                     target == "/v1/capabilities" && method == "GET" -> json(out, 200, OpenAiCompat.capabilitiesJson())
                     // MCP 通道：不消耗每小时消息额度，可直接调工具/读网页
                     target == "/v1/status" && method == "GET" -> statusRoute(out)
@@ -143,6 +146,11 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                     target == "/v1/conversations" || target.startsWith("/v1/conversations/") ->
                         conversationRoute(out, method, target, body, headers)
                     target == "/v1/usage" && method == "GET" -> json(out, 200, UsageMeter.snapshot(context).toString())
+                    target == "/v1/oauth/status" && method == "GET" -> json(out, 200, oauthStatusJson().toString())
+                    target == "/v1/oauth/login" && method == "POST" -> oauthLoginRoute(out)
+                    target == "/v1/oauth/callback" && method == "POST" -> oauthCallbackRoute(out, body)
+                    target == "/v1/oauth/logout" && method == "POST" -> oauthLogoutRoute(out)
+                    target == "/v1/oauth/credential" && method == "PUT" -> oauthCredentialRoute(out, body)
                     method == "POST" && target == "/v1/chat/completions" ->
                         measureUsage(body ?: ByteArray(0)) { chat(out, body ?: ByteArray(0), headers) }
                     method == "POST" && target == "/v1/responses" ->
@@ -512,9 +520,31 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         return supplied.isNotEmpty() && supplied == expected
     }
 
+
+    /** 当前通道是否就绪：web 由加密存储里的 OAuth 凭证决定，hook 由 token+DID 决定。 */
+    private fun channelReady(): Boolean = cfg.readyWithOauth(ChatGptCredentialStore.load())
+
+    /** OAuth 登录态摘要（不含 token 明文），给 /v1/oauth/status 与 UI 用。 */
+    private fun oauthStatusJson(): JSONObject {
+        val credential = ChatGptCredentialStore.load()
+        val now = System.currentTimeMillis()
+        return JSONObject()
+            .put("logged_in", credential != null)
+            .put("revoked", credential?.let { ChatGptCredentialStore.isRevoked(it.accessToken) } ?: false)
+            .put("email", credential?.email.orEmpty())
+            .put("plan", credential?.planLabel.orEmpty())
+            .put("account_id", credential?.accountId.orEmpty())
+            .put("has_refresh_token", credential?.hasRefreshToken ?: false)
+            .put(
+                "expires_in_seconds",
+                credential?.takeIf { it.expiresAtMillis > 0 }?.let { (it.expiresAtMillis - now) / 1000 } ?: -1L
+            )
+            .put("expired", credential?.let { it.expiresAtMillis in 1 until now } ?: false)
+    }
+
     private fun health(): String = JSONObject()
         .put("ok", true).put("port", cfg.port)
-        .put("ready", cfg.ready).put("upstream", cfg.upstreamBase)
+        .put("ready", channelReady()).put("upstream", cfg.upstreamBase)
         .toString()
 
     private fun responses(out: OutputStream, body: ByteArray, headers: Map<String, String>) {
@@ -668,19 +698,32 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         val id = (if (responsesMode) "resp-" else "chatcmpl-") +
             UUID.randomUUID().toString().replace("-", "").take(24)
         val responseItemId = "msg_" + UUID.randomUUID().toString().replace("-", "").take(24)
+        // ---- 通道分流：web = OAuth + Responses；hook = Android DPoP + conversation ----
+        if (cfg.proxyMode == "web") {
+            chatViaOauth(out, req, model, id, responseItemId, stream, responsesMode, responseHeaders, deferredToolStream)
+            return
+        }
         val client = ChatGptClient(cfg)
         val payload = OpenAiCompat.toConversation(
             req, conversationForTurn.upstreamConversationId, conversationForTurn.upstreamParentMessageId,
             cfg.connectorId, cfg.temporaryChat, cfg.fastMode, cfg.reasoningEffort, cfg.searchEnabled, cfg.model
         ).toString().toByteArray(Charsets.UTF_8)
 
-        val conn = try {
+        var conn = try {
             client.open("POST", "/backend-api/conversation", payload, "text/event-stream")
         } catch (t: Throwable) {
             UsageMeter.markFailure(502)
             json(out, 502, err("upstream_unreachable", t.message ?: "connect failed"), responseHeaders); return
         }
-        val code = conn.responseCode
+        var code = conn.responseCode
+        // 401 有限自愈：强制刷新一次凭证后重试，仍失败则交回客户端
+        if (code == 401) {
+            runCatching { conn.disconnect() }
+            val retry = runCatching {
+                client.open("POST", "/backend-api/conversation", payload, "text/event-stream")
+            }.getOrNull()
+            if (retry != null) { conn = retry; code = retry.responseCode }
+        }
         if (code >= 400) {
             UsageMeter.markFailure(code)
             val text = (conn.errorStream ?: conn.inputStream)?.bufferedReader()?.readText().orEmpty()
@@ -867,7 +910,7 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         json(out, 200, JSONObject()
             .put("ok", true)
             .put("running", running)
-            .put("ready", cfg.ready)
+            .put("ready", channelReady())
             .put("proxy_mode", cfg.proxyMode)
             .put("upstream", if (cfg.proxyMode == "web") cfg.webBase else cfg.upstreamBase)
             .put("usage", UsageMeter.snapshot(context))
@@ -911,7 +954,7 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
 
     private fun proxyModeRoute(out: OutputStream, method: String, body: ByteArray?) {
         if (method == "GET") {
-            json(out, 200, JSONObject().put("proxy_mode", cfg.proxyMode).put("ready", cfg.ready).toString())
+            json(out, 200, JSONObject().put("proxy_mode", cfg.proxyMode).put("ready", channelReady()).toString())
             return
         }
         if (method != "PUT") { json(out, 405, err("method_not_allowed", "use GET or PUT")); return }
@@ -920,7 +963,7 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         if (mode != "hook" && mode != "web") { json(out, 400, err("invalid_request", "mode must be hook or web")); return }
         cfg = cfg.copy(proxyMode = mode)
         RelayConfig.save(context, cfg)
-        json(out, 200, JSONObject().put("ok", true).put("proxy_mode", mode).put("ready", cfg.ready).toString())
+        json(out, 200, JSONObject().put("ok", true).put("proxy_mode", mode).put("ready", channelReady()).toString())
     }
 
     private fun kitImportRoute(out: OutputStream, body: ByteArray?) {
@@ -928,10 +971,302 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         runCatching { RelayConfig.importKit(context, raw) }
             .onSuccess {
                 cfg = it
-                json(out, 200, JSONObject().put("ok", true).put("ready", it.ready)
+                json(out, 200, JSONObject().put("ok", true).put("ready", it.readyWithOauth(ChatGptCredentialStore.load()))
                     .put("proxy_mode", it.proxyMode).toString())
             }
             .onFailure { json(out, 400, err("invalid_kit", it.message ?: "kit import failed")) }
+    }
+
+
+    /**
+     * web 通道：OAuth 凭证 + Codex Responses。
+     *
+     * 与 hook 通道共用同一套 OpenAI 兼容出口，差异全部收在这里：
+     * Chat 请求体 → Responses 请求体、Codex SSE → chat.completion.chunk。
+     * 上游只支持流式，非流式在此聚合成一次性 JSON。
+     */
+    private fun chatViaOauth(
+        out: OutputStream,
+        req: JSONObject,
+        model: String,
+        id: String,
+        responseItemId: String,
+        stream: Boolean,
+        responsesMode: Boolean,
+        responseHeaders: Map<String, String>,
+        deferredToolStream: Boolean,
+    ) {
+        UsageMeter.begin(model, "web", req.toString().length)
+        var credential = ChatGptCredentialStore.load()
+        credential = ChatGptCredentialStore.ensureUsable(credential) ?: credential
+        if (credential == null) {
+            UsageMeter.markFailure(401)
+            json(
+                out, 401,
+                err("oauth_required", "网页版通道需要先登录 ChatGPT 账号（OAuth），请在 API 页点击“登录 ChatGPT”"),
+                responseHeaders
+            )
+            return
+        }
+
+        val options = ChatGptResponses.toResponsesRequest(req, model)
+        // 快速模式不写 reasoning.effort；联网检索不适用于 Codex 通道，交给服务端工具
+        if (cfg.fastMode) options.optJSONObject("reasoning")?.remove("effort")
+        val payload = options.toString().toByteArray(Charsets.UTF_8)
+
+        fun send(): HttpURLConnection? = runCatching {
+            ChatGptCodexClient(credential!!).open(
+                "POST", "/responses", payload, "text/event-stream"
+            )
+        }.getOrNull()
+
+        var conn = send()
+        if (conn == null) {
+            UsageMeter.markFailure(502)
+            json(out, 502, err("upstream_unreachable", "无法连接 chatgpt.com/backend-api/codex"), responseHeaders)
+            return
+        }
+        var code = conn.responseCode
+        if (code == 401) {
+            // 401 → 强制刷新一次（受冷却/复用窗口约束），成功则重试一次
+            runCatching { conn.disconnect() }
+            val refreshed = ChatGptCredentialStore.ensureUsable(credential, force = true)
+            if (refreshed != null) {
+                credential = refreshed
+                conn = send()
+                code = conn?.responseCode ?: 502
+            }
+        }
+        if (conn == null || code >= 400) {
+            val text = conn?.let { runCatching { ChatGptCodexClient(credential).readAll(it) }.getOrNull() }.orEmpty()
+            runCatching { conn?.disconnect() }
+            UsageMeter.markFailure(code)
+            val hint = if (code == 401) "OAuth 凭证已失效，请重新登录 ChatGPT 账号" else "上游错误"
+            json(out, code, text.ifBlank { err("upstream_error", "$hint（HTTP $code）") }, responseHeaders)
+            return
+        }
+
+        val translator = ChatGptResponses.SseTranslator(id, model, mode = "web")
+        val textOut = StringBuilder()
+        var sent = ""
+        try {
+            val reader = BufferedReader(InputStreamReader(conn.inputStream, Charsets.UTF_8))
+            if (stream) {
+                writeHead(out, 200, "text/event-stream; charset=utf-8", null, responseHeaders)
+                reader.forEachLine { line ->
+                    for (frame in translator.translate(line)) {
+                        if (responsesMode) {
+                            // Responses 客户端：把 chat chunk 里的正文抽出来发 response 事件
+                            val obj = runCatching { JSONObject(frame.removePrefix("data: ").trim()) }.getOrNull()
+                            val delta = obj?.optJSONArray("choices")?.optJSONObject(0)
+                                ?.optJSONObject("delta")?.optString("content").orEmpty()
+                            if (delta.isNotEmpty()) {
+                                sent += delta
+                                textOut.append(delta)
+                                writeResponseEvent(out, "response.output_text.delta", JSONObject()
+                                    .put("item_id", responseItemId).put("output_index", 0)
+                                    .put("content_index", 0).put("delta", delta))
+                            }
+                        } else {
+                            val obj = runCatching { JSONObject(frame.removePrefix("data: ").trim()) }.getOrNull()
+                            obj?.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("delta")
+                                ?.optString("content").takeIf { !it.isNullOrEmpty() }?.let { sent += it; textOut.append(it) }
+                            writeChunk(out, frame)
+                        }
+                    }
+                }
+                val tail = translator.onFinish()
+                if (responsesMode) {
+                    val full = textOut.toString()
+                    writeResponseEvent(out, "response.completed", JSONObject()
+                        .put("response", OpenAiCompat.responseObject(id, model, full, itemId = responseItemId)))
+                } else {
+                    for (frame in tail) writeChunk(out, frame)
+                }
+                out.flush()
+            } else {
+                reader.forEachLine { line ->
+                    translator.translate(line).forEach { frame ->
+                        runCatching { JSONObject(frame.removePrefix("data: ").trim()) }.getOrNull()
+                            ?.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("delta")
+                            ?.optString("content").takeIf { !it.isNullOrEmpty() }?.let { sent += it; textOut.append(it) }
+                    }
+                }
+                val full = textOut.toString()
+                val usage = translator.lastUsage()
+                json(
+                    out, 200,
+                    if (responsesMode) OpenAiCompat.responseObject(id, model, full).toString()
+                    else JSONObject(OpenAiCompat.completion(id, model, full, usage?.optInt("prompt_tokens") ?: 0))
+                        .put("usage", usage ?: JSONObject().put("prompt_tokens", 0)
+                            .put("completion_tokens", 0).put("total_tokens", 0))
+                        .put("dsh", JSONObject().put("mode", "web")).toString(),
+                    responseHeaders
+                )
+            }
+            UsageMeter.markOutput(textOut.toString())
+            UsageMeter.markSuccess()
+            UsageMeter.finish(context)
+        } catch (t: Throwable) {
+            try { socketSafeFlush(out) } catch (_: Throwable) { }
+            UsageMeter.markFailure(502)
+        } finally {
+            runCatching { conn.disconnect() }
+        }
+    }
+
+
+    // ---------- OAuth 登录与凭证生命周期 ----------
+
+    /**
+     * 发起登录：生成 PKCE + state，起回环监听，返回授权 URL。
+     * verifier/state 只存内存（进程被杀即作废，宁可重登也不落盘 PKCE 秘密）。
+     */
+    private fun oauthLoginRoute(out: OutputStream) {
+        synchronized(loginLock) {
+            pendingLogin?.let { runCatching { it.server.stop() } }
+            val oauth = ChatGptOAuth()
+            val pkce = oauth.newPkce()
+            val state = oauth.newState()
+            val server = OAuthLoopbackServer()
+            if (!server.start()) {
+                json(out, 500, err("callback_port_unavailable",
+                    server.failureMessage() ?: "回调端口 1455 被占用，请关闭刚才的登录页后重试"))
+                return
+            }
+            pendingLogin = PendingLogin(state, pkce.verifier, server, System.currentTimeMillis())
+            json(out, 200, JSONObject()
+                .put("ok", true)
+                .put("auth_url", oauth.buildAuthUrl(state, pkce))
+                .put("redirect_uri", ChatGptOAuth.Constants.REDIRECT_URI)
+                .put("expires_in_seconds", ChatGptOAuth.Constants.LOGIN_TTL_MS / 1000)
+                .toString())
+        }
+    }
+
+    /** 回调提交：校验 state（防登录劫持）→ 一次性消费 → 换 token → 加密落盘。 */
+    private fun oauthCallbackRoute(out: OutputStream, body: ByteArray?) {
+        val request = runCatching { JSONObject(body?.toString(Charsets.UTF_8) ?: "") }.getOrNull()
+        val callbackUrl = request?.optString("callback_url").orEmpty()
+        val maxWait = (request?.optLong("wait_seconds", 0L) ?: 0L).coerceIn(0L, 300L)
+        if (callbackUrl.isBlank() && maxWait <= 0L) {
+            json(out, 400, err("invalid_request", "需要 callback_url，或给出 wait_seconds 让网关等待回环回调"))
+            return
+        }
+        synchronized(loginLock) {
+            val pending = pendingLogin
+            if (pending == null) {
+                json(out, 409, err("no_pending_login", "没有进行中的登录，请先调用 /v1/oauth/login"))
+                return
+            }
+            if (System.currentTimeMillis() - pending.createdAt > ChatGptOAuth.Constants.LOGIN_TTL_MS) {
+                pending.server.stop()
+                pendingLogin = null
+                json(out, 409, err("login_expired", "登录会话已超时，请重新发起"))
+                return
+            }
+            val code: String
+            val state: String
+            if (callbackUrl.isNotBlank()) {
+                val query = OAuthLoopbackServer.parseQuery(callbackUrl.substringAfter('?', ""))
+                code = query["code"].orEmpty()
+                state = query["state"].orEmpty()
+                pending.server.stop()
+                pendingLogin = null
+            } else {
+                val result = pending.server.await(maxWait * 1000)
+                pendingLogin = null
+                if (result == null) {
+                    val failure = pending.server.failureMessage()
+                    pending.server.stop()
+                    json(out, 408, err("callback_timeout", failure ?: "等待浏览器回调超时"))
+                    return
+                }
+                code = result.code
+                state = result.state
+            }
+            if (code.isBlank()) {
+                json(out, 400, err("invalid_callback", "回调里没有 code")); return
+            }
+            if (state.isNotEmpty() && state != pending.state) {
+                json(out, 400, err("state_mismatch", "登录状态校验失败（state 不匹配），可能存在登录劫持")); return
+            }
+            runCatching { ChatGptOAuth().exchangeCode(code, pending.verifier) }
+                .onSuccess { credential ->
+                    ChatGptCredentialStore.save(credential)
+                    cfg = cfg.copy(proxyMode = "web")
+                    RelayConfig.save(context, cfg)
+                    json(out, 200, JSONObject()
+                        .put("ok", true)
+                        .put("proxy_mode", "web")
+                        .put("oauth", oauthStatusJson())
+                        .toString())
+                }
+                .onFailure { json(out, 400, err("exchange_failed", it.message ?: "code 交换失败")) }
+        }
+    }
+
+    private fun oauthLogoutRoute(out: OutputStream) {
+        ChatGptCredentialStore.save(null)
+        runCatching { ChatGptCodexClient.invalidateModels() }
+        json(out, 200, JSONObject().put("ok", true).put("oauth", oauthStatusJson()).toString())
+    }
+
+    /** 手工粘贴/导入 oauth 凭证（兼容 kit.json 的顶层 access_token 形态）。 */
+    private fun oauthCredentialRoute(out: OutputStream, body: ByteArray?) {
+        val raw = body?.toString(Charsets.UTF_8).orEmpty()
+        val credential = OAuthCredential.fromJson(raw)
+            ?: OAuthCredential.fromJson(runCatching { JSONObject(raw).optJSONObject("oauth")?.toString() }.getOrNull())
+        if (credential == null || credential.accessToken.isBlank()) {
+            json(out, 400, err("invalid_credential", "需要 access_token（可选 refresh_token / expires_at）"))
+            return
+        }
+        ChatGptCredentialStore.save(credential)
+        json(out, 200, JSONObject().put("ok", true).put("oauth", oauthStatusJson()).toString())
+    }
+
+    private class PendingLogin(
+        val state: String,
+        val verifier: String,
+        val server: OAuthLoopbackServer,
+        val createdAt: Long,
+    )
+
+
+    /**
+     * 模型目录：web 通道优先用 Codex 上游真实目录（30 分钟缓存），失败回落内建档位；
+     * hook 通道仍用内建档位（Android 端能力由 system_hints 决定）。
+     */
+    private fun modelsPayload(): String {
+        val active = cfg.model.ifBlank { "auto" }
+        val ids = if (cfg.proxyMode == "web") {
+            val cached = ChatGptCodexClient.cachedModelsOrEmpty()
+            if (cached.isNotEmpty()) cached
+            else fetchOauthModels().ifEmpty { OpenAiCompat.DEFAULT_MODELS }
+        } else {
+            OpenAiCompat.DEFAULT_MODELS
+        }
+        return OpenAiCompat.modelsJson(
+            ids.distinct(),
+            active = active,
+            mode = cfg.proxyMode,
+            latencyMs = { 0L }
+        )
+    }
+
+    /** 拉一次 Codex 模型目录并缓存；失败返回空表（调用方回落到内建档位）。 */
+    private fun fetchOauthModels(): List<String> {
+        val current = ChatGptCredentialStore.load() ?: return emptyList()
+        val credential = ChatGptCredentialStore.ensureUsable(current) ?: current
+        return runCatching {
+            val client = ChatGptCodexClient(credential)
+            val conn = client.open("GET", "/models?client_version=0.55.0", null, "application/json")
+            val status = conn.responseCode
+            val raw = client.readAll(conn)
+            runCatching { conn.disconnect() }
+            if (status !in 200..299) emptyList()
+            else ChatGptResponses.parseModels(raw).also { if (it.isNotEmpty()) ChatGptCodexClient.cacheModels(it) }
+        }.getOrDefault(emptyList())
     }
 
     private fun mcpTools(out: OutputStream) {

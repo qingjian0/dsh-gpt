@@ -1,7 +1,9 @@
 package com.gpt.hook
 
 import android.app.Application
+import com.gpt.hook.api.AndroidSecretBox
 import com.gpt.hook.api.ApiService
+import com.gpt.hook.api.ChatGptCredentialStore
 import com.gpt.hook.api.ConversationRepository
 import com.gpt.hook.api.RelayConfig
 import io.github.libxposed.service.XposedService
@@ -15,6 +17,8 @@ class DshApplication : Application(), XposedServiceHelper.OnServiceListener {
     override fun onCreate() {
         super.onCreate()
         conversationRepository = ConversationRepository(this)
+        // OAuth 凭证加密存储：Keystore 包裹，缺失时退化为内存（绝不明文落盘）
+        ChatGptCredentialStore.attach(AndroidSecretBox(this))
         XposedServiceHelper.registerListener(this)
         if (RelayConfig.load(this).enabled) {
             runCatching { ApiService.start(this) }

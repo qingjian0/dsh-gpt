@@ -35,6 +35,7 @@ data class RelayConfig(
 
         fun load(ctx: Context): RelayConfig {
             val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            if (p.contains("codexToken")) p.edit().remove("codexToken").apply()
             val defaults = RelayConfig()
             val storedApiKey = p.getString("apiKey", null)
             val apiKey = storedApiKey?.takeIf { it.isNotBlank() }

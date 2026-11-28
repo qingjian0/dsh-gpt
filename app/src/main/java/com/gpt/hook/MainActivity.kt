@@ -1793,8 +1793,7 @@ private fun HookPage(
     var methodName by remember { mutableStateOf("") }
     var mode by remember { mutableStateOf("observe") }
     var parameters by remember { mutableStateOf("[]") }
-    var rawExpanded by remember { mutableStateOf(false) }
-    var eventExpanded by remember { mutableStateOf(false) }
+    var showRuntimeDetails by remember { mutableStateOf(false) }
 
     val enabled = hook.optBoolean("enabled", false)
     val ruleCount = hook.optInt("configuredRuleCount", 0)
@@ -1803,6 +1802,47 @@ private fun HookPage(
         ?.takeIf { !it.isNullOrBlank() && it != "unavailable" }
         ?: "配置已保存"
     val configuredHooks = hook.optJSONArray("configuredHooks") ?: JSONArray()
+
+    if (showRuntimeDetails) {
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(20.dp),
+            verticalArrangement = Arrangement.spacedBy(15.dp)
+        ) {
+            item {
+                TextButton(onClick = { showRuntimeDetails = false }) {
+                    Icon(Icons.Outlined.ArrowBack, null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("返回 Hook")
+                }
+                Text("Hook 运行详情", fontSize = 25.sp, fontWeight = FontWeight.Bold)
+                Text("目标进程回报的运行数据与观察事件", color = Muted, fontSize = 12.sp)
+            }
+            item {
+                CardBlock {
+                    Text("最近观察事件", fontWeight = FontWeight.Bold)
+                    Text("${events.length()} 条事件", color = Muted, fontSize = 12.sp)
+                    for (i in 0 until events.length()) {
+                        val event = events.optJSONObject(i) ?: continue
+                        HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+                        Column(Modifier.padding(vertical = 8.dp)) {
+                            Text(event.optString("method").ifBlank { event.optString("name") }, fontWeight = FontWeight.SemiBold)
+                            Text(event.optString("class").ifBlank { event.optString("class_name") }, color = Muted, fontSize = 12.sp)
+                            Text(event.optString("timestamp"), color = Muted, fontSize = 11.sp)
+                        }
+                    }
+                    if (events.length() == 0) Text("目标进程尚无观察事件", color = Muted, fontSize = 13.sp)
+                }
+            }
+            item {
+                CardBlock {
+                    Text("原始观察报告 JSON", fontWeight = FontWeight.Bold)
+                    Text(hook.toString(2), fontSize = 11.sp, lineHeight = 17.sp, color = Muted)
+                }
+            }
+        }
+        return
+    }
 
     LazyColumn(
         Modifier.fillMaxSize(),
@@ -1986,78 +2026,14 @@ private fun HookPage(
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .clickable { eventExpanded = !eventExpanded },
+                        .clickable { showRuntimeDetails = true },
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text("最近观察事件", fontWeight = FontWeight.Bold)
-                        Text("${events.length()} 条事件", color = Muted, fontSize = 12.sp)
+                        Text("运行详情", fontWeight = FontWeight.Bold)
+                        Text("观察事件、运行快照与诊断数据", color = Muted, fontSize = 12.sp)
                     }
-                    Icon(
-                        if (eventExpanded) Icons.Outlined.ExpandLess
-                        else Icons.Outlined.ExpandMore,
-                        null
-                    )
-                }
-
-                AnimatedVisibility(eventExpanded) {
-                    Column {
-                        for (i in 0 until events.length()) {
-                            val event = events.optJSONObject(i) ?: continue
-                            HorizontalDivider(
-                                color = MaterialTheme.colorScheme.surfaceVariant
-                            )
-                            Column(Modifier.padding(vertical = 10.dp)) {
-                                Text(
-                                    event.optString("method")
-                                        .ifBlank {
-                                            event.optString("name")
-                                        },
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Text(
-                                    event.optString("class")
-                                        .ifBlank { event.optString("class_name") },
-                                    color = Muted,
-                                    fontSize = 12.sp
-                                )
-                                Text(
-                                    event.optString("timestamp"),
-                                    color = Muted,
-                                    fontSize = 11.sp
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        item {
-            CardBlock {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .clickable { rawExpanded = !rawExpanded },
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("原始观察报告 JSON", Modifier.weight(1f), fontWeight = FontWeight.Bold)
-                    Icon(
-                        if (rawExpanded) Icons.Outlined.ExpandLess
-                        else Icons.Outlined.ExpandMore,
-                        null
-                    )
-                }
-
-                AnimatedVisibility(rawExpanded) {
-                    Column {
-                        Text(
-                            hook.toString(2),
-                            fontSize = 11.sp,
-                            lineHeight = 17.sp,
-                            color = Muted
-                        )
-                    }
+                    Icon(Icons.Outlined.ChevronRight, null)
                 }
             }
         }

@@ -32,7 +32,8 @@ data class RelayConfig(
     val ready: Boolean
         get() = when (proxyMode) {
             "web" -> webAccessToken.isNotBlank()
-            "siwc" -> siwcProfileId.isNotBlank()
+            // 「网页授权」走的就是网页凭证，不再要求 SIWC 账号档案
+            "siwc" -> webAccessToken.isNotBlank()
             else -> accessToken.isNotBlank() && oaiDid.isNotBlank()
         }
 

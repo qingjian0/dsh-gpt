@@ -8,7 +8,8 @@ import java.net.URL
 class ChatGptClient(private val cfg: RelayConfig) {
 
     fun open(method: String, path: String, body: ByteArray?, accept: String): HttpURLConnection {
-        val web = cfg.proxyMode == "web"
+        // 「网页授权」(siwc) 与「网页凭证」(web) 走同一条网页通道
+        val web = cfg.proxyMode == "web" || cfg.proxyMode == "siwc"
         val base = (if (web) cfg.webBase else cfg.upstreamBase).trimEnd('/')
         val normalizedPath = when {
             path.startsWith("/backend-api") -> path

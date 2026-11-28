@@ -1300,7 +1300,7 @@ private fun UpstreamConfig(
                     FilterChip(
                         selected = proxyMode == "siwc",
                         onClick = { proxyMode = "siwc" },
-                        label = { Text("订阅授权") },
+                        label = { Text("网页授权") },
                         modifier = Modifier.weight(1f),
                     )
                 }
@@ -1340,7 +1340,7 @@ private fun UpstreamConfig(
                     )
                 } else {
                     Text(
-                        "使用上方账号管理中当前选中的 ChatGPT 账号。网关开放 /v1/responses 与 /v1/models；不走 backend-api，且不支持 /v1/chat/completions、MCP 和旧版网页读取通道。",
+                        "网页版通道：在上方点「登录 ChatGPT（自动配置网页通道）」登录一次即可。请求走 chatgpt.com/backend-api，免费账号可用。",
                         color = Muted, fontSize = 12.sp
                     )
                 }

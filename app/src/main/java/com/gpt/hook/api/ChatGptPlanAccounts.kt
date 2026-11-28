@@ -165,7 +165,7 @@ internal fun ChatGptPlanAccounts(context: Context) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("ChatGPT 官方账号授权", fontWeight = FontWeight.Bold)
             Text(
-                "系统浏览器 OAuth · PKCE · Android Keystore 加密。独立于 Android DPoP / Web Cookie；选择账号后，若网关处于「ChatGPT 订阅授权」模式，会同步切换网关账号。",
+                "网页版通道：App 内登录一次 chatgpt.com，自动读取会话 cookie 并换取 accessToken，直接走 chatgpt.com/backend-api。免费账号可用，无需订阅。",
                 color = Color.Gray,
                 fontSize = 12.sp,
             )
@@ -297,9 +297,13 @@ internal fun ChatGptPlanAccounts(context: Context) {
             Button(
                 enabled = !busy,
                 modifier = Modifier.fillMaxWidth(),
-                onClick = { startLogin(null, forceNewRegistration = true) },
+                onClick = {
+                    // 这个按钮直接走网页版：WebView 里登录一次，自动拿到网页会话凭证，
+                    // 并自动把网关切到网页通道。SIWC/Codex 属订阅能力，免费号会被拦。
+                    context.startActivity(ChatGptWebLoginActivity.intent(context))
+                },
                 shape = RoundedCornerShape(12.dp),
-            ) { Text(if (busy) "正在等待授权…" else "登录（使用浏览器账号）") }
+            ) { Text("登录 ChatGPT（自动配置网页通道）") }
             Spacer(Modifier.height(2.dp))
         }
     }

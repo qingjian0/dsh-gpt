@@ -1250,6 +1250,23 @@ private fun UpstreamConfig(
     var effortExpanded by remember { mutableStateOf(false) }
     var importStatus by remember { mutableStateOf("") }
 
+    // 从 Chrome 复制完切回 App 时自动读取剪贴板里的 accessToken
+    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME && proxyMode == "web") {
+                com.gpt.hook.api.ChatGptWebCredentials.fromClipboard(appContext)?.let { token ->
+                    if (token != webToken) {
+                        webToken = token
+                        importStatus = "已自动读取剪贴板中的 accessToken"
+                    }
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     // 网页通道：WebView 里登录一次，cookie 自动换成 accessToken，无需手抄。
     val webLoginLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
@@ -1345,10 +1362,25 @@ private fun UpstreamConfig(
                 } else if (proxyMode == "web") {
                     OutlinedButton(
                         modifier = Modifier.fillMaxWidth(),
-                        onClick = { webLoginLauncher.launch(com.gpt.hook.api.ChatGptWebLoginActivity.intent(appContext)) },
-                    ) { Text("打开 ChatGPT 登录（自动获取凭证）") }
+                        onClick = { com.gpt.hook.api.ChatGptWebCredentials.openSessionPage(appContext) },
+                    ) { Text("打开凭证页（Chrome 内，带你的登录态）") }
+                    OutlinedButton(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = {
+                            val token = com.gpt.hook.api.ChatGptWebCredentials.fromClipboard(appContext)
+                            if (token != null) {
+                                webToken = token
+                                importStatus = "已从剪贴板读取 accessToken"
+                            } else {
+                                importStatus = "剪贴板里没有可用的 accessToken"
+                            }
+                        },
+                    ) { Text("从剪贴板读取 accessToken") }
+                    if (importStatus.isNotBlank()) {
+                        Text(importStatus, fontSize = 11.sp, color = Color(0xFF2F6FEB))
+                    }
                     Text(
-                        "兼容旧版 ChatGPT 网页会话：需要手动提供凭证，不提供网页登录后自动提取。网页 backend-api 属于非公开接口，可能随时变化。若要通过 ChatGPT 账号登录并使用订阅授权，请选择「ChatGPT 订阅授权（SIWC）」并在上方账号管理中登录。",
+                        "点第一个按钮，页面会直接显示 accessToken；全选复制后回到这里即可（会自动读取）。网页 backend-api 属于非公开接口，可能随时变化。",
                         color = Color(0xFFE0A43C), fontSize = 12.sp
                     )
                     FieldLabel("Web Access Token")

@@ -57,12 +57,49 @@ internal class ChatGptPlanLoginCoordinator(
     ) : AutoCloseable {
         private var completed = false
 
+        /** The attempt frozen at begin() time; usable for manual callback fallback. */
+        fun attempt(): ChatGptPlanOAuth.Attempt = listener.attempt
+
         @Synchronized
         fun complete(timeoutMillis: Long = 3 * 60 * 1000L): ChatGptPlanProfile {
             check(!completed) { "This ChatGPT sign-in attempt has already been consumed" }
             completed = true
             try {
-                val callback = listener.await(timeoutMillis)
+                finish(listener.await(timeoutMillis))
+            } finally {
+                listener.close()
+            }
+            return completedProfile!!
+        }
+
+        /**
+         * Manual fallback: the browser reached 127.0.0.1 but the loopback socket was already gone
+         * (process frozen or the waiting coroutine cancelled). Paste the full callback URL here.
+         */
+        @Synchronized
+        fun completeWithCallbackUrl(callbackUrl: String): ChatGptPlanProfile {
+            check(!completed) { "This ChatGPT sign-in attempt has already been consumed" }
+            completed = true
+            try {
+                val attempt = listener.attempt
+                val callback = ChatGptPlanOAuth.validateCallback(
+                    callbackUrl.trim(),
+                    attempt.state,
+                    attempt.redirectUri,
+                    if (attempt.isFirstRegistration) null else attempt.clientId,
+                )
+                finish(callback)
+            } finally {
+                listener.close()
+            }
+            return completedProfile!!
+        }
+
+        @Volatile
+        private var completedProfile: ChatGptPlanProfile? = null
+
+        private fun finish(callback: ChatGptPlanOAuth.Callback) {
+            run {
                 // Save a newly issued registration before the one-time code exchange.
                 if (previous == null || callback.clientId != previous.clientId) {
                     store.savePendingClientId(callback.clientId)
@@ -102,9 +139,7 @@ internal class ChatGptPlanLoginCoordinator(
                 )
                 store.save(profile, makeActive = true)
                 store.clearPendingClientId()
-                return profile
-            } finally {
-                listener.close()
+                completedProfile = profile
             }
         }
 

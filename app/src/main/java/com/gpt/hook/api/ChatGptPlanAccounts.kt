@@ -21,7 +21,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -35,9 +37,9 @@ internal fun ChatGptPlanAccounts(context: Context) {
     val sessionManager = remember { ChatGptPlanSessionManager(http) }
     var profiles by remember { mutableStateOf(emptyList<ChatGptPlanProfile>()) }
     var activeProfileId by remember { mutableStateOf<String?>(null) }
-    var pending by remember { mutableStateOf<ChatGptPlanLoginCoordinator.PendingLogin?>(null) }
-    var busy by remember { mutableStateOf(false) }
-    var status by remember { mutableStateOf("尚未读取账号状态") }
+    var pending by remember { mutableStateOf(ChatGptPlanLoginRegistry.pending) }
+    var busy by remember { mutableStateOf(ChatGptPlanLoginRegistry.inFlight) }
+    var status by remember { mutableStateOf(ChatGptPlanLoginRegistry.lastStatus ?: "尚未读取账号状态") }
 
     suspend fun reload() {
         try {
@@ -67,22 +69,28 @@ internal fun ChatGptPlanAccounts(context: Context) {
     }
 
     fun startLogin(selectedProfileId: String?, forceNewRegistration: Boolean = false) {
+        if (ChatGptPlanLoginRegistry.inFlight) {
+            pending = ChatGptPlanLoginRegistry.pending
+            busy = true
+            status = ChatGptPlanLoginRegistry.lastStatus ?: "正在等待授权…"
+            return
+        }
         try {
             val login = coordinator.begin(context, selectedProfileId, forceNewRegistration)
             pending = login
             busy = true
             status = "已打开系统浏览器，等待 ChatGPT 完成授权……"
-            scope.launch {
-                try {
-                    withContext(Dispatchers.IO) { login.complete() }
-                    status = "ChatGPT 授权成功，凭证已加密保存"
-                    reload()
-                    syncGatewayProfile()
-                } catch (error: Throwable) {
-                    status = "授权未完成：${error.message ?: error.javaClass.simpleName}"
-                } finally {
-                    pending = null
-                    busy = false
+            // 关键：等待协程跑在进程级作用域，否则打开浏览器导致 composable 销毁时
+            // 协程被取消，回环 socket 随之关闭，浏览器回调只会看到 ERR_CONNECTION_REFUSED。
+            ChatGptPlanLoginRegistry.launchWait(login) { outcome, message ->
+                pending = null
+                busy = false
+                status = message
+                if (outcome) {
+                    ChatGptPlanLoginRegistry.scope.launch {
+                        reload()
+                        syncGatewayProfile()
+                    }
                 }
             }
         } catch (error: Throwable) {
@@ -93,7 +101,13 @@ internal fun ChatGptPlanAccounts(context: Context) {
 
     val activeProfile = profiles.firstOrNull { it.id == activeProfileId }
 
-    LaunchedEffect(store) { reload() }
+    LaunchedEffect(store) {
+        reload()
+        // 从浏览器返回后重新同步（等待可能仍在进程级协程里进行）
+        pending = ChatGptPlanLoginRegistry.pending
+        busy = ChatGptPlanLoginRegistry.inFlight
+        ChatGptPlanLoginRegistry.lastStatus?.let { status = it }
+    }
     DisposableEffect(pending) {
         onDispose { pending?.close() }
     }
@@ -235,6 +249,52 @@ internal fun ChatGptPlanAccounts(context: Context) {
                 shape = RoundedCornerShape(12.dp),
             ) { Text(if (busy) "正在等待授权…" else "添加另一个 ChatGPT 账号") }
             Spacer(Modifier.height(2.dp))
+        }
+    }
+}
+
+/**
+ * 进程级登录注册表。
+ *
+ * 为什么需要它：SIWC 登录要先绑一个 127.0.0.1 的回环端口，再把用户送去系统浏览器。
+ * 如果等待回调的协程绑在 Composable 上（rememberCoroutineScope），应用退到后台、
+ * Composable 被销毁时协程会被取消，finally 里 close() 掉 socket，浏览器回调就变成
+ * ERR_CONNECTION_REFUSED。把等待放到进程级作用域后，Activity 重建也不影响监听。
+ */
+internal object ChatGptPlanLoginRegistry {
+    val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+    @Volatile
+    var pending: ChatGptPlanLoginCoordinator.PendingLogin? = null
+        private set
+
+    @Volatile
+    var inFlight: Boolean = false
+        private set
+
+    @Volatile
+    var lastStatus: String? = null
+
+    fun launchWait(
+        login: ChatGptPlanLoginCoordinator.PendingLogin,
+        onDone: (success: Boolean, message: String) -> Unit,
+    ) {
+        pending = login
+        inFlight = true
+        lastStatus = "已打开系统浏览器，等待 ChatGPT 完成授权……"
+        scope.launch {
+            var success = false
+            val message = try {
+                withContext(Dispatchers.IO) { login.complete() }
+                success = true
+                "ChatGPT 授权成功，凭证已加密保存"
+            } catch (error: Throwable) {
+                "授权未完成：${error.message ?: error.javaClass.simpleName}"
+            }
+            pending = null
+            inFlight = false
+            lastStatus = message
+            onDone(success, message)
         }
     }
 }

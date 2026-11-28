@@ -1255,7 +1255,7 @@ private fun UpstreamConfig(
     androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
             if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME && proxyMode == "web") {
-                com.gpt.hook.api.ChatGptWebCredentials.fromClipboard(appContext)?.let { token ->
+                com.gpt.hook.api.ChatGptWebCapture.fromClipboard(appContext)?.let { token ->
                     if (token != webToken) {
                         webToken = token
                         importStatus = "已自动读取剪贴板中的 accessToken"
@@ -1362,12 +1362,12 @@ private fun UpstreamConfig(
                 } else if (proxyMode == "web") {
                     OutlinedButton(
                         modifier = Modifier.fillMaxWidth(),
-                        onClick = { com.gpt.hook.api.ChatGptWebCredentials.openSessionPage(appContext) },
+                        onClick = { com.gpt.hook.api.ChatGptWebCapture.openSessionPage(appContext) },
                     ) { Text("打开凭证页（Chrome 内，带你的登录态）") }
                     OutlinedButton(
                         modifier = Modifier.fillMaxWidth(),
                         onClick = {
-                            val token = com.gpt.hook.api.ChatGptWebCredentials.fromClipboard(appContext)
+                            val token = com.gpt.hook.api.ChatGptWebCapture.fromClipboard(appContext)
                             if (token != null) {
                                 webToken = token
                                 importStatus = "已从剪贴板读取 accessToken"

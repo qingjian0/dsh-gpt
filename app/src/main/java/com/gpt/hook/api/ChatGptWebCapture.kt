@@ -10,7 +10,7 @@ import org.json.JSONObject
  * 该页带着浏览器已登录会话，直接把 session JSON（含 accessToken）显示出来。
  * 用户全选复制后回到 App，这里自动从剪贴板解析，不用手敲。
  */
-object ChatGptWebCredentials {
+object ChatGptWebCapture {
 
     const val SESSION_URL = "https://chatgpt.com/api/auth/session"
 

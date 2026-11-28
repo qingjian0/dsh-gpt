@@ -62,7 +62,7 @@ internal fun ChatGptPlanAccounts(context: Context) {
             withContext(Dispatchers.IO) {
                 RelayConfig.save(context, current.copy(siwcProfileId = activeId))
             }
-            ApiService.start(context)
+            if (current.enabled) ApiService.start(context)
         }
     }
 

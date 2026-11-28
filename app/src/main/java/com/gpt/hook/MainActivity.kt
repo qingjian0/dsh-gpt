@@ -1824,6 +1824,7 @@ private fun HookPage(
     var editMethod by remember { mutableStateOf("") }
     var editParameters by remember { mutableStateOf("[]") }
     var editorError by remember { mutableStateOf<String?>(null) }
+    var expandedRuleId by remember { mutableStateOf<String?>(null) }
 
     val unavailable = hook.optBoolean("statusUnavailable", false)
     val rules = hook.optJSONArray("configuredHooks") ?: hook.optJSONArray("configuredRules") ?: JSONArray()
@@ -1950,8 +1951,24 @@ private fun HookPage(
                         Switch(checked = isEnabled, onCheckedChange = { value -> onSaveRule(JSONObject(rule.toString()).put("enabled", value)) })
                     }
                     Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                        TextButton(onClick = { expandedRuleId = if (expandedRuleId == id) null else id }) { Text(if (expandedRuleId == id) "收起详情" else "详情") }
                         TextButton(onClick = { beginEdit(rule) }) { Icon(Icons.Outlined.Edit, null); Text("编辑") }
                         TextButton(onClick = { onSaveRule(JSONObject().put("id", id).put("_delete", true)) }) { Icon(Icons.Outlined.Delete, null); Text("删除") }
+                    }
+                    if (expandedRuleId == id) {
+                        HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+                        Text("实际匹配方法", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                        val actualMethods = (0 until installed.length()).mapNotNull { installed.optJSONObject(it) }.filter { it.optString("ruleId") == id }
+                        if (actualMethods.isEmpty()) Text("目标进程尚未回报安装方法。", color = Muted, fontSize = 11.sp)
+                        actualMethods.forEach { actual ->
+                            Text(actual.optString("signature"), fontSize = 10.sp)
+                            Text("调用 ${actual.optLong("invocations", 0L)} 次", color = Muted, fontSize = 10.sp)
+                        }
+                        val relatedEvents = eventItems.filter { it.optString("ruleId") == id || it.optString("rule_id") == id }
+                        Text("关联事件 · ${relatedEvents.size}", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                        relatedEvents.takeLast(10).reversed().forEach { event ->
+                            Text("${event.optString("method")} · ${event.optString("exception", "无异常")}", fontSize = 10.sp, color = Muted)
+                        }
                     }
                 }
             }
@@ -2016,9 +2033,23 @@ private fun HookPage(
                         Text("候选规则 · ${candidates.length()}", fontWeight = FontWeight.SemiBold)
                         for (index in 0 until minOf(candidates.length(), 12)) {
                             val candidate = candidates.optJSONObject(index) ?: continue
-                            Text(candidate.optString("methodName", candidate.optString("signature")), fontSize = 11.sp)
+                            Text(candidate.optString("runtimeClassName") + "." + candidate.optString("methodName"), fontSize = 11.sp)
+                            Text(candidate.optString("jvmDescriptor"), fontSize = 10.sp, color = Muted)
+                            TextButton(onClick = {
+                                val candidateId = candidate.optString("candidateId").take(64)
+                                if (candidateId.isNotBlank()) {
+                                    onSaveRule(JSONObject()
+                                        .put("id", candidateId)
+                                        .put("className", candidate.optString("runtimeClassName"))
+                                        .put("methodName", candidate.optString("methodName"))
+                                        .put("methodDescriptor", candidate.optString("jvmDescriptor"))
+                                        .put("mode", "observe")
+                                        .put("enabled", true)
+                                        .put("sampleEvery", 1))
+                                }
+                            }) { Text("生成观察规则") }
                         }
-                        Text("候选项仅供检查，不会自动安装。", color = Muted, fontSize = 11.sp)
+                        Text("候选项仅供检查；点击生成后才会加入动态规则，仍需目标进程确认安装。", color = Muted, fontSize = 11.sp)
                     }
                 }
             }

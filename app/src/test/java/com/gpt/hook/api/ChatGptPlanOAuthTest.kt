@@ -45,19 +45,19 @@ class ChatGptPlanOAuthTest {
     fun callbackRequiresExactLoopbackPathAndConstantTimeStateMatch() {
         val attempt = ChatGptPlanOAuth.createAttempt(redirect, hostId)
         val callback = "http://127.0.0.1:43127/auth/callback?code=one-time-code&state=${attempt.state}&client_id=oaiapp_1234567890abc"
-        val parsed = ChatGptPlanOAuth.validateCallback(callback, attempt.state)
+        val parsed = ChatGptPlanOAuth.validateCallback(callback, attempt.state, redirect)
         assertEquals("one-time-code", parsed.code)
         assertEquals("oaiapp_1234567890abc", parsed.clientId)
-        assertRejected { ChatGptPlanOAuth.validateCallback(callback.replace(attempt.state, "wrong"), attempt.state) }
-        assertRejected { ChatGptPlanOAuth.validateCallback(callback.replace("/auth/callback", "/callback"), attempt.state) }
-        assertRejected { ChatGptPlanOAuth.validateCallback(callback.replace("127.0.0.1", "localhost"), attempt.state) }
+        assertRejected { ChatGptPlanOAuth.validateCallback(callback.replace(attempt.state, "wrong"), attempt.state, redirect) }
+        assertRejected { ChatGptPlanOAuth.validateCallback(callback.replace("/auth/callback", "/callback"), attempt.state, redirect) }
+        assertRejected { ChatGptPlanOAuth.validateCallback(callback.replace("127.0.0.1", "localhost"), attempt.state, redirect) }
     }
 
     @Test
     fun callbackCannotSwitchAnExistingRegistration() {
         val attempt = ChatGptPlanOAuth.createAttempt(redirect, hostId, "oaiapp_1234567890abc")
         val callback = "http://127.0.0.1:43127/auth/callback?code=c&state=${attempt.state}&client_id=oaiapp_different123"
-        assertRejected { ChatGptPlanOAuth.validateCallback(callback, attempt.state, attempt.clientId) }
+        assertRejected { ChatGptPlanOAuth.validateCallback(callback, attempt.state, redirect, attempt.clientId) }
     }
 
     @Test

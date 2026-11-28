@@ -116,4 +116,36 @@ class OpenAiCompatConversationTest {
         assertEquals("hello", payload.getJSONArray("messages")
             .getJSONObject(0).getJSONObject("content").getJSONArray("parts").getString(0))
     }
+    @Test
+    fun fastModeOmitsReasonAndReasoningEffort() {
+        val request = JSONObject().put("model", "auto")
+            .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", "hello")))
+        val payload = OpenAiCompat.toConversation(request, fastMode = true, reasoningEffort = "high")
+        assertFalse(payload.has("reasoning_effort"))
+        val hints = payload.optJSONArray("system_hints") ?: JSONArray()
+        for (i in 0 until hints.length()) assertFalse(hints.getString(i) == "reason")
+    }
+
+    @Test
+    fun thinkingModeAddsReasonAndNormalizedEffort() {
+        val request = JSONObject().put("model", "auto")
+            .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", "hello")))
+        val payload = OpenAiCompat.toConversation(request, reasoningEffort = "minimal")
+        assertEquals("low", payload.getString("reasoning_effort"))
+        assertTrue((0 until payload.getJSONArray("system_hints").length())
+            .any { payload.getJSONArray("system_hints").getString(it) == "reason" })
+    }
+
+    @Test
+    fun searchHintIsControlledByTheGatewaySetting() {
+        val request = JSONObject().put("model", "auto")
+            .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", "hello")))
+        val disabled = OpenAiCompat.toConversation(request, searchEnabled = false)
+        val enabled = OpenAiCompat.toConversation(request, searchEnabled = true)
+        val disabledHints = disabled.optJSONArray("system_hints") ?: JSONArray()
+        val enabledHints = enabled.getJSONArray("system_hints")
+        assertFalse((0 until disabledHints.length()).any { disabledHints.getString(it) == "web_search" })
+        assertTrue((0 until enabledHints.length()).any { enabledHints.getString(it) == "web_search" })
+    }
+
 }

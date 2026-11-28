@@ -1253,10 +1253,15 @@ private fun UpstreamConfig(
     androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
             if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME && proxyMode == "web") {
-                val token = com.gpt.hook.api.ChatGptWebToken.fromClipboard(appContext)
+                val captured = com.gpt.hook.api.ChatGptWebToken.capture(appContext)
+                val token = captured?.accessToken
                 if (token != null && token != webToken) {
                     webToken = token
-                    importStatus = "已自动读取并保存"
+                    importStatus = if (captured.account.isNotBlank()) {
+                        "登录成功：账号 " + captured.account
+                    } else {
+                        "登录成功：凭证已保存"
+                    }
                     onSave(
                         initialConfig.copy(
                             proxyMode = "web",
@@ -1332,16 +1337,7 @@ private fun UpstreamConfig(
                 } else if (proxyMode == "web") {
                     Button(
                         modifier = Modifier.fillMaxWidth(),
-                        onClick = {
-                            com.gpt.hook.api.ChatGptOAuthLogin.start(appContext) { ok, msg ->
-                                importStatus = msg
-                                if (ok) {
-                                    com.gpt.hook.api.ChatGptCredentialStore.load()?.let {
-                                        webToken = it.accessToken
-                                    }
-                                }
-                            }
-                        },
+                        onClick = { com.gpt.hook.api.ChatGptWebToken.openSessionPage(appContext) },
                     ) { Text("登录 ChatGPT") }
                     if (importStatus.isNotBlank()) {
                         Text(importStatus, fontSize = 12.sp, color = Color(0xFF2F6FEB))

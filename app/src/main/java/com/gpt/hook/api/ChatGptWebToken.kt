@@ -47,6 +47,32 @@ object ChatGptWebToken {
         }.getOrDefault(false)
     }
 
+    /** 捕获结果：token 与账号显示名。 */
+    data class Captured(val accessToken: String, val account: String)
+
+    /**
+     * 从剪贴板取凭证。整段 session JSON 时还能拿到邮箱/昵称，
+     * 界面就能显示「登录成功：账号 xxx」。
+     */
+    fun capture(context: Context): Captured? {
+        val manager = context.getSystemService(ClipboardManager::class.java) ?: return null
+        val text = manager.primaryClip?.takeIf { it.itemCount > 0 }
+            ?.getItemAt(0)?.coerceToText(context)?.toString()?.trim()
+            ?: return null
+        if (text.isEmpty()) return null
+        if (text.startsWith("{")) {
+            val obj = runCatching { JSONObject(text) }.getOrNull() ?: return null
+            val token = obj.optString("accessToken").takeIf { it.isNotBlank() } ?: return null
+            val user = obj.optJSONObject("user")
+            val account = user?.optString("email").orEmpty().ifBlank {
+                user?.optString("name").orEmpty()
+            }
+            return Captured(token, account)
+        }
+        return text.takeIf { it.startsWith("eyJ") && it.count { ch -> ch == '.' } >= 2 }
+            ?.let { Captured(it, "") }
+    }
+
     /** 剪贴板里既可能是整段 session JSON，也可能是裸的 accessToken。 */
     fun fromClipboard(context: Context): String? {
         val manager = context.getSystemService(ClipboardManager::class.java) ?: return null

@@ -53,6 +53,13 @@ internal class ChatGptPlanHttp(
         return postForm(metadata.tokenEndpoint, ChatGptPlanOAuth.refreshForm(clientId, refreshToken))
     }
 
+    fun revoke(clientId: String, refreshToken: String): HttpResult {
+        val metadata = discover()
+        val endpoint = metadata.revocationEndpoint
+            ?: throw IllegalStateException("OpenAI sign-in metadata does not publish a revocation endpoint")
+        return postForm(endpoint, ChatGptPlanOAuth.revocationForm(clientId, refreshToken))
+    }
+
     fun fetchJwks(metadata: ProviderMetadata): String {
         val result = request(URL(metadata.jwksUri), "GET", accept = "application/json")
         require(result.status in 200..299) { "OpenAI signing keys are temporarily unavailable (HTTP ${result.status})" }

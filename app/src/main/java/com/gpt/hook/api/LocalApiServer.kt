@@ -123,9 +123,10 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                     target == "/v1/models" -> json(out, 200, OpenAiCompat.modelsJson(OpenAiCompat.DEFAULT_MODELS))
                     target == "/v1/capabilities" && method == "GET" -> json(out, 200, OpenAiCompat.capabilitiesJson())
                     // MCP 通道：不消耗每小时消息额度，可直接调工具/读网页
-                    // Codex 通道：模型名 codex-* 时走 /backend-api/codex/responses
-                    target == "/v1/codex/status" && method == "GET" -> json(out, 200,
-                        JSONObject().put("configured", CodexBridge(cfg).available()).toString())
+                    target == "/v1/status" && method == "GET" -> statusRoute(out)
+                    target == "/v1/config" -> configRoute(out, method, body)
+                    target == "/v1/proxy/mode" -> proxyModeRoute(out, method, body)
+                    target == "/v1/kit/import" && method == "POST" -> kitImportRoute(out, body)
                     target == "/v1/mcp/tools" && method == "GET" -> mcpTools(out)
                     target == "/v1/mcp/resources" && method == "GET" -> mcpResources(out)
                     target == "/v1/mcp/resource" && method == "POST" -> mcpResourceRead(out, body)
@@ -160,11 +161,14 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         val started = System.currentTimeMillis()
         val request = runCatching { JSONObject(String(body, Charsets.UTF_8)) }.getOrNull()
         val model = request?.optString("model", "unknown")?.ifBlank { "unknown" } ?: "unknown"
-        val channel = if (model.startsWith("codex-")) "codex" else "chatgpt"
+        UsageMeter.begin(model, "chatgpt", body.size)
         try {
             action()
+        } catch (t: Throwable) {
+            UsageMeter.markFailure()
+            throw t
         } finally {
-            UsageMeter.record(context, model, channel, System.currentTimeMillis() - started)
+            UsageMeter.finish(context)
         }
     }
 
@@ -644,12 +648,6 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
             json(out, 413, err("conversation_limit", e.message ?: "conversation limit reached"), responseHeaders); return
         }
 
-        val codexModel = req.optString("model").startsWith("codex-")
-        if (codexModel) {
-            codexChat(out, req, responseHeaders)
-            return
-        }
-
         // 先看账号是否被限流，被限时直接回带 Retry-After 的 429
         val blockedUntil = sendBlockedUntil()
         if (blockedUntil > System.currentTimeMillis()) {
@@ -671,7 +669,8 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         val responseItemId = "msg_" + UUID.randomUUID().toString().replace("-", "").take(24)
         val client = ChatGptClient(cfg)
         val payload = OpenAiCompat.toConversation(
-            req, conversationForTurn.upstreamConversationId, conversationForTurn.upstreamParentMessageId, cfg.connectorId, cfg.temporaryChat
+            req, conversationForTurn.upstreamConversationId, conversationForTurn.upstreamParentMessageId,
+            cfg.connectorId, cfg.temporaryChat, cfg.fastMode, cfg.reasoningEffort, cfg.searchEnabled, cfg.model
         ).toString().toByteArray(Charsets.UTF_8)
 
         val conn = try {
@@ -717,6 +716,7 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                     val event = l.substring(5).trim()
                     captureUpstreamState(event, upstreamState)
                     val delta = extractDelta(event, sent) ?: continue
+                    UsageMeter.markOutput(delta)
                     sent += delta
                     textOut.append(delta)
                     if (responsesMode) {
@@ -789,7 +789,7 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                         val event = l.substring(5).trim()
                         captureUpstreamState(event, upstreamState)
                         val delta = extractDelta(event, sent)
-                        if (delta != null) { sent += delta; textOut.append(delta) }
+                        if (delta != null) { UsageMeter.markOutput(delta); sent += delta; textOut.append(delta) }
                     }
                 }
                 val full = textOut.toString()
@@ -819,6 +819,7 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                         .put("created_at", System.currentTimeMillis())
                 )
             }
+            UsageMeter.markSuccess()
         } catch (t: Throwable) {
             try { socketSafeFlush(out) } catch (_: Throwable) { }
         } finally {
@@ -859,46 +860,75 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
      * 返回 blocked_features[].resets_after 精确到秒。
      * "send" 被 block 时，生成请求必定 429，提前告诉客户端比让它干等更好。
      */
-    /** 走 Codex 通道的对话，与 ChatGPT 消费端互不影响 */
-    private fun codexChat(out: OutputStream, req: JSONObject, headers: Map<String, String>) {
-        val bridge = CodexBridge(cfg)
-        if (!bridge.available()) {
-            json(out, 503, err("codex_not_configured",
-                "Codex 通道需要单独 OAuth token，ChatGPT 的 token 无权限。在 API 页填写 codex token 后启用。"), headers)
+    private fun statusRoute(out: OutputStream) {
+        json(out, 200, JSONObject()
+            .put("ok", true)
+            .put("running", running)
+            .put("ready", cfg.ready)
+            .put("proxy_mode", cfg.proxyMode)
+            .put("upstream", if (cfg.proxyMode == "web") cfg.webBase else cfg.upstreamBase)
+            .put("usage", UsageMeter.snapshot(context))
+            .toString())
+    }
+
+    private fun configRoute(out: OutputStream, method: String, body: ByteArray?) {
+        if (method == "GET") {
+            json(out, 200, JSONObject()
+                .put("enabled", cfg.enabled).put("port", cfg.port).put("lan", cfg.lan)
+                .put("proxy_mode", cfg.proxyMode).put("model", cfg.model)
+                .put("fast_mode", cfg.fastMode).put("reasoning_effort", cfg.reasoningEffort)
+                .put("search_enabled", cfg.searchEnabled).put("temporary_chat", cfg.temporaryChat)
+                .put("has_hook_token", cfg.accessToken.isNotBlank()).put("has_oai_did", cfg.oaiDid.isNotBlank())
+                .put("has_web_token", cfg.webAccessToken.isNotBlank())
+                .put("has_web_session", cfg.webSessionToken.isNotBlank())
+                .put("restart_required", false).toString())
             return
         }
-        val id = "chatcmpl-" + java.util.UUID.randomUUID().toString().replace("-", "").take(24)
-        val model = req.optString("model", "codex-gpt-5.1").removePrefix("codex-")
-        val stream = req.optBoolean("stream", false)
-        val copy = JSONObject(req.toString()).put("model", model)
-        runCatching {
-            if (stream) {
-                val input = bridge.chatStream(copy)
-                writeHead(out, 200, "text/event-stream; charset=utf-8", null, headers)
-                var acc = ""
-                input.bufferedReader().forEachLine { line ->
-                    if (!line.startsWith("data:")) return@forEachLine
-                    val payload = line.removePrefix("data:").trim()
-                    if (payload == "[DONE]" || payload.isEmpty()) return@forEachLine
-                    val obj = runCatching { JSONObject(payload) }.getOrNull() ?: return@forEachLine
-                    if (obj.optString("type") == "response.output_text.delta") {
-                        val d = obj.optString("delta")
-                        if (d.isNotEmpty()) {
-                            acc += d
-                            writeChunk(out, "data: " + OpenAiCompat.chunk(id, model, d) + "\n\n")
-                        }
-                    }
-                }
-                writeChunk(out, "data: " + OpenAiCompat.chunk(id, model, "", "stop") + "\n\n")
-                writeChunk(out, "data: [DONE]\n\n")
-                out.flush()
-            } else {
-                val resp = bridge.chat(copy)
-                json(out, 200, bridge.toChatCompletion(resp, id, model).toString(), headers)
-            }
-        }.onFailure {
-            json(out, 502, err("codex_error", it.message ?: "codex call failed"), headers)
+        if (method != "PUT") { json(out, 405, err("method_not_allowed", "use GET or PUT")); return }
+        val request = runCatching { JSONObject(body?.toString(Charsets.UTF_8) ?: "") }.getOrNull()
+        if (request == null) { json(out, 400, err("invalid_request", "body must be JSON")); return }
+        val next = cfg.copy(
+            proxyMode = request.optString("proxy_mode", cfg.proxyMode).let { if (it == "web") "web" else "hook" },
+            model = request.optString("model", cfg.model).ifBlank { cfg.model },
+            fastMode = request.optBoolean("fast_mode", cfg.fastMode),
+            reasoningEffort = RelayConfig.normalizeEffort(request.optString("reasoning_effort", cfg.reasoningEffort)),
+            searchEnabled = request.optBoolean("search_enabled", cfg.searchEnabled),
+            temporaryChat = request.optBoolean("temporary_chat", cfg.temporaryChat),
+            accessToken = request.optString("access_token", cfg.accessToken),
+            oaiDid = request.optString("oai_did", cfg.oaiDid),
+            sessionId = request.optString("session_id", cfg.sessionId),
+            webAccessToken = request.optString("web_access_token", cfg.webAccessToken),
+            webSessionToken = request.optString("web_session_token", cfg.webSessionToken),
+        )
+        cfg = next
+        RelayConfig.save(context, next)
+        json(out, 200, JSONObject().put("ok", true).put("ready", next.ready)
+            .put("proxy_mode", next.proxyMode).put("model", next.model).toString())
+    }
+
+    private fun proxyModeRoute(out: OutputStream, method: String, body: ByteArray?) {
+        if (method == "GET") {
+            json(out, 200, JSONObject().put("proxy_mode", cfg.proxyMode).put("ready", cfg.ready).toString())
+            return
         }
+        if (method != "PUT") { json(out, 405, err("method_not_allowed", "use GET or PUT")); return }
+        val request = runCatching { JSONObject(body?.toString(Charsets.UTF_8) ?: "") }.getOrNull()
+        val mode = request?.optString("mode").orEmpty()
+        if (mode != "hook" && mode != "web") { json(out, 400, err("invalid_request", "mode must be hook or web")); return }
+        cfg = cfg.copy(proxyMode = mode)
+        RelayConfig.save(context, cfg)
+        json(out, 200, JSONObject().put("ok", true).put("proxy_mode", mode).put("ready", cfg.ready).toString())
+    }
+
+    private fun kitImportRoute(out: OutputStream, body: ByteArray?) {
+        val raw = body?.toString(Charsets.UTF_8).orEmpty()
+        runCatching { RelayConfig.importKit(context, raw) }
+            .onSuccess {
+                cfg = it
+                json(out, 200, JSONObject().put("ok", true).put("ready", it.ready)
+                    .put("proxy_mode", it.proxyMode).toString())
+            }
+            .onFailure { json(out, 400, err("invalid_kit", it.message ?: "kit import failed")) }
     }
 
     private fun mcpTools(out: OutputStream) {

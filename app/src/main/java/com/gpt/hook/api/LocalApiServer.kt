@@ -137,6 +137,8 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                     target == "/v1/config" -> configRoute(out, method, body)
                     target == "/v1/proxy/mode" -> proxyModeRoute(out, method, body)
                     target == "/v1/kit/import" && method == "POST" -> kitImportRoute(out, body)
+                    (target.startsWith("/v1/mcp/") || target == "/v1/web/open") && cfg.proxyMode == "siwc" ->
+                        json(out, 400, err("unsupported_api", "MCP and ChatGPT web-reader routes require the separate backend-api channel and are disabled in SIWC mode"))
                     target == "/v1/mcp/tools" && method == "GET" -> mcpTools(out)
                     target == "/v1/mcp/resources" && method == "GET" -> mcpResources(out)
                     target == "/v1/mcp/resource" && method == "POST" -> mcpResourceRead(out, body)

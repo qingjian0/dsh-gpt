@@ -52,14 +52,14 @@ internal class ChatGptPlanHttp(
 
     fun refresh(clientId: String, refreshToken: String): HttpResult {
         val metadata = discover()
-        return postForm(metadata.tokenEndpoint, ChatGptPlanOAuth.refreshForm(clientId, refreshToken))
+        return postJson(metadata.tokenEndpoint, ChatGptPlanOAuth.refreshJson(clientId, refreshToken))
     }
 
     fun revoke(clientId: String, refreshToken: String): HttpResult {
         val metadata = discover()
         val endpoint = metadata.revocationEndpoint
             ?: throw IllegalStateException("OpenAI sign-in metadata does not publish a revocation endpoint")
-        return postForm(endpoint, ChatGptPlanOAuth.revocationForm(clientId, refreshToken))
+        return postJson(endpoint, ChatGptPlanOAuth.revocationJson(clientId, refreshToken))
     }
 
     fun fetchJwks(metadata: ProviderMetadata): String {

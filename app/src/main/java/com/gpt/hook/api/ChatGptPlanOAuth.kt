@@ -263,6 +263,19 @@ internal object ChatGptPlanOAuth {
         ))
     }
 
+    fun refreshJson(clientId: String, refreshToken: String): String =
+        jsonOf(linkedMapOf(
+            "grant_type" to "refresh_token",
+            "client_id" to clientId,
+            "refresh_token" to refreshToken,
+        ))
+
+    fun revocationJson(clientId: String, refreshToken: String): String =
+        jsonOf(linkedMapOf(
+            "client_id" to clientId,
+            "token" to refreshToken,
+        ))
+
     private fun jsonOf(values: Map<String, String>): String =
         values.entries.joinToString(",", "{", "}") { (k, v) ->
             "\"" + encodeJson(k) + "\":\"" + encodeJson(v) + "\""

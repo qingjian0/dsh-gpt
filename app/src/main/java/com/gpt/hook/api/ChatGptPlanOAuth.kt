@@ -249,6 +249,38 @@ internal object ChatGptPlanOAuth {
     private fun base64Url(bytes: ByteArray): String = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
     private fun encode(value: String): String = URLEncoder.encode(value, "UTF-8")
     private fun decode(value: String): String = URLDecoder.decode(value, "UTF-8")
+    /** token 端点要求 JSON body；与 [codeExchangeForm] 参数一致，仅编码不同。 */
+    fun codeExchangeJson(attempt: Attempt, callback: Callback): String {
+        if (attempt.isFirstRegistration) validateIssuedClientId(callback.clientId)
+        else require(callback.clientId == attempt.clientId) { "OAuth client registration mismatch" }
+        return jsonOf(linkedMapOf(
+            "grant_type" to "authorization_code",
+            "client_id" to callback.clientId,
+            "code" to callback.code,
+            "code_verifier" to attempt.pkce.verifier,
+            "redirect_uri" to attempt.redirectUri,
+            "resource" to RESOURCE,
+        ))
+    }
+
+    private fun jsonOf(values: Map<String, String>): String =
+        values.entries.joinToString(",", "{", "}") { (k, v) ->
+            "\"" + encodeJson(k) + "\":\"" + encodeJson(v) + "\""
+        }
+
+    private fun encodeJson(value: String): String = buildString {
+        for (ch in value) {
+            when (ch) {
+                '"' -> append("\\\"")
+                '\\' -> append("\\\\")
+                '\n' -> append("\\n")
+                '\r' -> append("\\r")
+                '\t' -> append("\\t")
+                else -> if (ch < ' ') append(String.format("\\u%04x", ch.code)) else append(ch)
+            }
+        }
+    }
+
     private fun form(values: Map<String, String>): String =
         values.entries.joinToString("&") { (k, v) -> "${encode(k)}=${encode(v)}" }
 }

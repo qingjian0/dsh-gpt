@@ -47,7 +47,7 @@ internal class ChatGptPlanHttp(
 
     fun exchangeCode(attempt: ChatGptPlanOAuth.Attempt, callback: ChatGptPlanOAuth.Callback): HttpResult {
         val metadata = discover()
-        return postForm(metadata.tokenEndpoint, ChatGptPlanOAuth.codeExchangeForm(attempt, callback))
+        return postJson(metadata.tokenEndpoint, ChatGptPlanOAuth.codeExchangeJson(attempt, callback))
     }
 
     fun refresh(clientId: String, refreshToken: String): HttpResult {
@@ -203,16 +203,21 @@ internal class ChatGptPlanHttp(
         return result
     }
 
-    private fun postForm(endpoint: String, form: String): HttpResult {
+    /**
+     * 实测：auth.openai.com/oauth/token 只接受 JSON body。
+     * 发 form-urlencoded 会返回 "Missing required parameter: 'grant_type'"，
+     * 因为服务端完全不解析表单——这正是授权成功却永远拿不到 token 的原因。
+     */
+    private fun postJson(endpoint: String, json: String): HttpResult {
         val connection = connectionFactory(URL(endpoint))
         connection.requestMethod = "POST"
         connection.connectTimeout = CONNECT_TIMEOUT_MS
         connection.readTimeout = READ_TIMEOUT_MS
         connection.instanceFollowRedirects = false
         connection.doOutput = true
-        connection.setRequestProperty("Content-Type", "application/x-www-form-urlencoded; charset=utf-8")
+        connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
         connection.setRequestProperty("Accept", "application/json")
-        val bytes = form.toByteArray(StandardCharsets.UTF_8)
+        val bytes = json.toByteArray(StandardCharsets.UTF_8)
         connection.setFixedLengthStreamingMode(bytes.size)
         connection.outputStream.use { it.write(bytes) }
         return read(connection)

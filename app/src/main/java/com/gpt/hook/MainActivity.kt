@@ -15,6 +15,8 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -640,9 +642,25 @@ private fun DshApp(
                                 val config = JSONObject(current.body).optJSONObject("config")
                                     ?: throw Exception("后端未返回有效 Hook 配置")
                                 val rules = config.optJSONArray("rules") ?: JSONArray()
-                                if (rules.length() >= 64) throw Exception("规则数量已达到上限（64）")
-                                rules.put(rule)
-                                config.put("rules", rules)
+                                val id = rule.optString("id")
+                                if (id.isBlank()) throw Exception("规则 ID 不能为空")
+                                val delete = rule.optBoolean("_delete", false)
+                                val nextRules = JSONArray()
+                                var found = false
+                                for (i in 0 until rules.length()) {
+                                    val existing = rules.optJSONObject(i) ?: continue
+                                    if (existing.optString("id") == id) {
+                                        found = true
+                                        if (!delete) nextRules.put(rule)
+                                    } else {
+                                        nextRules.put(existing)
+                                    }
+                                }
+                                if (!found && !delete) {
+                                    if (nextRules.length() >= 64) throw Exception("规则数量已达到上限（64）")
+                                    nextRules.put(rule)
+                                }
+                                config.put("rules", nextRules)
                                 val response = backend.put("/v1/hook/config", config)
                                 if (response.code !in 200..299) throw Exception("规则提交失败：HTTP ${response.code}")
                                 val status = backend.get("/v1/hook/status")
@@ -662,6 +680,20 @@ private fun DshApp(
                                 state = state.copy(hook = JSONObjectOrEmpty(status.body))
                             } catch (e: Exception) {
                                 notify(e.message ?: "操作失败")
+                            }
+                        }
+                    },
+                    onDiscover = { request ->
+                        scope.launch {
+                            try {
+                                val route = if (request.optString("className").isNotBlank()) "/v1/hook/inspect" else "/v1/hook/discover"
+                                val submitted = backend.post(route, request)
+                                if (submitted.code !in 200..299) throw Exception("扫描任务提交失败：HTTP ${submitted.code}")
+                                val status = backend.get("/v1/hook/status")
+                                state = state.copy(hook = JSONObjectOrEmpty(status.body))
+                                notify("扫描任务已提交；等待目标进程执行")
+                            } catch (e: Exception) {
+                                notify(e.message ?: "扫描任务提交失败")
                             }
                         }
                     }
@@ -1781,184 +1813,353 @@ private fun HookPage(
     events: JSONArray,
     onRefresh: () -> Unit,
     onSaveRule: (JSONObject) -> Unit,
-    onSetEnabled: (Boolean) -> Unit
+    onSetEnabled: (Boolean) -> Unit,
+    onDiscover: (JSONObject) -> Unit
 ) {
-    var selectedRule by remember { mutableStateOf<JSONObject?>(null) }
-    var className by remember { mutableStateOf("") }
-    var methodName by remember { mutableStateOf("") }
-    var parameters by remember { mutableStateOf("[]") }
-    var showCreate by remember { mutableStateOf(false) }
+    var section by remember { mutableStateOf("总览") }
+    var search by remember { mutableStateOf("") }
+    var prefix by remember { mutableStateOf("com.openai.") }
+    var showEditor by remember { mutableStateOf(false) }
+    var editingRule by remember { mutableStateOf<JSONObject?>(null) }
+    var editClass by remember { mutableStateOf("") }
+    var editMethod by remember { mutableStateOf("") }
+    var editParameters by remember { mutableStateOf("[]") }
+    var editorError by remember { mutableStateOf<String?>(null) }
+    var expandedRuleId by remember { mutableStateOf<String?>(null) }
+
     val unavailable = hook.optBoolean("statusUnavailable", false)
     val rules = hook.optJSONArray("configuredHooks") ?: hook.optJSONArray("configuredRules") ?: JSONArray()
     val installed = hook.optJSONArray("installedHooks") ?: JSONArray()
     val enabled = hook.optBoolean("enabled", false)
-    val targetObserved = hook.optBoolean("targetObserved", false)
+    val reportAt = hook.optLong("targetReportUpdatedAtMs", 0L)
+    val ageMs = if (reportAt > 0L) (System.currentTimeMillis() - reportAt).coerceAtLeast(0L) else Long.MAX_VALUE
+    val targetOnline = reportAt > 0L && ageMs <= 30_000L
     val activeCount = hook.optInt("activeHookCount", 0)
     val observedRuleIds = buildSet {
-        for (i in 0 until installed.length()) {
-            installed.optJSONObject(i)?.optString("ruleId")?.takeIf { it.isNotBlank() }?.let(::add)
-        }
+        for (i in 0 until installed.length()) installed.optJSONObject(i)?.optString("ruleId")?.takeIf { it.isNotBlank() }?.let(::add)
+    }
+    val ruleItems = (0 until rules.length()).mapNotNull { rules.optJSONObject(it) }
+    val eventItems = (0 until events.length()).mapNotNull { events.optJSONObject(it) }
+    val filteredRules = ruleItems.filter { search.isBlank() || it.optString("className").contains(search, true) || it.optString("methodName").contains(search, true) || it.optString("id").contains(search, true) }
+    val filteredEvents = eventItems.filter { search.isBlank() || it.optString("class").contains(search, true) || it.optString("method").contains(search, true) || it.optString("ruleId").contains(search, true) }
+    val task = hook.optJSONObject("discoveryTask") ?: JSONObject()
+    val discoveryResult = hook.optJSONObject("discoveryResult") ?: JSONObject()
+    val applyReport = hook.optJSONObject("lastApplyReport") ?: JSONObject()
+    val builtInGroups = listOf(
+        Triple("设备信息", "Build 字段", "android.os.Build · MANUFACTURER / BRAND / MODEL / DEVICE / PRODUCT / HARDWARE / FINGERPRINT / BOOTLOADER / TAGS / TYPE / HOST"),
+        Triple("系统属性", "属性读取", "android.os.SystemProperties.get(String) · get(String, String)"),
+        Triple("文件检测", "文件状态", "java.io.File.exists() · isFile() · canRead() · canExecute()"),
+        Triple("命令执行", "命令检测", "java.lang.Runtime.exec(String) · exec(String[])"),
+        Triple("包查询", "安装包查询", "android.app.ApplicationPackageManager.getPackageInfo(String, int)"),
+        Triple("调试检测", "调试状态", "android.os.Debug.isDebuggerConnected() · waitingForDebugger()"),
+        Triple("证书校验", "TLS 校验路径", "okhttp3.CertificatePinner.check(...) · Conscrypt TrustManagerImpl.verifyChain(...)"),
+        Triple("遥测调用", "SDK 调用", "Firebase · Crashlytics · Statsig · Amplitude · Segment · Sentry · Mixpanel · AppsFlyer · Adjust")
+    )
+    fun beginEdit(rule: JSONObject? = null) {
+        editingRule = rule
+        editClass = rule?.optString("className").orEmpty()
+        editMethod = rule?.optString("methodName").orEmpty()
+        editParameters = rule?.optJSONArray("parameterTypes")?.toString() ?: "[]"
+        editorError = null
+        showEditor = true
     }
 
-    selectedRule?.let { rule ->
-        val id = rule.optString("id")
-        val actual = (0 until installed.length()).mapNotNull { installed.optJSONObject(it) }
-            .filter { it.optString("ruleId") == id }
-        val ruleEvents = (0 until events.length()).mapNotNull { events.optJSONObject(it) }
-            .filter { it.optString("ruleId") == id || it.optString("rule_id") == id }
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            item {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = { selectedRule = null }) { Icon(Icons.Outlined.ArrowBack, "返回") }
-                    Column {
-                        Text("Hook 详情", fontSize = 24.sp, fontWeight = FontWeight.Bold)
-                        Text(id, color = Muted, fontSize = 12.sp)
-                    }
-                }
-            }
-            item {
-                CardBlock {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(rule.optString("methodName"), fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.weight(1f))
-                        StatusPill(when {
-                            !enabled -> "总开关关闭"
-                            !rule.optBoolean("enabled", true) -> "规则已禁用"
-                            !targetObserved -> "待验证"
-                            actual.isNotEmpty() -> "已安装"
-                            else -> "未安装"
-                        })
-                    }
-                    Text(rule.optString("className"), color = Muted, fontSize = 12.sp)
-                    StatusValue("模式", rule.optString("mode", "observe"))
-                    StatusValue("参数类型", rule.optJSONArray("parameterTypes")?.toString() ?: "[]")
-                    StatusValue("目标进程", if (targetObserved) "已上报" else "尚未上报")
-                    HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
-                    Text("实际安装的方法 · ${actual.size}", fontWeight = FontWeight.SemiBold)
-                    if (actual.isEmpty()) Text("暂无已确认安装的方法", color = Muted, fontSize = 12.sp)
-                    actual.forEach { item ->
-                        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                            Text(item.optString("signature"), fontSize = 11.sp)
-                            Text("调用 ${item.optLong("invocations")} 次 · ${item.optString("mode")}", color = Muted, fontSize = 11.sp)
-                        }
-                    }
-                }
-            }
-            item {
-                CardBlock {
-                    Text("运行事件 · ${ruleEvents.size}", fontWeight = FontWeight.Bold)
-                    if (ruleEvents.isEmpty()) Text("暂无匹配事件。规则已配置不代表目标方法已经执行。", color = Muted, fontSize = 12.sp)
-                    ruleEvents.takeLast(30).reversed().forEach { event ->
-                        HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
-                        Column {
-                            Text(event.optString("method").ifBlank { rule.optString("methodName") }, fontWeight = FontWeight.SemiBold)
-                            Text(event.optString("class").ifBlank { rule.optString("className") }, color = Muted, fontSize = 11.sp)
-                            Text(event.optString("timestamp"), color = Muted, fontSize = 11.sp)
-                        }
-                    }
-                }
-            }
-        }
-        return
-    }
-
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        if (unavailable) {
-            item { CardBlock { Text("Hook 状态暂不可用", fontWeight = FontWeight.Bold); Text(hook.optString("error", "无法读取 Hook 控制接口"), color = Muted, fontSize = 12.sp); Text("检查网关 API Key、模块进程和 LSPosed 安装状态后刷新。", color = Muted, fontSize = 12.sp) } }
-        }
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("Hook", fontSize = 27.sp, fontWeight = FontWeight.Bold)
+                    Text("Hook 控制台", fontSize = 25.sp, fontWeight = FontWeight.Bold)
                     Text("目标应用 · com.openai.chatgpt", color = Muted, fontSize = 12.sp)
                 }
                 IconButton(onClick = onRefresh) { Icon(Icons.Outlined.Refresh, "刷新") }
             }
         }
+        if (unavailable) item { CardBlock { Text("Hook 状态暂不可用", fontWeight = FontWeight.Bold); Text(hook.optString("error", "无法读取 Hook 控制接口"), color = MaterialTheme.colorScheme.error, fontSize = 12.sp) } }
         item {
             CardBlock {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text(if (enabled) "Hook 已启用" else "Hook 已关闭", fontWeight = FontWeight.Bold, fontSize = 17.sp)
-                        Text(when {
-                            !enabled -> "所有规则暂停"
-                            !targetObserved -> "目标进程尚未上报运行状态"
-                            else -> "已确认安装 $activeCount 个方法"
-                        }, color = Muted, fontSize = 12.sp)
+                        Text(if (targetOnline) "目标进程在线" else "目标进程未确认在线", fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                        Text(if (reportAt == 0L) "尚未收到目标进程报告" else if (targetOnline) "最近报告 ${ageMs / 1000} 秒前" else "最近报告已过期 · ${ageMs / 1000} 秒前", color = Muted, fontSize = 12.sp)
+                    }
+                    StatusPill(if (targetOnline) "在线" else "未知 / 离线")
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("动态 Hook 总开关", fontWeight = FontWeight.SemiBold)
+                        Text("只控制动态规则，不控制内置 Hook", color = Muted, fontSize = 11.sp)
                     }
                     Switch(checked = enabled, onCheckedChange = onSetEnabled)
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Metric("规则", "${rules.length()}")
-                    Metric("已安装", "$activeCount")
-                    Metric("事件", "${events.length()}")
-                }
-                if (!targetObserved) {
-                    Text("启动 ChatGPT 并确认 LSPosed 已勾选本模块，随后刷新即可读取真实运行状态。未验证的规则不会显示为已生效。", color = Muted, fontSize = 12.sp)
+                    Metric("已配置", ruleItems.size.toString())
+                    Metric("已安装方法", activeCount.toString())
+                    Metric("事件", eventItems.size.toString())
+                    Metric("Revision", hook.optLong("configRevision", 0L).toString())
                 }
             }
         }
         item {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("规则列表", fontWeight = FontWeight.Bold, fontSize = 18.sp, modifier = Modifier.weight(1f))
-                TextButton(onClick = { showCreate = true }) { Icon(Icons.Outlined.Add, null); Text("新增") }
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
+                listOf("总览", "内置 Hook", "动态 Hook", "类发现", "事件", "诊断").forEach { name ->
+                    FilterChip(selected = section == name, onClick = { section = name }, label = { Text(name, fontSize = 10.sp) })
+                }
             }
         }
-        if (rules.length() == 0) {
-            item { CardBlock { Text("暂无 Hook 规则", fontWeight = FontWeight.SemiBold); Text("新增规则后会显示在这里。动态规则详情和运行事件放在二级页面。", color = Muted, fontSize = 12.sp) } }
-        } else {
-            items(rules.length()) { index ->
-                val rule = rules.optJSONObject(index) ?: JSONObject()
-                val id = rule.optString("id")
-                val status = when {
-                    !enabled -> "总开关关闭"
-                    !rule.optBoolean("enabled", true) -> "已禁用"
-                    !targetObserved -> "待验证"
-                    id in observedRuleIds -> "已安装"
-                    else -> "未安装"
+        if (section == "总览") {
+            item {
+                CardBlock {
+                    Text("运行概况", fontWeight = FontWeight.Bold)
+                    StatusValue("模块注入报告", if (reportAt > 0L) "已收到" else "尚无报告")
+                    StatusValue("运行时状态", hook.optString("runtimeState", "unavailable"))
+                    StatusValue("动态规则安装方法", activeCount.toString())
+                    StatusValue("类加载监听", if (hook.optBoolean("classLoadWatcherEnabled", false)) "已启用" else "未启用 / 未报告")
+                    StatusValue("最近应用结果", applyReport.optString("state", "unavailable"))
+                    if (hook.optBoolean("hookInventoryTruncated", false)) Text("运行时清单已截断，数量不是完整总数。", color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
                 }
-                Card(Modifier.fillMaxWidth().clickable { selectedRule = rule }, shape = RoundedCornerShape(14.dp)) {
-                    Row(Modifier.padding(15.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Outlined.Extension, null, tint = if (status == "已安装") Green else Muted)
-                        Spacer(Modifier.width(12.dp))
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            }
+            item { CardBlock { Text("控制台分区", fontWeight = FontWeight.Bold); Text("内置 Hook 清单、动态规则管理、DEX 类发现、事件检索和运行诊断已拆分为独立页面。", color = Muted, fontSize = 12.sp); Text("内置 Hook 尚无逐项安装回报，未确认状态不会显示成已安装。", color = Muted, fontSize = 12.sp) } }
+        }
+        if (section == "内置 Hook") {
+            item { CardBlock { Text("内置 Hook 能力清单", fontWeight = FontWeight.Bold, fontSize = 17.sp); Text("以下是当前 APK Hardening 实现中的目标分类。当前协议没有逐项安装结果，因此明确标注未逐项确认。", color = Muted, fontSize = 12.sp) } }
+            items(builtInGroups) { group ->
+                CardBlock {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) { Text(group.first, fontWeight = FontWeight.SemiBold); Text(group.second, color = Muted, fontSize = 11.sp) }
+                        StatusPill("未逐项确认")
+                    }
+                    Text(group.third, fontSize = 11.sp, color = Muted)
+                }
+            }
+            item { CardBlock { Text("状态边界", fontWeight = FontWeight.SemiBold); Text("需要目标进程逐项上报安装成功、类未找到、方法未匹配或安装失败，才能显示真实运行状态。当前页面不推测安装结果。", color = Muted, fontSize = 12.sp) } }
+        }
+        if (section == "动态 Hook") {
+            item { Row(verticalAlignment = Alignment.CenterVertically) { Text("动态规则 · ${ruleItems.size}", fontWeight = FontWeight.Bold, fontSize = 18.sp, modifier = Modifier.weight(1f)); TextButton(onClick = { beginEdit() }) { Icon(Icons.Outlined.Add, null); Text("新增") } } }
+            item { OutlinedTextField(value = search, onValueChange = { search = it }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("搜索类名、方法名或规则 ID") }, leadingIcon = { Icon(Icons.Outlined.Search, null) }) }
+            if (filteredRules.isEmpty()) item { CardBlock { Text(if (ruleItems.isEmpty()) "暂无动态规则" else "没有匹配的规则"); Text("配置会立即显示；实际安装状态以目标进程回报为准。", color = Muted, fontSize = 12.sp) } }
+            else items(filteredRules, key = { it.optString("id") }) { rule ->
+                val id = rule.optString("id")
+                val isEnabled = rule.optBoolean("enabled", true)
+                val actualCount = (0 until installed.length()).count { installed.optJSONObject(it)?.optString("ruleId") == id }
+                CardBlock {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
                             Text(rule.optString("methodName", "未命名方法"), fontWeight = FontWeight.SemiBold)
-                            Text(rule.optString("className"), color = Muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(status, color = if (status == "已安装") Green else Muted, fontSize = 11.sp)
+                            Text(rule.optString("className"), color = Muted, fontSize = 11.sp)
+                            Text("模式 ${rule.optString("mode", "observe")} · 安装方法 ${actualCount} · ${if (!enabled) "总开关关闭" else if (!isEnabled) "规则禁用" else if (!targetOnline) "等待新报告" else if (id in observedRuleIds) "已上报安装" else "尚未确认安装"}", color = Muted, fontSize = 11.sp)
                         }
-                        Icon(Icons.Outlined.ChevronRight, null, tint = Muted)
+                        Switch(checked = isEnabled, onCheckedChange = { value -> onSaveRule(JSONObject(rule.toString()).put("enabled", value)) })
+                    }
+                    Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                        TextButton(onClick = { expandedRuleId = if (expandedRuleId == id) null else id }) { Text(if (expandedRuleId == id) "收起详情" else "详情") }
+                        TextButton(onClick = { beginEdit(rule) }) { Icon(Icons.Outlined.Edit, null); Text("编辑") }
+                        TextButton(onClick = { onSaveRule(JSONObject().put("id", id).put("_delete", true)) }) { Icon(Icons.Outlined.Delete, null); Text("删除") }
+                    }
+                    if (expandedRuleId == id) {
+                        HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+                        Text("实际匹配方法", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                        val actualMethods = (0 until installed.length()).mapNotNull { installed.optJSONObject(it) }.filter { it.optString("ruleId") == id }
+                        if (actualMethods.isEmpty()) Text("目标进程尚未回报安装方法。", color = Muted, fontSize = 11.sp)
+                        actualMethods.forEach { actual ->
+                            Text(actual.optString("signature"), fontSize = 10.sp)
+                            Text("调用 ${actual.optLong("invocations", 0L)} 次", color = Muted, fontSize = 10.sp)
+                        }
+                        val relatedEvents = eventItems.filter { it.optString("ruleId") == id || it.optString("rule_id") == id }
+                        Text("关联事件 · ${relatedEvents.size}", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                        relatedEvents.takeLast(10).reversed().forEach { event ->
+                            Text("${event.optString("method")} · ${event.optString("exception", "无异常")}", fontSize = 10.sp, color = Muted)
+                        }
+                    }
+                }
+            }
+            item { CardBlock { Text("数据边界", fontWeight = FontWeight.SemiBold); Text("规则观察只展示类 / 方法元数据、耗时和异常，不采集参数、返回值、Cookie、Token、请求头或请求体。", color = Muted, fontSize = 12.sp) } }
+        }
+        if (section == "类发现") {
+            item {
+                CardBlock {
+                    Text("DEX 类与方法发现", fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                    Text("提交目标进程扫描任务；结果可能受 DEX 数量、类数量、耗时和响应预算限制。", color = Muted, fontSize = 12.sp)
+                    OutlinedTextField(value = prefix, onValueChange = { prefix = it }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("类名前缀") })
+                    Button(onClick = { onDiscover(JSONObject().put("prefix", prefix.trim()).put("limit", 100).put("cursor", 0)) }, enabled = prefix.startsWith("com.openai.") && prefix.length <= 180, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.Search, null); Text("开始扫描") }
+                }
+            }
+            item {
+                CardBlock {
+                    Text("启动时发现", fontWeight = FontWeight.SemiBold)
+                    StatusValue("更新时间", hook.optLong("startupDiscoveryUpdatedAtMs", 0L).toString())
+                    StatusValue("发现类数", hook.optInt("startupDiscoveryClassCount", 0).toString())
+                    if (hook.optBoolean("startupDiscoveryAvailable", false)) Text("启动发现结果已上报，可通过启动发现接口读取详情。", color = Muted, fontSize = 11.sp)
+                    else Text("尚无可用的启动发现结果。", color = Muted, fontSize = 11.sp)
+                }
+            }
+            item {
+                CardBlock {
+                    Text("最近扫描任务", fontWeight = FontWeight.SemiBold)
+                    StatusValue("任务 ID", task.optString("requestId", "暂无"))
+                    StatusValue("状态", task.optString("status", "尚未提交"))
+                    StatusValue("更新时间", task.optLong("updatedAtMs", 0L).toString())
+                    if (task.has("error")) Text(task.optString("error"), color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+                    Text("扫描结果不等于已安装 Hook；刷新状态可读取最近一次扫描结果。", color = Muted, fontSize = 12.sp)
+                }
+            }
+            if (discoveryResult.optBoolean("ok", false)) {
+                item {
+                    CardBlock {
+                        Text("扫描结果", fontWeight = FontWeight.Bold)
+                        StatusValue("扫描类数", discoveryResult.optInt("classesScanned", 0).toString())
+                        StatusValue("发现类数", discoveryResult.optJSONArray("classes")?.length()?.toString() ?: "0")
+                        StatusValue("成员记录", discoveryResult.optInt("recordCount", 0).toString())
+                        StatusValue("DEX 数", discoveryResult.optInt("dexScanned", 0).toString())
+                        StatusValue("耗时", "${discoveryResult.optLong("elapsedMs", 0L)} ms")
+                        StatusValue("分页", if (discoveryResult.optBoolean("hasMore", false)) "还有下一页" else "已完成")
+                        if (discoveryResult.optBoolean("timedOut", false) || discoveryResult.optBoolean("scanTruncated", false) || discoveryResult.optBoolean("responseTruncated", false) || discoveryResult.optBoolean("classMetadataTruncated", false)) {
+                            Text("结果受到扫描时间、数量或响应预算限制，可能不完整。", color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+                        }
+                        if (discoveryResult.optBoolean("hasMore", false)) {
+                            TextButton(onClick = {
+                                onDiscover(JSONObject().put("prefix", prefix.trim()).put("limit", 100).put("cursor", discoveryResult.optInt("nextCursor", 0)))
+                            }) { Text("加载下一页") }
+                        }
+                    }
+                }
+                val classes = discoveryResult.optJSONArray("classes") ?: JSONArray()
+                items(classes.length()) { index ->
+                    val item = classes.optJSONObject(index) ?: JSONObject()
+                    val className = item.optString("className")
+                    val methods = item.optJSONArray("methods") ?: JSONArray()
+                    val inherited = item.optJSONArray("inheritedMethods") ?: JSONArray()
+                    val constructors = item.optJSONArray("constructors") ?: JSONArray()
+                    val fields = item.optJSONArray("fields") ?: JSONArray()
+                    CardBlock {
+                        Text(className, fontWeight = FontWeight.SemiBold)
+                        StatusValue("声明方法", methods.length().toString())
+                        StatusValue("继承方法", inherited.length().toString())
+                        StatusValue("构造器", constructors.length().toString())
+                        StatusValue("字段", fields.length().toString())
+                        if (methods.length() > 0) {
+                            Text("声明方法签名", fontWeight = FontWeight.SemiBold, fontSize = 11.sp)
+                            for (methodIndex in 0 until minOf(methods.length(), 20)) Text(methods.optString(methodIndex), fontSize = 10.sp, color = Muted)
+                        }
+                        if (inherited.length() > 0) {
+                            Text("继承方法", fontWeight = FontWeight.SemiBold, fontSize = 11.sp)
+                            for (methodIndex in 0 until minOf(inherited.length(), 10)) Text(inherited.optString(methodIndex), fontSize = 10.sp, color = Muted)
+                        }
+                        if (constructors.length() > 0) {
+                            Text("构造器", fontWeight = FontWeight.SemiBold, fontSize = 11.sp)
+                            for (methodIndex in 0 until minOf(constructors.length(), 10)) Text(constructors.optString(methodIndex), fontSize = 10.sp, color = Muted)
+                        }
+                        if (fields.length() > 0) {
+                            Text("字段", fontWeight = FontWeight.SemiBold, fontSize = 11.sp)
+                            for (fieldIndex in 0 until minOf(fields.length(), 20)) Text(fields.optString(fieldIndex), fontSize = 10.sp, color = Muted)
+                        }
+                        if (item.optBoolean("metadataTruncated", false)) Text("此类的成员元数据已截断。", color = MaterialTheme.colorScheme.error, fontSize = 11.sp)
+                        TextButton(onClick = { onDiscover(JSONObject().put("className", className).put("limit", 100).put("cursor", 0)) }) { Text("重新检查该类") }
+                    }
+                }
+                val candidates = discoveryResult.optJSONArray("candidateProposals") ?: JSONArray()
+                if (candidates.length() > 0) item {
+                    CardBlock {
+                        Text("候选规则 · ${candidates.length()}", fontWeight = FontWeight.SemiBold)
+                        for (index in 0 until minOf(candidates.length(), 12)) {
+                            val candidate = candidates.optJSONObject(index) ?: continue
+                            Text(candidate.optString("runtimeClassName") + "." + candidate.optString("methodName"), fontSize = 11.sp)
+                            Text(candidate.optString("jvmDescriptor"), fontSize = 10.sp, color = Muted)
+                            TextButton(onClick = {
+                                val candidateId = candidate.optString("candidateId").take(64)
+                                if (candidateId.isNotBlank()) {
+                                    onSaveRule(JSONObject()
+                                        .put("id", candidateId)
+                                        .put("className", candidate.optString("runtimeClassName"))
+                                        .put("methodName", candidate.optString("methodName"))
+                                        .put("methodDescriptor", candidate.optString("jvmDescriptor"))
+                                        .put("mode", "observe")
+                                        .put("enabled", true)
+                                        .put("sampleEvery", 1))
+                                }
+                            }) { Text("生成观察规则") }
+                        }
+                        Text("候选项仅供检查；点击生成后才会加入动态规则，仍需目标进程确认安装。", color = Muted, fontSize = 11.sp)
                     }
                 }
             }
         }
+        if (section == "事件") {
+            item { Text("事件中心 · ${eventItems.size}", fontSize = 20.sp, fontWeight = FontWeight.Bold); OutlinedTextField(value = search, onValueChange = { search = it }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("搜索规则、类名或方法") }) }
+            if (filteredEvents.isEmpty()) item { CardBlock { Text("暂无匹配事件"); Text("事件仅包含规则、类 / 方法元数据、耗时和异常，不包含参数和凭证。", color = Muted, fontSize = 12.sp) } }
+            else items(filteredEvents.takeLast(100).reversed()) { event ->
+                CardBlock {
+                    Text(event.optString("method", "未知方法"), fontWeight = FontWeight.SemiBold)
+                    Text(event.optString("class", "未知类"), color = Muted, fontSize = 11.sp)
+                    StatusValue("规则", event.optString("ruleId", event.optString("rule_id", "—")))
+                    StatusValue("耗时", "${event.optLong("elapsedMs", event.optLong("durationMs", 0L))} ms")
+                    StatusValue("异常", event.optString("exception", "无"))
+                    StatusValue("时间", event.optString("timestamp", "—"))
+                }
+            }
+        }
+        if (section == "诊断") {
+            item {
+                CardBlock {
+                    Text("目标进程诊断", fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                    StatusValue("目标包", hook.optString("targetPackage", "com.openai.chatgpt"))
+                    StatusValue("报告状态", if (targetOnline) "新鲜报告" else if (reportAt > 0L) "报告过期" else "无报告")
+                    StatusValue("报告时间", reportAt.toString())
+                    StatusValue("运行时状态", hook.optString("runtimeState", "unavailable"))
+                    StatusValue("运行时快照", hook.optLong("runtimeSnapshotAtMs", 0L).toString())
+                    StatusValue("配置 revision", hook.optLong("configRevision", 0L).toString())
+                    StatusValue("安装清单", "${installed.length()} 条")
+                    StatusValue("清单截断", if (hook.optBoolean("hookInventoryTruncated", false)) "是" else "否")
+                }
+            }
+            item { CardBlock { Text("最后一次规则应用", fontWeight = FontWeight.SemiBold); Text(applyReport.toString(2), fontSize = 10.sp, color = Muted) } }
+            item {
+                CardBlock {
+                    Text("高级能力", fontWeight = FontWeight.SemiBold)
+                    StatusValue("类加载监听", if (hook.optBoolean("classLoadWatcherEnabled", false)) "已启用" else "未启用 / 未报告")
+                    StatusValue("请求抓取", if (hook.has("dumpRequests")) if (hook.optBoolean("dumpRequests")) "已启用" else "已关闭" else "当前 API 未提供状态")
+                    Text("请求抓取可能记录敏感内容，必须默认关闭并提供独立授权与清理。当前接口没有完整配置 / 清理能力，因此不显示虚假开关。", color = Muted, fontSize = 12.sp)
+                }
+            }
+            item { CardBlock { Text("旧版未迁移能力", fontWeight = FontWeight.SemiBold); Text("旧版 gpt-hook 独立 Xposed 实现不属于当前 APK 运行能力；未迁移功能不会列为当前可用。", color = Muted, fontSize = 12.sp) } }
+        }
     }
-    if (showCreate) {
+
+    if (showEditor) {
         AlertDialog(
-            onDismissRequest = { showCreate = false },
-            title = { Text("新增动态规则") },
+            onDismissRequest = { showEditor = false },
+            title = { Text(if (editingRule == null) "新增动态规则" else "编辑动态规则") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    AppTextField(className, { className = it }, "com.openai.example.Target")
-                    AppTextField(methodName, { methodName = it }, "methodName")
-                    AppTextField(parameters, { parameters = it }, """["java.lang.String"]""")
-                    Text("仅支持 observe / dump 观察模式", color = Muted, fontSize = 11.sp)
+                    OutlinedTextField(value = editClass, onValueChange = { editClass = it }, label = { Text("类名") }, singleLine = true)
+                    OutlinedTextField(value = editMethod, onValueChange = { editMethod = it }, label = { Text("方法名") }, singleLine = true)
+                    OutlinedTextField(value = editParameters, onValueChange = { editParameters = it }, label = { Text("参数类型 JSON 数组") }, minLines = 2)
+                    Text("仅允许 observe / dump 观察模式；目标类必须位于 com.openai.*。", color = Muted, fontSize = 11.sp)
+                    editorError?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp) }
                 }
             },
             confirmButton = {
                 TextButton(onClick = {
-                    runCatching {
-                        require(className.startsWith("com.openai.") && methodName.isNotBlank())
-                        onSaveRule(JSONObject().put("id", "ui-" + java.util.UUID.randomUUID())
-                            .put("className", className.trim()).put("methodName", methodName.trim())
-                            .put("mode", "observe").put("parameterTypes", JSONArray(parameters))
-                            .put("enabled", true).put("sampleEvery", 1))
-                        showCreate = false
-                        className = ""
-                        methodName = ""
+                    try {
+                        require(editClass.startsWith("com.openai.") && editClass.length <= 240) { "类名必须位于 com.openai.*" }
+                        require(editMethod.isNotBlank()) { "方法名不能为空" }
+                        val args = JSONArray(editParameters)
+                        val next = JSONObject(editingRule?.toString() ?: "{}")
+                            .put("id", editingRule?.optString("id")?.takeIf { it.isNotBlank() } ?: "ui-" + java.util.UUID.randomUUID())
+                            .put("className", editClass.trim())
+                            .put("methodName", editMethod.trim())
+                            .put("mode", "observe")
+                            .put("parameterTypes", args)
+                            .put("enabled", editingRule?.optBoolean("enabled", true) ?: true)
+                            .put("sampleEvery", editingRule?.optInt("sampleEvery", 1) ?: 1)
+                        onSaveRule(next)
+                        showEditor = false
+                    } catch (t: Throwable) {
+                        editorError = t.message ?: "规则无效"
                     }
-                }) { Text("保存规则") }
+                }) { Text("保存") }
             },
-            dismissButton = { TextButton(onClick = { showCreate = false }) { Text("取消") } }
+            dismissButton = { TextButton(onClick = { showEditor = false }) { Text("取消") } }
         )
     }
 }

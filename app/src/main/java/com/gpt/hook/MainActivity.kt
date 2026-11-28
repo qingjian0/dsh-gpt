@@ -1025,19 +1025,24 @@ private fun ApiPage(
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Metric("平均首字", "${usage.optLong("avg_ttft_ms")}ms")
+                    Metric("最近首字", "${usage.optLong("last_ttft_ms")}ms")
                     Metric("最近总耗时", "${usage.optLong("last_ms")}ms")
-                    Metric("估算 Token", usage.optInt("total_tokens").toString())
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Metric("输入 Token", usage.optLong("prompt_tokens").toString())
+                    Metric("输出 Token", usage.optLong("completion_tokens").toString())
+                    Metric("总 Token", usage.optLong("total_tokens").toString())
                 }
                 val recent = usage.optJSONArray("recent") ?: JSONArray()
                 if (recent.length() == 0) {
                     Text("完成一次 ChatGPT 请求后，这里会显示最近记录", color = Muted, fontSize = 12.sp)
                 } else {
                     Text("最近请求", fontWeight = FontWeight.SemiBold)
-                    for (i in (recent.length() - 5).coerceAtLeast(0) until recent.length()) {
+                    for (i in (recent.length() - 20).coerceAtLeast(0) until recent.length()) {
                         val item = recent.optJSONObject(i) ?: continue
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Column(Modifier.weight(1f)) {
-                                Text(item.optString("model", "auto"), fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                                Text("${item.optString("model", "auto")} · ${item.optString("channel", "chatgpt")}", fontSize = 12.sp, fontWeight = FontWeight.Medium)
                                 Text(if (item.optBoolean("ok")) "成功" else "失败", color = if (item.optBoolean("ok")) Green else Color(0xFFE05252), fontSize = 11.sp)
                             }
                             Text("首字 ${item.optLong("ttft_ms")}ms · 总计 ${item.optLong("total_ms")}ms", color = Muted, fontSize = 11.sp)

@@ -32,6 +32,10 @@
             </intent-filter>
         </activity>
         <service
+            android:name=".api.ChatGptLoginWaitService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+        <service
             android:name=".api.ApiService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />

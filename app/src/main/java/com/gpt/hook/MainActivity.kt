@@ -1303,6 +1303,18 @@ private fun UpstreamConfig(
                 } else if (proxyMode == "web") {
                     OutlinedButton(
                         modifier = Modifier.fillMaxWidth(),
+                        onClick = {
+                            com.gpt.hook.api.ChatGptOAuthLogin.start(appContext) { ok, msg ->
+                                importStatus = msg
+                                if (ok) {
+                                    val saved = com.gpt.hook.api.ChatGptCredentialStore.load()
+                                    if (saved != null) webToken = saved.accessToken
+                                }
+                            }
+                        },
+                    ) { Text("账号登录（浏览器授权，自动完成）") }
+                    OutlinedButton(
+                        modifier = Modifier.fillMaxWidth(),
                         onClick = { com.gpt.hook.api.ChatGptWebToken.openHome(appContext) },
                     ) { Text("打开 ChatGPT（登录）") }
                     OutlinedButton(

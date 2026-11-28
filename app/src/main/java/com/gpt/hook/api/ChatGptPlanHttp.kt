@@ -143,7 +143,7 @@ internal class ChatGptPlanHttp(
 
         fun dispatch() {
             if (dataLines.isEmpty()) return
-            val data = dataLines.joinToString("\\n")
+            val data = dataLines.joinToString("\n")
             dataLines.clear()
             if (data == "[DONE]") return
             val event = JSONObject(data)

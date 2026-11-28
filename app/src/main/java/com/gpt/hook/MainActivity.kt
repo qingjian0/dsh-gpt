@@ -2191,8 +2191,8 @@ private fun HookPage(
                 CardBlock {
                     Text("高级能力", fontWeight = FontWeight.SemiBold)
                     StatusValue("类加载监听", if (hook.optBoolean("classLoadWatcherEnabled", false)) "已启用" else "未启用 / 未报告")
-                    StatusValue("请求抓取", if (hook.has("dumpRequests")) if (hook.optBoolean("dumpRequests")) "已启用" else "已关闭" else "当前 API 未提供状态")
-                    Text("请求抓取可能记录敏感内容，必须默认关闭并提供独立授权与清理。当前接口没有完整配置 / 清理能力，因此不显示虚假开关。", color = Muted, fontSize = 12.sp)
+                    StatusValue("请求抓取", if (requestDump.optBoolean("enabled", false)) "已启用" else "已关闭")
+                    Text("独立的请求抓取页面提供开关、记录列表与清理；默认关闭，受本地网关 API Key 保护。", color = Muted, fontSize = 12.sp)
                 }
             }
             item { CardBlock { Text("旧版未迁移能力", fontWeight = FontWeight.SemiBold); Text("旧版 gpt-hook 独立 Xposed 实现不属于当前 APK 运行能力；未迁移功能不会列为当前可用。", color = Muted, fontSize = 12.sp) } }

@@ -469,6 +469,26 @@ private fun DshApp(
                     expanded = configExpanded,
                     latency = state.latency,
                     usage = state.usage,
+                    initialRelayConfig = relayConfig,
+                    modelIds = modelIds,
+                    onRelayConfigSave = { next ->
+                        relayConfig = next
+                        onRelayConfigChange(next)
+                        notify("ChatGPT 配置已保存，网关已重启")
+                    },
+                    onImportKit = {
+                        try {
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            val raw = clipboard.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()
+                            require(raw.isNotBlank()) { "剪贴板为空" }
+                            val imported = RelayConfig.importKit(context, raw)
+                            relayConfig = imported
+                            onRelayConfigChange(imported)
+                            notify(if (imported.ready) "ChatGPT 配置导入成功" else "Kit 已导入，请补齐当前通道凭证")
+                        } catch (e: Exception) {
+                            notify("导入失败：${e.message ?: "无效 kit.json"}")
+                        }
+                    },
                     onExpand = { configExpanded = !configExpanded },
                     onEndpointChange = { endpoint = it },
                     onKeyChange = { apiKey = it },
@@ -903,6 +923,10 @@ private fun ApiPage(
     expanded: Boolean,
     latency: List<LatencyPoint>,
     usage: JSONObject,
+    initialRelayConfig: RelayConfig,
+    modelIds: List<String>,
+    onRelayConfigSave: (RelayConfig) -> Unit,
+    onImportKit: () -> Unit,
     onExpand: () -> Unit,
     onEndpointChange: (String) -> Unit,
     onKeyChange: (String) -> Unit,
@@ -1067,25 +1091,10 @@ private fun ApiPage(
 
         item {
             UpstreamConfig(
-                initialConfig = relayConfig,
+                initialConfig = initialRelayConfig,
                 modelIds = modelIds,
-                onSave = { next ->
-                    relayConfig = next
-                    onRelayConfigChange(next)
-                },
-                onImportKit = {
-                    try {
-                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        val raw = clipboard.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()
-                        require(raw.isNotBlank()) { "剪贴板为空" }
-                        val imported = RelayConfig.importKit(context, raw)
-                        relayConfig = imported
-                        onRelayConfigChange(imported)
-                        notify(if (imported.ready) "ChatGPT 配置导入成功" else "Kit 已导入，请补齐当前通道凭证")
-                    } catch (e: Exception) {
-                        notify("导入失败：${e.message ?: "无效 kit.json"}")
-                    }
-                }
+                onSave = onRelayConfigSave,
+                onImportKit = onImportKit
             )
         }
     }

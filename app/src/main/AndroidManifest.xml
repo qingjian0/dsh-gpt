@@ -35,6 +35,10 @@
             android:name=".api.ApiService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+        <service
+            android:name=".api.ChatGptPlanLoginWaitService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
         <provider
             android:name=".ObservationProvider"
             android:authorities="com.gpt.hook.observations"

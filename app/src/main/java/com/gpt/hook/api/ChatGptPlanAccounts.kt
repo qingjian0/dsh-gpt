@@ -80,6 +80,9 @@ internal fun ChatGptPlanAccounts(context: Context) {
             pending = login
             busy = true
             status = "已打开系统浏览器，等待 ChatGPT 完成授权……"
+            // 关键：MIUI 切到外部浏览器后约 3 秒把本应用降到 adj 700（idle）并冻结进程，
+            // 冻结后回环 socket 不再 accept，浏览器回调必然失败。前台服务让进程保持可见级 adj。
+            ChatGptPlanLoginWaitService.start(context.applicationContext)
             // 关键：等待协程跑在进程级作用域，否则打开浏览器导致 composable 销毁时
             // 协程被取消，回环 socket 随之关闭，浏览器回调只会看到 ERR_CONNECTION_REFUSED。
             ChatGptPlanLoginRegistry.launchWait(context, login) { outcome, message ->
@@ -310,6 +313,7 @@ internal object ChatGptPlanLoginRegistry {
             pending = null
             inFlight = false
             lastStatus = message
+            ChatGptPlanLoginWaitService.stop(context.applicationContext)
             // 浏览器不会自己切回 App：http 回调页没有能力把后台应用拉到前台，
             // 必须由 App 主动启动 MainActivity（网关前台服务在跑时允许后台启动）。
             if (success) bringToFront(context)

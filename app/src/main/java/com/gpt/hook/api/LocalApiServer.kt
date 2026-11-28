@@ -159,8 +159,9 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
 
     private fun measureUsage(body: ByteArray, action: () -> Unit) {
         val request = runCatching { JSONObject(String(body, Charsets.UTF_8)) }.getOrNull()
-        val model = request?.optString("model", "unknown")?.ifBlank { "unknown" } ?: "unknown"
-        UsageMeter.begin(model, "chatgpt", body.size)
+        val requestedModel = request?.optString("model", "").orEmpty()
+        val model = if (requestedModel.isBlank() || requestedModel == "auto") cfg.model else requestedModel
+        UsageMeter.begin(model, "chatgpt", String(body, Charsets.UTF_8).length)
         try {
             action()
         } catch (t: Throwable) {
@@ -676,10 +677,12 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         val conn = try {
             client.open("POST", "/backend-api/conversation", payload, "text/event-stream")
         } catch (t: Throwable) {
+            UsageMeter.markFailure(502)
             json(out, 502, err("upstream_unreachable", t.message ?: "connect failed"), responseHeaders); return
         }
         val code = conn.responseCode
         if (code >= 400) {
+            UsageMeter.markFailure(code)
             val text = (conn.errorStream ?: conn.inputStream)?.bufferedReader()?.readText().orEmpty()
             json(out, code, text.ifBlank { err("upstream_error", "HTTP $code") }, responseHeaders)
             try { conn.disconnect() } catch (_: Throwable) { }

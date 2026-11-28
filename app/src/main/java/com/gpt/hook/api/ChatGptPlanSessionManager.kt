@@ -79,9 +79,25 @@ internal class ChatGptPlanSessionManager(
         val profile = store.snapshot().profiles.firstOrNull { it.id == profileId }
             ?: throw IllegalArgumentException("ChatGPT profile not found")
         val revoked = profile.refreshToken?.let { token ->
-            runCatching {
-                http.revoke(profile.clientId, token).status == 200
-            }.getOrDefault(false)
+            var confirmed = false
+            for (attempt in 0 until REVOCATION_ATTEMPTS) {
+                val response = runCatching { http.revoke(profile.clientId, token) }.getOrNull()
+                if (response?.status == 200) {
+                    confirmed = true
+                    break
+                }
+                val status = response?.status
+                if (status != null && status in 400..499 && status != 429) break
+                if (attempt < REVOCATION_ATTEMPTS - 1) {
+                    try {
+                        Thread.sleep(REVOCATION_BACKOFF_MS shl attempt)
+                    } catch (_: InterruptedException) {
+                        Thread.currentThread().interrupt()
+                        break
+                    }
+                }
+            }
+            confirmed
         } ?: false
         store.clearTokens(profileId)
         return revoked
@@ -89,5 +105,7 @@ internal class ChatGptPlanSessionManager(
 
     private companion object {
         private val refreshLocks = ConcurrentHashMap<String, Any>()
+        const val REVOCATION_ATTEMPTS = 3
+        const val REVOCATION_BACKOFF_MS = 500L
     }
 }

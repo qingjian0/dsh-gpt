@@ -127,8 +127,10 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                     cfg.apiKey.isBlank() -> json(out, 503, err("configuration_required", "configure a gateway API key before using protected API routes"))
                     !authorized(headers) -> json(out, 401, err("invalid_api_key", "missing or bad Authorization"))
                     target == "/v1/request-dump" -> requestDumpRoute(out, method, body)
-                    target == "/v1/models" -> json(out, 200, OpenAiCompat.modelsJson(OpenAiCompat.DEFAULT_MODELS))
-                    target == "/v1/capabilities" && method == "GET" -> json(out, 200, OpenAiCompat.capabilitiesJson())
+                    target == "/v1/models" && method == "GET" ->
+                        json(out, 200, OpenAiCompat.modelsJson(OpenAiCompat.DEFAULT_MODELS))
+                    target == "/v1/capabilities" && method == "GET" ->
+                        json(out, 200, OpenAiCompat.capabilitiesJson())
                     // MCP 通道：不消耗每小时消息额度，可直接调工具/读网页
                     target == "/v1/status" && method == "GET" -> statusRoute(out)
                     target == "/v1/config" -> configRoute(out, method, body)
@@ -535,9 +537,10 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
 
     private fun health(): String = JSONObject()
         .put("ok", true).put("port", cfg.port)
-        .put("ready", cfg.ready).put("upstream", cfg.upstreamBase)
+        .put("ready", cfg.ready).put("upstream", if (cfg.proxyMode == "web") cfg.webBase else cfg.upstreamBase)
         .toString()
 
+    /** Responses 入口：text-only，拒绝本网关无法忠实转发的字段。 */
     private fun responses(out: OutputStream, body: ByteArray, headers: Map<String, String>) {
         val request = try { JSONObject(String(body, Charsets.UTF_8)) } catch (t: Throwable) {
             json(out, 400, err("invalid_request", "body is not JSON")); return
@@ -915,7 +918,7 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
             .put("running", running)
             .put("ready", cfg.ready)
             .put("proxy_mode", cfg.proxyMode)
-            .put("upstream", if (cfg.proxyMode == "web") cfg.webBase else cfg.upstreamBase)
+            .put("upstream", when (cfg.proxyMode) { "web" -> cfg.webBase; else -> cfg.upstreamBase })
             .put("usage", UsageMeter.snapshot(context))
             .toString())
     }
@@ -930,6 +933,7 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                 .put("has_hook_token", cfg.accessToken.isNotBlank()).put("has_oai_did", cfg.oaiDid.isNotBlank())
                 .put("has_web_token", cfg.webAccessToken.isNotBlank())
                 .put("has_web_session", cfg.webSessionToken.isNotBlank())
+                .put("has_siwc_profile", cfg.siwcProfileId.isNotBlank())
                 .put("restart_required", false).toString())
             return
         }
@@ -937,7 +941,8 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         val request = runCatching { JSONObject(body?.toString(Charsets.UTF_8) ?: "") }.getOrNull()
         if (request == null) { json(out, 400, err("invalid_request", "body must be JSON")); return }
         val next = cfg.copy(
-            proxyMode = request.optString("proxy_mode", cfg.proxyMode).let { if (it == "web") "web" else "hook" },
+            proxyMode = request.optString("proxy_mode", cfg.proxyMode).let { if (it in setOf("web")) it else "hook" },
+            siwcProfileId = request.optString("siwc_profile_id", cfg.siwcProfileId),
             model = request.optString("model", cfg.model).ifBlank { cfg.model },
             fastMode = request.optBoolean("fast_mode", cfg.fastMode),
             reasoningEffort = RelayConfig.normalizeEffort(request.optString("reasoning_effort", cfg.reasoningEffort)),
@@ -963,7 +968,7 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         if (method != "PUT") { json(out, 405, err("method_not_allowed", "use GET or PUT")); return }
         val request = runCatching { JSONObject(body?.toString(Charsets.UTF_8) ?: "") }.getOrNull()
         val mode = request?.optString("mode").orEmpty()
-        if (mode != "hook" && mode != "web") { json(out, 400, err("invalid_request", "mode must be hook or web")); return }
+        if (mode !in setOf("hook", "web")) { json(out, 400, err("invalid_request", "mode must be hook, web or siwc")); return }
         cfg = cfg.copy(proxyMode = mode)
         RelayConfig.save(context, cfg)
         json(out, 200, JSONObject().put("ok", true).put("proxy_mode", mode).put("ready", cfg.ready).toString())

@@ -35,6 +35,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import com.gpt.hook.api.ApiService
@@ -1228,6 +1229,7 @@ private fun UpstreamConfig(
     onSave: (RelayConfig) -> Unit,
     onImportKit: () -> Unit
 ) {
+    val appContext = LocalContext.current
     var expanded by remember { mutableStateOf(false) }
     var proxyMode by remember(initialConfig) { mutableStateOf(initialConfig.proxyMode) }
     var hookToken by remember(initialConfig) { mutableStateOf(initialConfig.accessToken) }
@@ -1244,6 +1246,43 @@ private fun UpstreamConfig(
     var revealSecrets by remember { mutableStateOf(false) }
     var modelExpanded by remember { mutableStateOf(false) }
     var effortExpanded by remember { mutableStateOf(false) }
+    var importStatus by remember { mutableStateOf("") }
+
+    // 从浏览器切回来自动读剪贴板：拿到 accessToken 就保存，不用再点按钮
+    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME && proxyMode == "web") {
+                val captured = com.gpt.hook.api.ChatGptWebToken.capture(appContext)
+                val token = captured?.accessToken
+                if (token != null && token != webToken) {
+                    webToken = token
+                    importStatus = if (captured.account.isNotBlank()) {
+                        "登录成功：账号 " + captured.account
+                    } else {
+                        "登录成功：凭证已保存"
+                    }
+                    onSave(
+                        initialConfig.copy(
+                            proxyMode = "web",
+                            webAccessToken = token,
+                            webSessionToken = webSession.trim(),
+                            connectorId = connector.trim(),
+                            model = model,
+                            fastMode = fastMode,
+                            reasoningEffort = effort,
+                            searchEnabled = search,
+                            temporaryChat = temporary,
+                        )
+                    )
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+
 
     CardBlock {
         Row(
@@ -1263,19 +1302,27 @@ private fun UpstreamConfig(
         )
         AnimatedVisibility(expanded) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     FilterChip(
                         selected = proxyMode == "hook",
                         onClick = { proxyMode = "hook" },
-                        label = { Text("Android Hook") }
+                        label = { Text("Android Hook") },
+                        modifier = Modifier.weight(1f),
                     )
                     FilterChip(
                         selected = proxyMode == "web",
                         onClick = { proxyMode = "web" },
-                        label = { Text("网页版 API") }
+                        label = { Text("网页版") },
+                        modifier = Modifier.weight(1f),
                     )
                 }
                 if (proxyMode == "hook") {
+                    if (importStatus.isNotBlank()) {
+                        Text(importStatus, fontSize = 11.sp, color = Color(0xFF2F6FEB))
+                    }
                     FieldLabel("DPoP Access Token")
                     OutlinedTextField(
                         value = hookToken, onValueChange = { hookToken = it },
@@ -1287,20 +1334,14 @@ private fun UpstreamConfig(
                     OutlinedTextField(value = did, onValueChange = { did = it }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                     FieldLabel("Session ID（可选）")
                     OutlinedTextField(value = sessionId, onValueChange = { sessionId = it }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-                } else {
-                    FieldLabel("Web Access Token")
-                    OutlinedTextField(
-                        value = webToken, onValueChange = { webToken = it },
-                        modifier = Modifier.fillMaxWidth(), singleLine = true,
-                        visualTransformation = if (revealSecrets) VisualTransformation.None else PasswordVisualTransformation(),
-                        placeholder = { Text("ChatGPT web access token") }
-                    )
-                    FieldLabel("Session Cookie（可选）")
-                    OutlinedTextField(
-                        value = webSession, onValueChange = { webSession = it },
-                        modifier = Modifier.fillMaxWidth(), singleLine = true,
-                        visualTransformation = if (revealSecrets) VisualTransformation.None else PasswordVisualTransformation()
-                    )
+                } else if (proxyMode == "web") {
+                    Button(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = { appContext.startActivity(com.gpt.hook.api.ChatGptWebLoginActivity.intent(appContext)) },
+                    ) { Text("登录 ChatGPT") }
+                    if (importStatus.isNotBlank()) {
+                        Text(importStatus, fontSize = 12.sp, color = Color(0xFF2F6FEB))
+                    }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("显示凭证", Modifier.weight(1f), color = Muted, fontSize = 12.sp)

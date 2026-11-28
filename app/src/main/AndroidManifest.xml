@@ -24,6 +24,10 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Dsh">
         <activity
+            android:name=".api.ChatGptWebLoginActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar" />
+        <activity
             android:name=".MainActivity"
             android:exported="true">
             <intent-filter>
@@ -31,6 +35,10 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <service
+            android:name=".api.ChatGptLoginWaitService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
         <service
             android:name=".api.ApiService"
             android:exported="false"

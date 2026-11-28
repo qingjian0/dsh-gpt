@@ -234,7 +234,11 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
             val state = providerCall(ObservationProvider.METHOD_API_SNAPSHOT)
                 ?: throw IllegalStateException("Hook control provider unavailable")
             val report = JSONObject(state.getString(ObservationProvider.KEY_REPORT).orEmpty())
-            json(out, 200, JSONObject().put("ok", true).put("report", report).toString())
+            json(out, 200, JSONObject()
+                .put("ok", true)
+                .put("events", report.optJSONArray("events") ?: JSONArray())
+                .put("report", report)
+                .toString())
         } catch (t: Throwable) {
             json(out, 503, err("hook_control_unavailable", t.message ?: "Hook events unavailable"))
         }

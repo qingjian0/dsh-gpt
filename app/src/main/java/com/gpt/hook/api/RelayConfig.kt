@@ -10,6 +10,8 @@ data class RelayConfig(
     val lan: Boolean = true,
     val apiKey: String = "",
     val proxyMode: String = "hook",
+    /** SIWC profile ID only; bearer/refresh tokens remain in the Keystore-backed profile store. */
+    val siwcProfileId: String = "",
     val upstreamBase: String = "https://android.chat.openai.com",
     val accessToken: String = "",
     val oaiDid: String = "",
@@ -27,8 +29,11 @@ data class RelayConfig(
     val userAgent: String = "ChatGPT/1.2026.321 (Android 15; 22081212C)",
 ) {
     val ready: Boolean
-        get() = if (proxyMode == "web") webAccessToken.isNotBlank()
-        else accessToken.isNotBlank() && oaiDid.isNotBlank()
+        get() = when (proxyMode) {
+            "web" -> webAccessToken.isNotBlank()
+            "siwc" -> siwcProfileId.isNotBlank()
+            else -> accessToken.isNotBlank() && oaiDid.isNotBlank()
+        }
 
     companion object {
         private const val PREFS = "relay"
@@ -48,6 +53,8 @@ data class RelayConfig(
                 lan = p.getBoolean("lan", defaults.lan),
                 apiKey = apiKey,
                 proxyMode = p.getString("proxyMode", defaults.proxyMode) ?: defaults.proxyMode,
+                siwcProfileId = p.getString("siwcProfileId", null)
+                    ?: runCatching { ChatGptPlanProfileStore(ctx).snapshot().activeProfileId.orEmpty() }.getOrDefault(""),
                 upstreamBase = p.getString("upstreamBase", defaults.upstreamBase) ?: defaults.upstreamBase,
                 accessToken = p.getString("accessToken", "") ?: "",
                 oaiDid = p.getString("oaiDid", "") ?: "",
@@ -72,7 +79,8 @@ data class RelayConfig(
                 .putInt("port", cfg.port)
                 .putBoolean("lan", cfg.lan)
                 .putString("apiKey", cfg.apiKey)
-                .putString("proxyMode", if (cfg.proxyMode == "web") "web" else "hook")
+                .putString("proxyMode", cfg.proxyMode.takeIf { it in setOf("hook", "web", "siwc") } ?: "hook")
+                .putString("siwcProfileId", cfg.siwcProfileId)
                 .putString("upstreamBase", cfg.upstreamBase)
                 .putString("accessToken", cfg.accessToken)
                 .putString("oaiDid", cfg.oaiDid)
@@ -109,7 +117,7 @@ data class RelayConfig(
                 connectorId = o.optString("connectorId", cur.connectorId),
                 webAccessToken = o.optString("web_access_token", cur.webAccessToken),
                 webSessionToken = o.optString("web_session_token", cur.webSessionToken),
-                proxyMode = o.optString("proxy_mode", cur.proxyMode).let { if (it == "web") "web" else "hook" },
+                proxyMode = o.optString("proxy_mode", cur.proxyMode).let { if (it in setOf("web", "siwc")) it else "hook" },
                 temporaryChat = o.optBoolean("temporaryChat", cur.temporaryChat),
             )
             save(ctx, next)

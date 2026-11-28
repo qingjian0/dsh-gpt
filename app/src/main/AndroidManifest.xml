@@ -40,6 +40,11 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
         <activity
+            android:name=".api.ChatGptWebLoginActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar" />
+        <activity
             android:name=".api.ChatGptPlanWebLoginActivity"
             android:exported="false"
             android:configChanges="orientation|screenSize|keyboardHidden"

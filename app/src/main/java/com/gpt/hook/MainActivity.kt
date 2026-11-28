@@ -1249,6 +1249,18 @@ private fun UpstreamConfig(
     var modelExpanded by remember { mutableStateOf(false) }
     var effortExpanded by remember { mutableStateOf(false) }
 
+    // 网页通道：WebView 里登录一次，cookie 自动换成 accessToken，无需手抄。
+    val webLoginLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            val cfg = com.gpt.hook.api.RelayConfig.load(appContext)
+            webToken = cfg.webAccessToken
+            webSession = cfg.webSessionToken
+            proxyMode = "web"
+        }
+    }
+
     CardBlock {
         Row(
             Modifier.fillMaxWidth().clickable { expanded = !expanded },
@@ -1305,6 +1317,10 @@ private fun UpstreamConfig(
                     FieldLabel("Session ID（可选）")
                     OutlinedTextField(value = sessionId, onValueChange = { sessionId = it }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                 } else if (proxyMode == "web") {
+                    OutlinedButton(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = { webLoginLauncher.launch(com.gpt.hook.api.ChatGptWebLoginActivity.intent(appContext)) },
+                    ) { Text("打开 ChatGPT 登录（自动获取凭证）") }
                     Text(
                         "兼容旧版 ChatGPT 网页会话：需要手动提供凭证，不提供网页登录后自动提取。网页 backend-api 属于非公开接口，可能随时变化。若要通过 ChatGPT 账号登录并使用订阅授权，请选择「ChatGPT 订阅授权（SIWC）」并在上方账号管理中登录。",
                         color = Color(0xFFE0A43C), fontSize = 12.sp

@@ -23,9 +23,19 @@ class ChatGptClient(private val cfg: RelayConfig) {
         if (web) {
             conn.setRequestProperty("Authorization", "Bearer ${cfg.webAccessToken}")
             if (cfg.webSessionToken.isNotBlank()) {
+                // 只给 accessToken 时 chatgpt.com 常回 403 Unusual activity，
+                // 带上会话 cookie 才稳（浏览器里 __Secure-next-auth.session-token 的值）。
                 conn.setRequestProperty("Cookie", "__Secure-next-auth.session-token=${cfg.webSessionToken}")
             }
             conn.setRequestProperty("User-Agent", cfg.webUserAgent)
+            // 浏览器指纹：缺这些头会被判定为脚本流量
+            conn.setRequestProperty("oai-device-id", cfg.oaiDid)
+            conn.setRequestProperty("oai-language", "zh-CN")
+            conn.setRequestProperty("Origin", "https://chatgpt.com")
+            conn.setRequestProperty("Referer", "https://chatgpt.com/")
+            conn.setRequestProperty("sec-ch-ua", "\"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"")
+            conn.setRequestProperty("sec-ch-ua-mobile", "?0")
+            conn.setRequestProperty("sec-ch-ua-platform", "\"Windows\"")
         } else {
             conn.setRequestProperty("Authorization", "DPoP ${cfg.accessToken}")
             conn.setRequestProperty("oai-did", cfg.oaiDid)

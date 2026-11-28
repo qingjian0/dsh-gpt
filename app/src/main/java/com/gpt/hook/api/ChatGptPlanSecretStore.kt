@@ -163,6 +163,29 @@ internal class ChatGptPlanProfileStore(
     }
 
     @Synchronized
+    fun pendingClientId(): String? =
+        context.getSharedPreferences(HOST_PREFS, Context.MODE_PRIVATE)
+            .getString(PENDING_CLIENT_ID, null)
+            ?.also(ChatGptPlanOAuth::validateIssuedClientId)
+
+    @Synchronized
+    fun savePendingClientId(clientId: String) {
+        ChatGptPlanOAuth.validateIssuedClientId(clientId)
+        check(context.getSharedPreferences(HOST_PREFS, Context.MODE_PRIVATE)
+            .edit().putString(PENDING_CLIENT_ID, clientId).commit()) {
+            "Could not persist ChatGPT registration ID"
+        }
+    }
+
+    @Synchronized
+    fun clearPendingClientId() {
+        check(context.getSharedPreferences(HOST_PREFS, Context.MODE_PRIVATE)
+            .edit().remove(PENDING_CLIENT_ID).commit()) {
+            "Could not clear pending ChatGPT registration ID"
+        }
+    }
+
+    @Synchronized
     fun snapshot(): Snapshot {
         val raw = secrets.read() ?: return Snapshot(null, emptyList())
         val root = JSONObject(raw)
@@ -224,5 +247,6 @@ internal class ChatGptPlanProfileStore(
     private companion object {
         const val HOST_PREFS = "dsh_siwc_host"
         const val HOST_ID = "ext_agent_host_id"
+        const val PENDING_CLIENT_ID = "pending_client_id"
     }
 }

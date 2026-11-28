@@ -50,6 +50,30 @@ internal fun ChatGptPlanAccounts(context: Context) {
         }
     }
 
+    fun startLogin(selectedProfileId: String?, forceNewRegistration: Boolean = false) {
+        try {
+            val login = coordinator.begin(context, selectedProfileId, forceNewRegistration)
+            pending = login
+            busy = true
+            status = "已打开系统浏览器，等待 ChatGPT 完成授权……"
+            scope.launch {
+                try {
+                    withContext(Dispatchers.IO) { login.complete() }
+                    status = "ChatGPT 授权成功，凭证已加密保存"
+                    reload()
+                } catch (error: Throwable) {
+                    status = "授权未完成：${error.message ?: error.javaClass.simpleName}"
+                } finally {
+                    pending = null
+                    busy = false
+                }
+            }
+        } catch (error: Throwable) {
+            status = "无法启动授权：${error.message ?: error.javaClass.simpleName}"
+            busy = false
+        }
+    }
+
     val activeProfile = profiles.firstOrNull { it.id == activeProfileId }
 
     LaunchedEffect(store) { reload() }
@@ -90,6 +114,10 @@ internal fun ChatGptPlanAccounts(context: Context) {
                         }
                     }
                     Column {
+                        OutlinedButton(
+                            enabled = !busy,
+                            onClick = { startLogin(profile.id) },
+                        ) { Text("重新授权") }
                         if (activeProfileId != profile.id) {
                             OutlinedButton(
                                 enabled = !busy,
@@ -184,31 +212,9 @@ internal fun ChatGptPlanAccounts(context: Context) {
             Button(
                 enabled = !busy,
                 modifier = Modifier.fillMaxWidth(),
-                onClick = {
-                    try {
-                        val login = coordinator.begin(context)
-                        pending = login
-                        busy = true
-                        status = "已打开系统浏览器，等待 ChatGPT 完成授权……"
-                        scope.launch {
-                            try {
-                                withContext(Dispatchers.IO) { login.complete() }
-                                status = "ChatGPT 授权成功，凭证已加密保存"
-                                reload()
-                            } catch (error: Throwable) {
-                                status = "授权未完成：${error.message ?: error.javaClass.simpleName}"
-                            } finally {
-                                pending = null
-                                busy = false
-                            }
-                        }
-                    } catch (error: Throwable) {
-                        status = "无法启动授权：${error.message ?: error.javaClass.simpleName}"
-                        busy = false
-                    }
-                },
+                onClick = { startLogin(null, forceNewRegistration = true) },
                 shape = RoundedCornerShape(12.dp),
-            ) { Text(if (busy) "正在等待授权…" else "使用 ChatGPT 账号登录") }
+            ) { Text(if (busy) "正在等待授权…" else "添加另一个 ChatGPT 账号") }
             Spacer(Modifier.height(2.dp))
         }
     }

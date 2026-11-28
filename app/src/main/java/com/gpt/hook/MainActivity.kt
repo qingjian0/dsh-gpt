@@ -1801,7 +1801,8 @@ private fun HookPage(
     val lastApplied = hook.optJSONObject("lastApplyReport")
         ?.optString("state")
         ?.takeIf { !it.isNullOrBlank() && it != "unavailable" }
-        ?: "等待目标进程报告"
+        ?: "配置已保存"
+    val configuredHooks = hook.optJSONArray("configuredHooks") ?: JSONArray()
 
     LazyColumn(
         Modifier.fillMaxSize(),
@@ -1840,8 +1841,54 @@ private fun HookPage(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Metric("动态规则", "$ruleCount 条")
-                    Metric("最近应用", lastApplied)
+                    Metric("已配置规则", "$ruleCount 条")
+                    Metric("配置状态", lastApplied)
+                }
+                Text(
+                    "规则清单来自本地配置，不依赖目标进程上报",
+                    color = Muted,
+                    fontSize = 12.sp
+                )
+            }
+        }
+
+        item {
+            CardBlock {
+                Text("已配置 Hook", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                if (configuredHooks.length() == 0) {
+                    Text("暂无规则。创建规则后会立即显示在这里。", color = Muted, fontSize = 13.sp)
+                } else {
+                    for (i in 0 until configuredHooks.length()) {
+                        val rule = configuredHooks.optJSONObject(i) ?: continue
+                        val ruleEnabled = rule.optBoolean("enabled", false)
+                        Column(Modifier.fillMaxWidth().padding(vertical = 7.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        rule.optString("className") + "." + rule.optString("methodName"),
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 13.sp
+                                    )
+                                    Text(
+                                        "模式：${rule.optString("mode", "observe")} · 参数：${rule.optJSONArray("parameterTypes")?.let { params ->
+                                            (0 until params.length()).joinToString(", ") { params.optString(it) }.ifBlank { "不限" }
+                                        } ?: "不限"}",
+                                        color = Muted,
+                                        fontSize = 11.sp
+                                    )
+                                }
+                                Text(
+                                    if (ruleEnabled) "已启用" else "已停用",
+                                    color = if (ruleEnabled) Green else Muted,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 12.sp
+                                )
+                            }
+                        }
+                        if (i < configuredHooks.length() - 1) {
+                            HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+                        }
+                    }
                 }
             }
         }

@@ -252,20 +252,6 @@ internal fun ChatGptPlanAccounts(context: Context) {
         }
     }
 
-
-    /** 授权完成后把主界面拉回前台，避免用户以为“卡在浏览器”。 */
-    private fun bringToFront(context: android.content.Context) {
-        runCatching {
-            val intent = android.content.Intent(context, com.gpt.hook.MainActivity::class.java).apply {
-                addFlags(
-                    android.content.Intent.FLAG_ACTIVITY_NEW_TASK or
-                        android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
-                        android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP
-                )
-            }
-            context.startActivity(intent)
-        }
-    }
 }
 
 /**
@@ -289,6 +275,20 @@ internal object ChatGptPlanLoginRegistry {
 
     @Volatile
     var lastStatus: String? = null
+
+    /** 授权完成后把主界面拉回前台，避免用户以为“卡在浏览器”。 */
+    private fun bringToFront(context: android.content.Context) {
+        runCatching {
+            val intent = android.content.Intent(context, com.gpt.hook.MainActivity::class.java).apply {
+                addFlags(
+                    android.content.Intent.FLAG_ACTIVITY_NEW_TASK or
+                        android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+                        android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP
+                )
+            }
+            context.startActivity(intent)
+        }
+    }
 
     fun launchWait(
         context: android.content.Context,

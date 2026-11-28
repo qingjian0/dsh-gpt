@@ -1248,6 +1248,7 @@ private fun UpstreamConfig(
     var revealSecrets by remember { mutableStateOf(false) }
     var modelExpanded by remember { mutableStateOf(false) }
     var effortExpanded by remember { mutableStateOf(false) }
+    var importStatus by remember { mutableStateOf("") }
 
     // 网页通道：WebView 里登录一次，cookie 自动换成 accessToken，无需手抄。
     val webLoginLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -1305,6 +1306,23 @@ private fun UpstreamConfig(
                     )
                 }
                 if (proxyMode == "hook") {
+                    OutlinedButton(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = {
+                            when (val r = com.gpt.hook.api.ChatGptLocalImporter.import()) {
+                                is com.gpt.hook.api.ChatGptLocalImporter.Outcome.Ok -> {
+                                    hookToken = r.credentials.accessToken
+                                    did = r.credentials.deviceId
+                                    importStatus = "已自动读取本机 ChatGPT 登录态"
+                                }
+                                is com.gpt.hook.api.ChatGptLocalImporter.Outcome.Failed ->
+                                    importStatus = "失败：" + r.reason
+                            }
+                        },
+                    ) { Text("一键读取本机 ChatGPT 登录态") }
+                    if (importStatus.isNotBlank()) {
+                        Text(importStatus, fontSize = 11.sp, color = Color(0xFF2F6FEB))
+                    }
                     FieldLabel("DPoP Access Token")
                     OutlinedTextField(
                         value = hookToken, onValueChange = { hookToken = it },

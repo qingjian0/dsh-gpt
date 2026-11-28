@@ -1,7 +1,7 @@
 {
   "name": "@dsh-external/dsh-gpt-hook-agent",
-  "version": "0.1.0",
-  "description": "DSH Agent tools for live control and iterative research of the dsh-gpt LSPosed module.",
+  "version": "0.2.0",
+  "description": "Authenticated DSH Agent tools for the standalone dsh-gpt LSPosed module.",
   "type": "module",
   "main": "index.mjs",
   "exports": {

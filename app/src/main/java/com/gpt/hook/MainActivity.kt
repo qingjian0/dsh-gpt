@@ -1841,6 +1841,7 @@ private fun HookPage(
     val filteredRules = ruleItems.filter { search.isBlank() || it.optString("className").contains(search, true) || it.optString("methodName").contains(search, true) || it.optString("id").contains(search, true) }
     val filteredEvents = eventItems.filter { search.isBlank() || it.optString("class").contains(search, true) || it.optString("method").contains(search, true) || it.optString("ruleId").contains(search, true) }
     val task = hook.optJSONObject("discoveryTask") ?: JSONObject()
+    val discoveryResult = hook.optJSONObject("discoveryResult") ?: JSONObject()
     val applyReport = hook.optJSONObject("lastApplyReport") ?: JSONObject()
     val builtInGroups = listOf(
         Triple("设备信息", "Build 字段", "android.os.Build · MANUFACTURER / BRAND / MODEL / DEVICE / PRODUCT / HARDWARE / FINGERPRINT / BOOTLOADER / TAGS / TYPE / HOST"),
@@ -1972,7 +1973,53 @@ private fun HookPage(
                     StatusValue("状态", task.optString("status", "尚未提交"))
                     StatusValue("更新时间", task.optLong("updatedAtMs", 0L).toString())
                     if (task.has("error")) Text(task.optString("error"), color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
-                    Text("扫描结果不等于已安装 Hook；任务结果需要按 requestId 查询。", color = Muted, fontSize = 12.sp)
+                    Text("扫描结果不等于已安装 Hook；刷新状态可读取最近一次扫描结果。", color = Muted, fontSize = 12.sp)
+                }
+            }
+            if (discoveryResult.optBoolean("ok", false)) {
+                item {
+                    CardBlock {
+                        Text("扫描结果", fontWeight = FontWeight.Bold)
+                        StatusValue("扫描类数", discoveryResult.optInt("classesScanned", 0).toString())
+                        StatusValue("发现类数", discoveryResult.optJSONArray("classes")?.length()?.toString() ?: "0")
+                        StatusValue("成员记录", discoveryResult.optInt("recordCount", 0).toString())
+                        StatusValue("DEX 数", discoveryResult.optInt("dexScanned", 0).toString())
+                        StatusValue("耗时", "${discoveryResult.optLong("elapsedMs", 0L)} ms")
+                        StatusValue("分页", if (discoveryResult.optBoolean("hasMore", false)) "还有下一页" else "已完成")
+                        if (discoveryResult.optBoolean("timedOut", false) || discoveryResult.optBoolean("scanTruncated", false) || discoveryResult.optBoolean("responseTruncated", false) || discoveryResult.optBoolean("classMetadataTruncated", false)) {
+                            Text("结果受到扫描时间、数量或响应预算限制，可能不完整。", color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+                        }
+                        if (discoveryResult.optBoolean("hasMore", false)) {
+                            TextButton(onClick = {
+                                onDiscover(JSONObject().put("prefix", prefix.trim()).put("limit", 100).put("cursor", discoveryResult.optInt("nextCursor", 0)))
+                            }) { Text("加载下一页") }
+                        }
+                    }
+                }
+                val classes = discoveryResult.optJSONArray("classes") ?: JSONArray()
+                items(classes.length()) { index ->
+                    val item = classes.optJSONObject(index) ?: JSONObject()
+                    val className = item.optString("className")
+                    CardBlock {
+                        Text(className, fontWeight = FontWeight.SemiBold)
+                        StatusValue("声明方法", (item.optJSONArray("methods")?.length() ?: 0).toString())
+                        StatusValue("继承方法", (item.optJSONArray("inheritedMethods")?.length() ?: 0).toString())
+                        StatusValue("构造器", (item.optJSONArray("constructors")?.length() ?: 0).toString())
+                        StatusValue("字段", (item.optJSONArray("fields")?.length() ?: 0).toString())
+                        if (item.optBoolean("metadataTruncated", false)) Text("此类的成员元数据已截断。", color = MaterialTheme.colorScheme.error, fontSize = 11.sp)
+                        TextButton(onClick = { onDiscover(JSONObject().put("className", className).put("limit", 100).put("cursor", 0)) }) { Text("检查该类成员") }
+                    }
+                }
+                val candidates = discoveryResult.optJSONArray("candidateProposals") ?: JSONArray()
+                if (candidates.length() > 0) item {
+                    CardBlock {
+                        Text("候选规则 · ${candidates.length()}", fontWeight = FontWeight.SemiBold)
+                        for (index in 0 until minOf(candidates.length(), 12)) {
+                            val candidate = candidates.optJSONObject(index) ?: continue
+                            Text(candidate.optString("methodName", candidate.optString("signature")), fontSize = 11.sp)
+                        }
+                        Text("候选项仅供检查，不会自动安装。", color = Muted, fontSize = 11.sp)
+                    }
                 }
             }
         }

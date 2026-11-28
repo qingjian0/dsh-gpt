@@ -267,12 +267,15 @@ private fun DshApp(
     var toast by remember { mutableStateOf<String?>(null) }
 
     val scope = rememberCoroutineScope()
-    val backend = remember(endpoint, apiKey) {
-        Backend(endpoint, apiKey)
+    val backend = remember(endpoint, relayConfig.apiKey) {
+        Backend(endpoint, relayConfig.apiKey)
     }
     val modelIds = remember(state.models) {
-        (0 until state.models.length()).mapNotNull { state.models.optJSONObject(it)?.optString("id") }
-            .filter { it.isNotBlank() }.ifEmpty { listOf("auto", "gpt-6", "gpt-6-think", "gpt-6-deep", "gpt-6-search", "gpt-6-tools") }
+        (0 until state.models.length()).mapNotNull { index ->
+            val item = state.models.optJSONObject(index)
+            item?.optString("id")?.takeIf { it.isNotBlank() }
+                ?: state.models.optString(index).takeIf { it.isNotBlank() }
+        }.distinct()
     }
 
     fun notify(message: String) {
@@ -612,21 +615,16 @@ private fun DshApp(
                 )
 
                 3 -> HookPage(
-                    backend = backend,
                     hook = state.hook,
                     events = state.events,
                     onRefresh = {
                         scope.launch {
                             try {
                                 val result = backend.get("/v1/hook/status")
-                                val events = backend.get("/v1/hook/events")
+                                val eventResult = backend.get("/v1/hook/events")
                                 state = state.copy(
                                     hook = JSONObjectOrEmpty(result.body),
-                                    events = extractArray(
-                                        events.body,
-                                        "events",
-                                        "data"
-                                    )
+                                    events = extractArray(eventResult.body, "events", "data")
                                 )
                                 notify("Hook 状态已更新")
                             } catch (e: Exception) {
@@ -638,39 +636,32 @@ private fun DshApp(
                         scope.launch {
                             try {
                                 val current = backend.get("/v1/hook/config")
-                                if (current.code !in 200..299) {
-                                    throw Exception("读取现有 Hook 配置失败：HTTP ${current.code}")
-                                }
-                                val envelope = JSONObject(current.body)
-                                val config = envelope.optJSONObject("config")
+                                if (current.code !in 200..299) throw Exception("读取 Hook 配置失败：HTTP ${current.code}")
+                                val config = JSONObject(current.body).optJSONObject("config")
                                     ?: throw Exception("后端未返回有效 Hook 配置")
                                 val rules = config.optJSONArray("rules") ?: JSONArray()
-                                if (rules.length() >= 64) {
-                                    throw Exception("规则数量已达到上限（64）")
-                                }
+                                if (rules.length() >= 64) throw Exception("最多支持 64 条规则")
                                 rules.put(rule)
-                                config.put("schemaVersion", config.optInt("schemaVersion", 1))
-                                config.put("targetPackage", "com.openai.chatgpt")
                                 config.put("rules", rules)
-
-                                val response = backend.put("/v1/hook/config", config)
-                                if (response.code !in 200..299) {
-                                    throw Exception("规则提交失败：HTTP ${response.code} ${response.body}")
-                                }
-                                val accepted = JSONObject(response.body)
+                                val saved = backend.put("/v1/hook/config", config)
+                                if (saved.code !in 200..299) throw Exception("保存失败：HTTP ${saved.code}")
                                 val status = backend.get("/v1/hook/status")
-                                if (status.code in 200..299) {
-                                    state = state.copy(hook = JSONObjectOrEmpty(status.body))
-                                }
-                                notify(
-                                    if (accepted.optBoolean("accepted", false)) {
-                                        "规则已接受；请检查目标进程安装清单确认实际生效"
-                                    } else {
-                                        "后端未确认规则接受"
-                                    }
-                                )
+                                state = state.copy(hook = JSONObjectOrEmpty(status.body))
+                                notify("规则已保存，等待目标进程应用")
                             } catch (e: Exception) {
-                                notify(readableError(e))
+                                notify(e.message ?: "保存失败")
+                            }
+                        }
+                    },
+                    onSetEnabled = { enabled ->
+                        scope.launch {
+                            try {
+                                val result = backend.put("/v1/hook/enabled", JSONObject().put("enabled", enabled))
+                                if (result.code !in 200..299) throw Exception("Hook 状态修改失败：HTTP ${result.code}")
+                                val status = backend.get("/v1/hook/status")
+                                state = state.copy(hook = JSONObjectOrEmpty(status.body))
+                            } catch (e: Exception) {
+                                notify(e.message ?: "操作失败")
                             }
                         }
                     }

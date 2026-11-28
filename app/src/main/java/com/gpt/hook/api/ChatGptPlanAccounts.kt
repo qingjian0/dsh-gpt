@@ -101,7 +101,7 @@ internal fun ChatGptPlanAccounts(context: Context) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("ChatGPT 官方账号授权", fontWeight = FontWeight.Bold)
             Text(
-                "系统浏览器 OAuth · PKCE · Android Keystore 加密。独立于 Android DPoP / Web Cookie；当前用于账号授权与凭证保管，不会自动切换网关上游。",
+                "系统浏览器 OAuth · PKCE · Android Keystore 加密。独立于 Android DPoP / Web Cookie；选择账号后，若网关处于「ChatGPT 订阅授权」模式，会同步切换网关账号。",
                 color = Color.Gray,
                 fontSize = 12.sp,
             )

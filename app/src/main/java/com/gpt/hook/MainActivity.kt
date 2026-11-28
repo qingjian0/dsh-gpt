@@ -1844,6 +1844,18 @@ private fun HookPage(
                     StatusValue("采样间隔", "每 ${rule.optInt("sampleEvery", 1)} 次")
                     StatusValue("启用状态", if (rule.optBoolean("enabled", true)) "启用" else "禁用")
                     StatusValue("目标进程", if (targetObserved) "已上报运行信息" else "尚未上报")
+                    val actual = (0 until installed.length()).mapNotNull { installed.optJSONObject(it) }
+                        .filter { it.optString("ruleId") == id }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+                    Text("实际安装的方法 · ${actual.size}", fontWeight = FontWeight.SemiBold)
+                    if (actual.isEmpty()) {
+                        Text("当前没有可确认的已安装方法", color = Muted, fontSize = 12.sp)
+                    } else actual.forEach { item ->
+                        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text(item.optString("signature"), fontSize = 11.sp)
+                            Text("调用 ${item.optLong("invocations")} 次 · ${item.optString("mode")} · ${item.optString("state")}", color = Muted, fontSize = 11.sp)
+                        }
+                    }
                 }
             }
             item {

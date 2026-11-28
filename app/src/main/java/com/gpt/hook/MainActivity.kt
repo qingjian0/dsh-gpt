@@ -1313,7 +1313,7 @@ private fun UpstreamConfig(
                     )
                 } else {
                     Text(
-                        "使用上方账号管理中当前选中的 ChatGPT 账号。网关仅开放 /v1/responses 与 /v1/models；不走 backend-api，也不支持 /v1/chat/completions。",
+                        "使用上方账号管理中当前选中的 ChatGPT 账号。网关开放 /v1/responses 与 /v1/models；不走 backend-api，且不支持 /v1/chat/completions、MCP 和旧版网页读取通道。",
                         color = Muted, fontSize = 12.sp
                     )
                 }

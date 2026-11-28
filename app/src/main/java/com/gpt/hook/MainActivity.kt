@@ -1279,25 +1279,17 @@ private fun UpstreamConfig(
                         modifier = Modifier.weight(1f),
                     )
                     FilterChip(
-                        selected = proxyMode == "oauth",
-                        onClick = { proxyMode = "oauth" },
-                        label = { Text("账号授权") },
+                        selected = proxyMode == "web",
+                        onClick = { proxyMode = "web" },
+                        label = { Text("网页版") },
                         modifier = Modifier.weight(1f),
                     )
                 }
                 if (proxyMode == "hook") {
-                    OutlinedButton(
-                        modifier = Modifier.fillMaxWidth(),
-                        onClick = {
-                            com.gpt.hook.api.ChatGptOAuthLogin.start(appContext) { _, msg ->
-                                importStatus = msg
-                            }
-                        },
-                    ) { Text("账号授权登录（推荐）") }
                     if (importStatus.isNotBlank()) {
                         Text(importStatus, fontSize = 11.sp, color = Color(0xFF2F6FEB))
                     }
-                    FieldLabel("DPoP Access Token（可选，手填旧方式）")
+                    FieldLabel("DPoP Access Token")
                     OutlinedTextField(
                         value = hookToken, onValueChange = { hookToken = it },
                         modifier = Modifier.fillMaxWidth(), singleLine = true,
@@ -1308,21 +1300,36 @@ private fun UpstreamConfig(
                     OutlinedTextField(value = did, onValueChange = { did = it }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                     FieldLabel("Session ID（可选）")
                     OutlinedTextField(value = sessionId, onValueChange = { sessionId = it }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-                } else if (proxyMode == "oauth") {
+                } else if (proxyMode == "web") {
+                    OutlinedButton(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = { com.gpt.hook.api.ChatGptWebToken.openSessionPage(appContext) },
+                    ) { Text("在 Chrome 中打开凭证页") }
                     OutlinedButton(
                         modifier = Modifier.fillMaxWidth(),
                         onClick = {
-                            com.gpt.hook.api.ChatGptOAuthLogin.start(appContext) { _, msg ->
-                                importStatus = msg
+                            val token = com.gpt.hook.api.ChatGptWebToken.fromClipboard(appContext)
+                            if (token != null) {
+                                webToken = token
+                                importStatus = "已读取 accessToken"
+                            } else {
+                                importStatus = "剪贴板里没有 accessToken"
                             }
                         },
-                    ) { Text("账号授权登录（Chrome 内完成）") }
+                    ) { Text("从剪贴板读取") }
                     if (importStatus.isNotBlank()) {
                         Text(importStatus, fontSize = 11.sp, color = Color(0xFF2F6FEB))
                     }
                     Text(
-                        "在 Chrome 里完成一次授权即可，凭证会自动保存并用于 chatgpt.com/backend-api。",
-                        color = Muted, fontSize = 12.sp,
+                        "点第一个按钮，Chrome 会打开 chatgpt.com/api/auth/session（带你的登录态），页面直接显示 accessToken；全选复制后回来自动读取。",
+                        color = Color(0xFFE0A43C), fontSize = 12.sp,
+                    )
+                    FieldLabel("Web Access Token")
+                    OutlinedTextField(
+                        value = webToken, onValueChange = { webToken = it },
+                        modifier = Modifier.fillMaxWidth(), singleLine = true,
+                        visualTransformation = if (revealSecrets) VisualTransformation.None else PasswordVisualTransformation(),
+                        placeholder = { Text("eyJhbGciOi...") }
                     )
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {

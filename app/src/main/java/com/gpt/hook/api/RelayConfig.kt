@@ -33,7 +33,7 @@ data class RelayConfig(
         get() = when (proxyMode) {
             "web" -> webAccessToken.isNotBlank()
             // 「网页授权」走的就是网页凭证，不再要求 SIWC 账号档案
-            "oauth" -> true
+            "web" -> true
             else -> accessToken.isNotBlank() && oaiDid.isNotBlank()
         }
 
@@ -81,7 +81,7 @@ data class RelayConfig(
                 .putInt("port", cfg.port)
                 .putBoolean("lan", cfg.lan)
                 .putString("apiKey", cfg.apiKey)
-                .putString("proxyMode", cfg.proxyMode.takeIf { it in setOf("hook", "web", "oauth") } ?: "hook")
+                .putString("proxyMode", cfg.proxyMode.takeIf { it in setOf("hook", "web") } ?: "hook")
                 .putString("siwcProfileId", cfg.siwcProfileId)
                 .putString("upstreamBase", cfg.upstreamBase)
                 .putString("accessToken", cfg.accessToken)

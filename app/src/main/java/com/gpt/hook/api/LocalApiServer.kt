@@ -537,7 +537,7 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
 
     private fun health(): String = JSONObject()
         .put("ok", true).put("port", cfg.port)
-        .put("ready", cfg.ready).put("upstream", if (cfg.proxyMode == "web" || cfg.proxyMode == "oauth") cfg.webBase else cfg.upstreamBase)
+        .put("ready", cfg.ready).put("upstream", if (cfg.proxyMode == "web") cfg.webBase else cfg.upstreamBase)
         .toString()
 
     /** Resolve the selected SIWC account and refresh rotating credentials when required. */
@@ -929,7 +929,7 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
             .put("running", running)
             .put("ready", cfg.ready)
             .put("proxy_mode", cfg.proxyMode)
-            .put("upstream", when (cfg.proxyMode) { "oauth" -> "https://api.openai.com"; "web" -> cfg.webBase; else -> cfg.upstreamBase })
+            .put("upstream", when (cfg.proxyMode) { "web" -> cfg.webBase; else -> cfg.upstreamBase })
             .put("usage", UsageMeter.snapshot(context))
             .toString())
     }

@@ -8,8 +8,7 @@ import java.net.URL
 class ChatGptClient(private val cfg: RelayConfig) {
 
     fun open(method: String, path: String, body: ByteArray?, accept: String): HttpURLConnection {
-        // oauth：Custom Tabs 授权拿到的 token，直接打 chatgpt.com 的网页接口
-        val web = cfg.proxyMode == "web" || cfg.proxyMode == "siwc" || cfg.proxyMode == "oauth"
+        val web = cfg.proxyMode != "hook"
         val base = (if (web) cfg.webBase else cfg.upstreamBase).trimEnd('/')
         val normalizedPath = when {
             path.startsWith("/backend-api") -> path
@@ -21,15 +20,7 @@ class ChatGptClient(private val cfg: RelayConfig) {
         conn.connectTimeout = 15000
         conn.readTimeout = 120000
         conn.doInput = true
-        if (cfg.proxyMode == "oauth") {
-            val token = ChatGptCredentialStore.load()?.accessToken.orEmpty()
-            conn.setRequestProperty("Authorization", "Bearer " + token)
-            conn.setRequestProperty("oai-device-id", cfg.oaiDid)
-            conn.setRequestProperty("oai-language", "zh-CN")
-            conn.setRequestProperty("Origin", "https://chatgpt.com")
-            conn.setRequestProperty("Referer", "https://chatgpt.com/")
-            conn.setRequestProperty("User-Agent", cfg.webUserAgent)
-        } else if (web) {
+        if (web) {
             conn.setRequestProperty("Authorization", "Bearer ${cfg.webAccessToken}")
             if (cfg.webSessionToken.isNotBlank()) {
                 // 只给 accessToken 时 chatgpt.com 常回 403 Unusual activity，

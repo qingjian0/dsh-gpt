@@ -1,0 +1,20 @@
+# Local credentials, extracted application state and session kits
+.env
+.env.*
+!.env.example
+/data/raw-kit/*.json
+/data/raw-kit/*.xml
+/data/raw-kit/*.zip
+/data/raw-kit/*.apk
+/data/raw-kit/*.txt
+/relay/kit/*.json
+/relay/kit/*.xml
+/relay/kit/*.zip
+/relay/kit/*.apk
+
+# Local build output
+.gradle/
+**/build/
+local.properties
+*.jks
+*.keystore

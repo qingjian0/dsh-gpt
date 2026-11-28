@@ -31,7 +31,8 @@ internal fun ChatGptPlanAccounts(context: Context) {
     val scope = rememberCoroutineScope()
     val store = remember(context) { ChatGptPlanProfileStore(context.applicationContext) }
     val coordinator = remember { ChatGptPlanLoginCoordinator() }
-    val sessionManager = remember { ChatGptPlanSessionManager() }
+    val http = remember { ChatGptPlanHttp() }
+    val sessionManager = remember { ChatGptPlanSessionManager(http) }
     var profiles by remember { mutableStateOf(emptyList<ChatGptPlanProfile>()) }
     var activeProfileId by remember { mutableStateOf<String?>(null) }
     var pending by remember { mutableStateOf<ChatGptPlanLoginCoordinator.PendingLogin?>(null) }
@@ -48,6 +49,8 @@ internal fun ChatGptPlanAccounts(context: Context) {
             status = "账号读取失败：${error.message ?: error.javaClass.simpleName}"
         }
     }
+
+    val activeProfile = profiles.firstOrNull { it.id == activeProfileId }
 
     LaunchedEffect(store) { reload() }
     DisposableEffect(pending) {
@@ -123,6 +126,30 @@ internal fun ChatGptPlanAccounts(context: Context) {
                     }
                 }
             }
+            OutlinedButton(
+                enabled = !busy && activeProfile?.canUseChatGptPlan == true,
+                modifier = Modifier.fillMaxWidth(),
+                onClick = {
+                    val selected = activeProfile ?: return@OutlinedButton
+                    scope.launch {
+                        busy = true
+                        try {
+                            val usable = withContext(Dispatchers.IO) {
+                                sessionManager.getUsableProfile(store, selected.id)
+                            }
+                            val models = withContext(Dispatchers.IO) {
+                                http.listModels(requireNotNull(usable.accessToken))
+                            }
+                            status = "API 已连通 · 当前账号可用模型 ${models.size} 个"
+                        } catch (error: Throwable) {
+                            status = "模型目录请求失败：${error.message ?: error.javaClass.simpleName}"
+                        } finally {
+                            busy = false
+                        }
+                    }
+                },
+                shape = RoundedCornerShape(12.dp),
+            ) { Text("测试 ChatGPT API 并刷新模型") }
             Button(
                 enabled = !busy,
                 modifier = Modifier.fillMaxWidth(),

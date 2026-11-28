@@ -13,6 +13,19 @@ class ChatGptPlanOAuthTest {
     private val hostId = "urn:uuid:123e4567-e89b-12d3-a456-426614174000"
     private val redirect = "http://127.0.0.1:43127/auth/callback"
 
+
+    @Test
+    fun revocationUsesIssuedClientAndRefreshTokenHint() {
+        val form = ChatGptPlanOAuth.revocationForm("oaiapp_1234567890abc", "refresh-token-value")
+        val values = form.split("&").associate {
+            val pair = it.split("=", limit = 2)
+            URLDecoder.decode(pair[0], "UTF-8") to URLDecoder.decode(pair.getOrElse(1) { "" }, "UTF-8")
+        }
+        assertEquals("oaiapp_1234567890abc", values["client_id"])
+        assertEquals("refresh-token-value", values["token"])
+        assertEquals("refresh_token", values["token_type_hint"])
+    }
+
     @Test
     fun firstRegistrationUsesDynamicClientAndRequiredSiwcParameters() {
         val attempt = ChatGptPlanOAuth.createAttempt(redirect, hostId)

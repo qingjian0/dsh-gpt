@@ -74,7 +74,7 @@ internal object ChatGptPlanOAuth {
         random: SecureRandom = SecureRandom(),
     ): Attempt {
         validateRedirectUri(redirectUri)
-        require(hostId.startsWith("urn:uuid:") || hostId.startsWith("urn:ietf:params:oauth:jwk-thumbprint:") || hostId.startsWith("did:key:")) {
+        require(hostId.length <= 512 && (hostId.startsWith("urn:uuid:") || hostId.startsWith("urn:ietf:params:oauth:jwk-thumbprint:") || hostId.startsWith("did:key:"))) {
             "ext_agent_host_id must be a supported opaque host identifier"
         }
         if (issuedClientId != null) validateIssuedClientId(issuedClientId)
@@ -90,7 +90,7 @@ internal object ChatGptPlanOAuth {
     }
 
     fun buildAuthorizationUrl(attempt: Attempt, appName: String, idTokenHint: String? = null, loginHint: String? = null): String {
-        require(appName.isNotBlank())
+        require(appName.isNotBlank() && appName.length <= 80 && appName.none { it.isISOControl() })
         val params = linkedMapOf(
             "client_id" to attempt.clientId,
             "response_type" to "code",
@@ -116,10 +116,15 @@ internal object ChatGptPlanOAuth {
     fun validateCallback(
         callbackUrl: String,
         expectedState: String,
+        expectedRedirectUri: String,
         expectedClientId: String? = null,
     ): Callback {
         val uri = java.net.URI(callbackUrl)
-        require(uri.scheme == "http" && uri.host == "127.0.0.1" && uri.path == CALLBACK_PATH) {
+        val expectedUri = java.net.URI(expectedRedirectUri)
+        require(uri.scheme == expectedUri.scheme && uri.host == expectedUri.host &&
+            uri.port == expectedUri.port && uri.path == expectedUri.path &&
+            uri.scheme == "http" && uri.host == "127.0.0.1" && uri.path == CALLBACK_PATH &&
+            uri.userInfo == null && uri.fragment == null) {
             "OAuth callback URI mismatch"
         }
         val params = parseQuery(uri.rawQuery.orEmpty())

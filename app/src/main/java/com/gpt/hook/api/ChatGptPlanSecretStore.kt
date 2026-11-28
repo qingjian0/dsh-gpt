@@ -211,6 +211,22 @@ internal class ChatGptPlanProfileStore(
         }
     }
 
+    /**
+     * 登录失败诊断。release 包没有 logcat，把关键节点写进独立 prefs，
+     * 便于在设备上直接读出 token 端点的状态码与响应片段。
+     */
+    @Synchronized
+    fun recordDiagnostic(stage: String, detail: String) {
+        runCatching {
+            val prefs = context.getSharedPreferences(DIAG_PREFS, Context.MODE_PRIVATE)
+            val line = System.currentTimeMillis().toString() + " [" + stage + "] " +
+                detail.replace('\n', ' ').take(600)
+            val prev = prefs.getString(DIAG_LOG, "").orEmpty()
+            val merged = (line + "\n" + prev).take(4000)
+            prefs.edit().putString(DIAG_LOG, merged).commit()
+        }
+    }
+
     @Synchronized
     fun snapshot(): Snapshot {
         val raw = secrets.read() ?: return Snapshot(null, emptyList())
@@ -291,6 +307,8 @@ internal class ChatGptPlanProfileStore(
         const val HOST_ID = "ext_agent_host_id"
         const val PENDING_CLIENT_ID = "pending_client_id"
         const val CALLBACK_PORT = "callback_port"
+        const val DIAG_PREFS = "dsh_siwc_diag"
+        const val DIAG_LOG = "log"
         const val PREFERRED_CALLBACK_PORT = 1455
     }
 }

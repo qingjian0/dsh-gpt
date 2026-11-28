@@ -25,12 +25,21 @@ internal object ChatGptPlanExchange {
             store.savePendingClientId(callback.clientId)
         }
         val tokenResponse = http.exchangeCode(attempt, callback)
+        store.recordDiagnostic(
+            "exchange",
+            "status=" + tokenResponse.status +
+                " redirect=" + attempt.redirectUri +
+                " client=" + callback.clientId +
+                " first=" + attempt.isFirstRegistration +
+                " body=" + tokenResponse.body.take(300)
+        )
         require(tokenResponse.status in 200..299) {
             "ChatGPT token exchange failed (HTTP ${tokenResponse.status})" +
                 tokenResponse.requestId?.let { ", request_id=$it" }.orEmpty()
         }
         val tokenSet = ChatGptPlanOAuth.parseTokenResponse(tokenResponse.body, System.currentTimeMillis())
         require(tokenSet.idToken.isNotBlank()) { "ChatGPT did not return an ID token; sign-in cannot be verified" }
+        store.recordDiagnostic("token-ok", "access=" + (tokenSet.accessToken.isNotEmpty()) + " idToken=" + tokenSet.idToken.isNotBlank())
         val metadata = http.discover()
         val jwks = http.fetchJwks(metadata)
         val identity = ChatGptPlanOidcVerifier.verify(
@@ -59,6 +68,7 @@ internal object ChatGptPlanExchange {
         )
         store.save(profile, makeActive = true)
         store.clearPendingClientId()
+        store.recordDiagnostic("saved", "subject=" + identity.subject + " email=" + (identity.email ?: "-"))
         return profile
     }
 }

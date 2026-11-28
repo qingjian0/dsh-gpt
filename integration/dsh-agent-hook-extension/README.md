@@ -6,25 +6,25 @@ part of the LSPosed APK.
 
 ## Connection configuration
 
-The plugin reads one app-private file from the DSH engine home:
+DSH injects the configured endpoint and API key into the engine process only when
+this optional profile plugin is mounted. The API key is encrypted at rest with
+an Android Keystore AES-GCM key in DSH app-private preferences. The engine
+passes it to the Cordis plugin through environment variables; the plugin
+captures the values at module load and immediately removes both variables from
+the process environment so later tool subprocesses do not inherit them.
 
-`$DSH_HOME/config/dsh-gpt-hook.json`
+- `DSH_GPT_HOOK_BASE_URL`: defaults to `http://127.0.0.1:8766`
+- `DSH_GPT_HOOK_API_KEY`: the local API key configured in dsh-gpt
 
-```json
-{
-  "baseUrl": "http://127.0.0.1:8766",
-  "apiKey": "<the local API key shown by dsh-gpt>"
-}
-```
+The URL is restricted to plain HTTP loopback (127.0.0.1, localhost or ::1);
+remote hosts, credentials embedded in URLs, query strings and fragments are
+rejected. Every request uses `Authorization: Bearer <apiKey>`. Missing or
+invalid config fails closed and does not register any fallback unauthenticated
+bridge.
 
-The default API port is 8766, but the configured port may differ. The URL is
-restricted to plain HTTP loopback (127.0.0.1, localhost or ::1); remote hosts,
-credentials embedded in URLs, query strings and fragments are rejected. Every
-request uses `Authorization: Bearer <apiKey>`. Missing or invalid config fails
-closed and does not register any fallback unauthenticated bridge.
-
-The API key must remain in DSH app-private storage. Do not place it in AGENTS.md,
-prompts, tool output, logs, exports, or ChatGPT target-process data.
+The API key must never be placed in AGENTS.md, prompts, tool output, logs,
+exports, or ChatGPT target-process data. It remains in memory while the Hook
+Agent plugin is active and is not exposed to the target process.
 
 ## Tools
 

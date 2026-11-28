@@ -683,7 +683,7 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                     .put("content", JSONArray().put(JSONObject().put("type", "output_text").put("text", full).put("annotations", JSONArray())))
                 writeResponseEvent(out, "response.output_item.done", JSONObject()
                     .put("output_index", 0).put("item", completedItem))
-                val completed = JSONObject(OpenAiCompat.responseObject(id, model, full).toString())
+                val completed = OpenAiCompat.responseObject(id, model, full, itemId = itemId)
                 writeResponseEvent(out, "response.completed", JSONObject().put("response", completed))
                 UsageMeter.markSuccess()
             } catch (t: Throwable) {

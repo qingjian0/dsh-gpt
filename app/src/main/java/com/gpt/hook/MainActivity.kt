@@ -39,7 +39,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import com.gpt.hook.api.ApiService
-import com.gpt.hook.api.ChatGptPlanAccounts
 import com.gpt.hook.api.ChatGptPlanProfileStore
 import com.gpt.hook.api.RelayConfig
 import androidx.compose.ui.unit.dp
@@ -1250,34 +1249,7 @@ private fun UpstreamConfig(
     var effortExpanded by remember { mutableStateOf(false) }
     var importStatus by remember { mutableStateOf("") }
 
-    // 从 Chrome 复制完切回 App 时自动读取剪贴板里的 accessToken
-    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
-    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
-        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
-            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME && proxyMode == "web") {
-                com.gpt.hook.api.ChatGptWebCapture.fromClipboard(appContext)?.let { token ->
-                    if (token != webToken) {
-                        webToken = token
-                        importStatus = "已自动读取剪贴板中的 accessToken"
-                    }
-                }
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
 
-    // 网页通道：WebView 里登录一次，cookie 自动换成 accessToken，无需手抄。
-    val webLoginLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == android.app.Activity.RESULT_OK) {
-            val cfg = com.gpt.hook.api.RelayConfig.load(appContext)
-            webToken = cfg.webAccessToken
-            webSession = cfg.webSessionToken
-            proxyMode = "web"
-        }
-    }
 
     CardBlock {
         Row(
@@ -1297,8 +1269,6 @@ private fun UpstreamConfig(
         )
         AnimatedVisibility(expanded) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                ChatGptPlanAccounts(appContext)
-                // 三个通道并排放下：文案过长会被挤成竖排单字，这里统一缩短。
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1310,15 +1280,9 @@ private fun UpstreamConfig(
                         modifier = Modifier.weight(1f),
                     )
                     FilterChip(
-                        selected = proxyMode == "web",
-                        onClick = { proxyMode = "web" },
-                        label = { Text("网页凭证") },
-                        modifier = Modifier.weight(1f),
-                    )
-                    FilterChip(
-                        selected = proxyMode == "siwc",
-                        onClick = { proxyMode = "siwc" },
-                        label = { Text("网页授权") },
+                        selected = proxyMode == "oauth",
+                        onClick = { proxyMode = "oauth" },
+                        label = { Text("账号授权") },
                         modifier = Modifier.weight(1f),
                     )
                 }
@@ -1330,25 +1294,11 @@ private fun UpstreamConfig(
                                 importStatus = msg
                             }
                         },
-                    ) { Text("账号授权登录（自动获取凭证）") }
-                    OutlinedButton(
-                        modifier = Modifier.fillMaxWidth(),
-                        onClick = {
-                            when (val r = com.gpt.hook.api.ChatGptLocalImporter.import()) {
-                                is com.gpt.hook.api.ChatGptLocalImporter.Outcome.Ok -> {
-                                    hookToken = r.credentials.accessToken
-                                    did = r.credentials.deviceId
-                                    importStatus = "已自动读取本机 ChatGPT 登录态"
-                                }
-                                is com.gpt.hook.api.ChatGptLocalImporter.Outcome.Failed ->
-                                    importStatus = "失败：" + r.reason
-                            }
-                        },
-                    ) { Text("一键读取本机 ChatGPT 登录态") }
+                    ) { Text("账号授权登录（推荐）") }
                     if (importStatus.isNotBlank()) {
                         Text(importStatus, fontSize = 11.sp, color = Color(0xFF2F6FEB))
                     }
-                    FieldLabel("DPoP Access Token")
+                    FieldLabel("DPoP Access Token（可选，手填旧方式）")
                     OutlinedTextField(
                         value = hookToken, onValueChange = { hookToken = it },
                         modifier = Modifier.fillMaxWidth(), singleLine = true,
@@ -1359,47 +1309,21 @@ private fun UpstreamConfig(
                     OutlinedTextField(value = did, onValueChange = { did = it }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                     FieldLabel("Session ID（可选）")
                     OutlinedTextField(value = sessionId, onValueChange = { sessionId = it }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-                } else if (proxyMode == "web") {
-                    OutlinedButton(
-                        modifier = Modifier.fillMaxWidth(),
-                        onClick = { com.gpt.hook.api.ChatGptWebCapture.openSessionPage(appContext) },
-                    ) { Text("打开凭证页（Chrome 内，带你的登录态）") }
+                } else if (proxyMode == "oauth") {
                     OutlinedButton(
                         modifier = Modifier.fillMaxWidth(),
                         onClick = {
-                            val token = com.gpt.hook.api.ChatGptWebCapture.fromClipboard(appContext)
-                            if (token != null) {
-                                webToken = token
-                                importStatus = "已从剪贴板读取 accessToken"
-                            } else {
-                                importStatus = "剪贴板里没有可用的 accessToken"
+                            com.gpt.hook.api.ChatGptOAuthLogin.start(appContext) { _, msg ->
+                                importStatus = msg
                             }
                         },
-                    ) { Text("从剪贴板读取 accessToken") }
+                    ) { Text("账号授权登录（Chrome 内完成）") }
                     if (importStatus.isNotBlank()) {
                         Text(importStatus, fontSize = 11.sp, color = Color(0xFF2F6FEB))
                     }
                     Text(
-                        "点第一个按钮，页面会直接显示 accessToken；全选复制后回到这里即可（会自动读取）。网页 backend-api 属于非公开接口，可能随时变化。",
-                        color = Color(0xFFE0A43C), fontSize = 12.sp
-                    )
-                    FieldLabel("Web Access Token")
-                    OutlinedTextField(
-                        value = webToken, onValueChange = { webToken = it },
-                        modifier = Modifier.fillMaxWidth(), singleLine = true,
-                        visualTransformation = if (revealSecrets) VisualTransformation.None else PasswordVisualTransformation(),
-                        placeholder = { Text("ChatGPT web access token") }
-                    )
-                    FieldLabel("Session Cookie（可选）")
-                    OutlinedTextField(
-                        value = webSession, onValueChange = { webSession = it },
-                        modifier = Modifier.fillMaxWidth(), singleLine = true,
-                        visualTransformation = if (revealSecrets) VisualTransformation.None else PasswordVisualTransformation()
-                    )
-                } else {
-                    Text(
-                        "网页版通道：在上方点「登录 ChatGPT（自动配置网页通道）」登录一次即可。请求走 chatgpt.com/backend-api，免费账号可用。",
-                        color = Muted, fontSize = 12.sp
+                        "在 Chrome 里完成一次授权即可，凭证会自动保存并用于 chatgpt.com/backend-api。",
+                        color = Muted, fontSize = 12.sp,
                     )
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {

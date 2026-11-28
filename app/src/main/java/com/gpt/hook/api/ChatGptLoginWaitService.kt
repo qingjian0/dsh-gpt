@@ -28,7 +28,7 @@ import android.os.Looper
  * 生命周期：登录发起时启动，[TIMEOUT_MS] 后自行退出，不常驻。用户可见一条低优先级
  * 通知，点通知可回到主界面（浏览器本身没有能力把后台应用拉回前台）。
  */
-class ChatGptPlanLoginWaitService : Service() {
+class ChatGptLoginWaitService : Service() {
 
     private val handler = Handler(Looper.getMainLooper())
     private val timeout = Runnable { stopSelf() }
@@ -94,7 +94,7 @@ class ChatGptPlanLoginWaitService : Service() {
 
         fun start(context: Context) {
             runCatching {
-                val intent = Intent(context, ChatGptPlanLoginWaitService::class.java)
+                val intent = Intent(context, ChatGptLoginWaitService::class.java)
                 if (Build.VERSION.SDK_INT >= 26) {
                     context.startForegroundService(intent)
                 } else {
@@ -104,7 +104,7 @@ class ChatGptPlanLoginWaitService : Service() {
         }
 
         fun stop(context: Context) {
-            runCatching { context.stopService(Intent(context, ChatGptPlanLoginWaitService::class.java)) }
+            runCatching { context.stopService(Intent(context, ChatGptLoginWaitService::class.java)) }
         }
     }
 }

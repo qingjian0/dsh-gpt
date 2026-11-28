@@ -33,7 +33,7 @@ data class RelayConfig(
         get() = when (proxyMode) {
             "web" -> webAccessToken.isNotBlank()
             // 「网页授权」走的就是网页凭证，不再要求 SIWC 账号档案
-            "siwc" -> webAccessToken.isNotBlank()
+            "oauth" -> true
             else -> accessToken.isNotBlank() && oaiDid.isNotBlank()
         }
 
@@ -50,43 +50,20 @@ data class RelayConfig(
                     UUID.randomUUID().toString().replace("-", "")
             if (storedApiKey != apiKey) p.edit().putString("apiKey", apiKey).apply()
 
-            val webSecretStore = ChatGptWebSecretStore(ctx)
-            val encryptedWebCredentials = runCatching { webSecretStore.read() }.getOrNull()
-            val legacyWebCredentials = ChatGptWebCredentials(
-                accessToken = p.getString("webAccessToken", "") ?: "",
-                sessionToken = p.getString("webSessionToken", "") ?: "",
-            )
-            var webCredentials = encryptedWebCredentials ?: ChatGptWebCredentials("", "")
-            if (encryptedWebCredentials == null &&
-                (legacyWebCredentials.accessToken.isNotBlank() || legacyWebCredentials.sessionToken.isNotBlank())
-            ) {
-                val migrated = runCatching {
-                    webSecretStore.write(legacyWebCredentials)
-                    true
-                }.getOrDefault(false)
-                if (migrated) {
-                    check(p.edit().remove("webAccessToken").remove("webSessionToken").commit()) {
-                        "Could not remove legacy plaintext Web credentials"
-                    }
-                    webCredentials = legacyWebCredentials
-                }
-            }
-
             return RelayConfig(
                 enabled = p.getBoolean("enabled", defaults.enabled),
                 port = p.getInt("port", defaults.port),
                 lan = p.getBoolean("lan", defaults.lan),
                 apiKey = apiKey,
                 proxyMode = p.getString("proxyMode", defaults.proxyMode) ?: defaults.proxyMode,
-                siwcProfileId = p.getString("siwcProfileId", null)
-                    ?: runCatching { ChatGptPlanProfileStore(ctx).snapshot().activeProfileId.orEmpty() }.getOrDefault(""),
+                siwcProfileId = p.getString("siwcProfileId", "") ?: "",
                 upstreamBase = p.getString("upstreamBase", defaults.upstreamBase) ?: defaults.upstreamBase,
                 accessToken = p.getString("accessToken", "") ?: "",
                 oaiDid = p.getString("oaiDid", "") ?: "",
                 sessionId = p.getString("sessionId", "") ?: "",
                 webBase = p.getString("webBase", defaults.webBase) ?: defaults.webBase,
-                webAccessToken = webCredentials.accessToken,
-                webSessionToken = webCredentials.sessionToken,
+                webAccessToken = p.getString("webAccessToken", "") ?: "",
+                webSessionToken = p.getString("webSessionToken", "") ?: "",
                 webUserAgent = p.getString("webUserAgent", defaults.webUserAgent) ?: defaults.webUserAgent,
                 connectorId = p.getString("connectorId", "") ?: "",
                 model = p.getString("model", defaults.model) ?: defaults.model,
@@ -99,25 +76,18 @@ data class RelayConfig(
         }
 
         fun save(ctx: Context, cfg: RelayConfig) {
-            // Commit encrypted credentials first. If Keystore persistence fails, do not save a
-            // configuration that appears successful while leaving secrets in plaintext.
-            ChatGptWebSecretStore(ctx).write(
-                ChatGptWebCredentials(cfg.webAccessToken, cfg.webSessionToken)
-            )
             check(ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
                 .putBoolean("enabled", cfg.enabled)
                 .putInt("port", cfg.port)
                 .putBoolean("lan", cfg.lan)
                 .putString("apiKey", cfg.apiKey)
-                .putString("proxyMode", cfg.proxyMode.takeIf { it in setOf("hook", "web", "siwc") } ?: "hook")
+                .putString("proxyMode", cfg.proxyMode.takeIf { it in setOf("hook", "web", "oauth") } ?: "hook")
                 .putString("siwcProfileId", cfg.siwcProfileId)
                 .putString("upstreamBase", cfg.upstreamBase)
                 .putString("accessToken", cfg.accessToken)
                 .putString("oaiDid", cfg.oaiDid)
                 .putString("sessionId", cfg.sessionId)
                 .putString("webBase", cfg.webBase)
-                .remove("webAccessToken")
-                .remove("webSessionToken")
                 .putString("webUserAgent", cfg.webUserAgent)
                 .putString("connectorId", cfg.connectorId)
                 .putString("model", cfg.model)

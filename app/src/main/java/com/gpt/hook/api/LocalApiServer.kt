@@ -128,18 +128,15 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                     !authorized(headers) -> json(out, 401, err("invalid_api_key", "missing or bad Authorization"))
                     target == "/v1/request-dump" -> requestDumpRoute(out, method, body)
                     target == "/v1/models" && method == "GET" -> {
-                        if (cfg.proxyMode == "siwc") siwcModels(out)
                         else json(out, 200, OpenAiCompat.modelsJson(OpenAiCompat.DEFAULT_MODELS))
                     }
                     target == "/v1/capabilities" && method == "GET" ->
-                        json(out, 200, if (cfg.proxyMode == "siwc") siwcCapabilitiesJson() else OpenAiCompat.capabilitiesJson())
+                        json(out, 200, OpenAiCompat.capabilitiesJson())
                     // MCP 通道：不消耗每小时消息额度，可直接调工具/读网页
                     target == "/v1/status" && method == "GET" -> statusRoute(out)
                     target == "/v1/config" -> configRoute(out, method, body)
                     target == "/v1/proxy/mode" -> proxyModeRoute(out, method, body)
                     target == "/v1/kit/import" && method == "POST" -> kitImportRoute(out, body)
-                    (target.startsWith("/v1/mcp/") || target == "/v1/web/open") && cfg.proxyMode == "siwc" ->
-                        json(out, 400, err("unsupported_api", "MCP and ChatGPT web-reader routes require the separate backend-api channel and are disabled in SIWC mode"))
                     target == "/v1/mcp/tools" && method == "GET" -> mcpTools(out)
                     target == "/v1/mcp/resources" && method == "GET" -> mcpResources(out)
                     target == "/v1/mcp/resource" && method == "POST" -> mcpResourceRead(out, body)
@@ -156,16 +153,10 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                     target == "/v1/conversations" || target.startsWith("/v1/conversations/") ->
                         conversationRoute(out, method, target, body, headers)
                     target == "/v1/usage" && method == "GET" -> json(out, 200, UsageMeter.snapshot(context).toString())
-                    method == "POST" && target == "/v1/chat/completions" && cfg.proxyMode == "siwc" ->
-                        json(out, 400, err("unsupported_api", "SIWC ChatGPT plan mode supports /v1/responses only; /v1/chat/completions is not available"))
                     method == "POST" && target == "/v1/chat/completions" ->
                         measureUsage(body ?: ByteArray(0)) { chat(out, body ?: ByteArray(0), headers) }
-                    method == "POST" && target == "/v1/responses" && cfg.proxyMode == "siwc" ->
-                        measureUsage(body ?: ByteArray(0)) { siwcResponses(out, body ?: ByteArray(0)) }
                     method == "POST" && target == "/v1/responses" ->
                         measureUsage(body ?: ByteArray(0)) { responses(out, body ?: ByteArray(0), headers) }
-                    target.startsWith("/backend-api") && cfg.proxyMode == "siwc" ->
-                        json(out, 400, err("unsupported_api", "SIWC mode does not use ChatGPT backend-api endpoints"))
                     target.startsWith("/backend-api") -> passthrough(out, method, target, body, headers)
                     else -> json(out, 404, err("not_found", "route not found"))
                 }
@@ -547,175 +538,25 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
 
     private fun health(): String = JSONObject()
         .put("ok", true).put("port", cfg.port)
-        .put("ready", cfg.ready).put("upstream", if (cfg.proxyMode == "siwc") "https://api.openai.com" else if (cfg.proxyMode == "web") cfg.webBase else cfg.upstreamBase)
+        .put("ready", cfg.ready).put("upstream", if (cfg.proxyMode == "web" || cfg.proxyMode == "oauth") cfg.webBase else cfg.upstreamBase)
         .toString()
 
     /** Resolve the selected SIWC account and refresh rotating credentials when required. */
-    private fun siwcUsableProfile(): ChatGptPlanProfile {
-        val store = ChatGptPlanProfileStore(context)
-        val snapshot = store.snapshot()
-        val profileId = cfg.siwcProfileId.takeIf { it.isNotBlank() } ?: snapshot.activeProfileId
-            ?: throw IllegalStateException("No active ChatGPT plan account; sign in from the account manager first")
-        val profile = ChatGptPlanSessionManager().getUsableProfile(store, profileId)
-        require(profile.canUseChatGptPlan) { "Selected ChatGPT account is not authorized for direct plan usage" }
-        return profile
+    /** 取 OAuth 授权保存的凭证（Custom Tabs 登录得到的 accessToken）。 */
+    private fun codexToken(): String {
+        val credential = ChatGptCredentialStore.load()
+            ?: throw IllegalStateException("尚未授权：请先在账号授权通道完成 Chrome 登录")
+        return credential.accessToken
     }
 
-    private fun siwcCapabilitiesJson(): String = JSONObject()
-        .put("object", "dsh.capabilities")
-        .put("chat_completions", false)
-        .put("responses", true)
-        .put("streaming", true)
-        .put("conversations", false)
-        .put("hook_control", true)
-        .put("tool_calling", false)
-        .put("upstream", "OpenAI Responses API via SIWC")
-        .put("modalities", JSONArray().put("text"))
-        .put("unsupported", JSONArray()
-            .put("chat_completions").put("tool_calling").put("structured_output")
-            .put("image_input").put("audio_input").put("audio_output")
-            .put("video_input").put("file_input").put("previous_response_id")
-            .put("mcp_backend_api").put("chatgpt_web_reader"))
-        .toString()
+    private fun codexAccountId(): String =
+        runCatching { ChatGptOAuth.claimAccountId(ChatGptCredentialStore.load()!!.accessToken) }.getOrDefault("")
 
-    private fun siwcModels(out: OutputStream) {
-        try {
-            val profile = siwcUsableProfile()
-            val models = ChatGptPlanHttp().listModels(profile.accessToken!!)
-            val data = JSONArray()
-            models.forEach { model ->
-                data.put(JSONObject()
-                    .put("id", model.slug)
-                    .put("object", "model")
-                    .put("created", 0)
-                    .put("owned_by", "openai")
-                    .put("name", model.displayName))
-            }
-            json(out, 200, JSONObject().put("object", "list").put("data", data).toString())
-        } catch (t: Throwable) {
-            json(out, 502, err("siwc_upstream_error", t.message ?: "ChatGPT model catalog unavailable"))
-        }
-    }
-
-    /**
+        /**
      * SIWC uses only the public Responses API. This deliberately accepts text-only
      * input and rejects storage/tool features that this gateway cannot faithfully relay.
      */
-    private fun siwcResponses(out: OutputStream, body: ByteArray) {
-        val request = try {
-            JSONObject(String(body, Charsets.UTF_8))
-        } catch (_: Throwable) {
-            json(out, 400, err("invalid_request", "body is not JSON"))
-            return
-        }
-        OpenAiCompat.unsupportedResponsesFeature(request)?.let {
-            json(out, 400, err("unsupported_feature", it))
-            return
-        }
-        if (request.optBoolean("store", false)) {
-            json(out, 400, err("unsupported_feature", "SIWC gateway enforces store=false"))
-            return
-        }
-        val allowedFields = setOf("model", "input", "instructions", "stream", "store", "text")
-        val requestKeys = request.keys()
-        var unsupportedField: String? = null
-        while (requestKeys.hasNext() && unsupportedField == null) {
-            val key = requestKeys.next()
-            if (key !in allowedFields) unsupportedField = key
-        }
-        unsupportedField?.let {
-            json(out, 400, err("unsupported_feature", "SIWC text adapter does not support the '$it' Responses field yet"))
-            return
-        }
-        val textOptions = request.optJSONObject("text")
-        if (textOptions != null && textOptions.keys().asSequence().any { it != "format" }) {
-            json(out, 400, err("unsupported_feature", "SIWC text adapter supports only text.format.type=text"))
-            return
-        }
-        val input = StringBuilder()
-        val instructions = request.optString("instructions").trim()
-        when (val value = request.opt("input")) {
-            is String -> input.append(value)
-            is JSONArray -> {
-                for (i in 0 until value.length()) {
-                    when (val item = value.opt(i)) {
-                        is String -> if (item.isNotBlank()) input.append(item).append("\n")
-                        is JSONObject -> {
-                            val role = item.optString("role", "user")
-                            val content = responseInputText(item.opt("content") ?: item.opt("text"))
-                            if (content.isNotBlank()) input.append(role).append(": ").append(content).append("\n")
-                        }
-                    }
-                }
-            }
-            else -> {
-                json(out, 400, err("invalid_request", "input must be a string or an array of text messages"))
-                return
-            }
-        }
-        val prompt = input.toString().trim()
-        if (prompt.isBlank()) {
-            json(out, 400, err("invalid_request", "input must contain text"))
-            return
-        }
-        try {
-            val profile = siwcUsableProfile()
-            val http = ChatGptPlanHttp()
-            var model = request.optString("model", cfg.model).ifBlank { cfg.model }
-            if (model == "auto") model = http.listModels(profile.accessToken!!).firstOrNull()?.slug
-                ?: throw IllegalStateException("No ChatGPT models are available for this account")
-            val id = "resp_" + UUID.randomUUID().toString().replace("-", "").take(24)
-            if (!request.optBoolean("stream", false)) {
-                val output = http.streamResponse(profile.accessToken!!, model, prompt, instructions = instructions)
-                json(out, 200, OpenAiCompat.responseObject(id, model, output).toString())
-                UsageMeter.markSuccess()
-                return
-            }
-
-            val responseHeaders = mapOf("Cache-Control" to "no-cache", "X-Accel-Buffering" to "no")
-            writeHead(out, 200, "text/event-stream; charset=utf-8", null, responseHeaders)
-            val responseShell = JSONObject()
-                .put("id", id).put("object", "response").put("status", "in_progress")
-                .put("model", model).put("output", JSONArray())
-            writeResponseEvent(out, "response.created", JSONObject().put("response", responseShell))
-            val itemId = "msg_" + UUID.randomUUID().toString().replace("-", "").take(24)
-            val item = JSONObject().put("id", itemId).put("type", "message")
-                .put("role", "assistant").put("status", "in_progress").put("content", JSONArray())
-            writeResponseEvent(out, "response.output_item.added", JSONObject()
-                .put("output_index", 0).put("item", item))
-            writeResponseEvent(out, "response.content_part.added", JSONObject()
-                .put("item_id", itemId).put("output_index", 0).put("content_index", 0)
-                .put("part", JSONObject().put("type", "output_text").put("text", "").put("annotations", JSONArray())))
-            val collected = StringBuilder()
-            try {
-                http.streamResponse(profile.accessToken!!, model, prompt, instructions = instructions) { delta ->
-                    collected.append(delta)
-                    writeResponseEvent(out, "response.output_text.delta", JSONObject()
-                        .put("item_id", itemId).put("output_index", 0).put("content_index", 0).put("delta", delta))
-                }
-                val full = collected.toString()
-                writeResponseEvent(out, "response.output_text.done", JSONObject()
-                    .put("item_id", itemId).put("output_index", 0).put("content_index", 0).put("text", full))
-                writeResponseEvent(out, "response.content_part.done", JSONObject()
-                    .put("item_id", itemId).put("output_index", 0).put("content_index", 0)
-                    .put("part", JSONObject().put("type", "output_text").put("text", full).put("annotations", JSONArray())))
-                val completedItem = JSONObject(item.toString()).put("status", "completed")
-                    .put("content", JSONArray().put(JSONObject().put("type", "output_text").put("text", full).put("annotations", JSONArray())))
-                writeResponseEvent(out, "response.output_item.done", JSONObject()
-                    .put("output_index", 0).put("item", completedItem))
-                val completed = OpenAiCompat.responseObject(id, model, full, itemId = itemId)
-                writeResponseEvent(out, "response.completed", JSONObject().put("response", completed))
-                UsageMeter.markSuccess()
-            } catch (t: Throwable) {
-                writeResponseEvent(out, "error", JSONObject().put("message", t.message ?: "ChatGPT response failed"))
-                UsageMeter.markFailure()
-            }
-        } catch (t: Throwable) {
-            json(out, 502, err("siwc_upstream_error", t.message ?: "ChatGPT Responses API unavailable"))
-        }
-    }
-
-    private fun responses(out: OutputStream, body: ByteArray, headers: Map<String, String>) {
+        private fun responses(out: OutputStream, body: ByteArray, headers: Map<String, String>) {
         val request = try { JSONObject(String(body, Charsets.UTF_8)) } catch (t: Throwable) {
             json(out, 400, err("invalid_request", "body is not JSON")); return
         }
@@ -1092,7 +933,7 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
             .put("running", running)
             .put("ready", cfg.ready)
             .put("proxy_mode", cfg.proxyMode)
-            .put("upstream", when (cfg.proxyMode) { "siwc" -> "https://api.openai.com"; "web" -> cfg.webBase; else -> cfg.upstreamBase })
+            .put("upstream", when (cfg.proxyMode) { "oauth" -> "https://api.openai.com"; "web" -> cfg.webBase; else -> cfg.upstreamBase })
             .put("usage", UsageMeter.snapshot(context))
             .toString())
     }
@@ -1115,7 +956,7 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         val request = runCatching { JSONObject(body?.toString(Charsets.UTF_8) ?: "") }.getOrNull()
         if (request == null) { json(out, 400, err("invalid_request", "body must be JSON")); return }
         val next = cfg.copy(
-            proxyMode = request.optString("proxy_mode", cfg.proxyMode).let { if (it in setOf("web", "siwc")) it else "hook" },
+            proxyMode = request.optString("proxy_mode", cfg.proxyMode).let { if (it in setOf("web")) it else "hook" },
             siwcProfileId = request.optString("siwc_profile_id", cfg.siwcProfileId),
             model = request.optString("model", cfg.model).ifBlank { cfg.model },
             fastMode = request.optBoolean("fast_mode", cfg.fastMode),
@@ -1142,7 +983,7 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         if (method != "PUT") { json(out, 405, err("method_not_allowed", "use GET or PUT")); return }
         val request = runCatching { JSONObject(body?.toString(Charsets.UTF_8) ?: "") }.getOrNull()
         val mode = request?.optString("mode").orEmpty()
-        if (mode !in setOf("hook", "web", "siwc")) { json(out, 400, err("invalid_request", "mode must be hook, web or siwc")); return }
+        if (mode !in setOf("hook", "web")) { json(out, 400, err("invalid_request", "mode must be hook, web or siwc")); return }
         cfg = cfg.copy(proxyMode = mode)
         RelayConfig.save(context, cfg)
         json(out, 200, JSONObject().put("ok", true).put("proxy_mode", mode).put("ready", cfg.ready).toString())

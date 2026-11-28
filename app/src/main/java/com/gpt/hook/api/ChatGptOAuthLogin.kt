@@ -34,7 +34,7 @@ object ChatGptOAuthLogin {
         if (inFlight) return
         inFlight = true
         lastStatus = "正在打开授权页…"
-        ChatGptPlanLoginWaitService.start(context.applicationContext)
+        ChatGptLoginWaitService.start(context.applicationContext)
 
         scope.launch {
             val server = OAuthLoopbackServer()
@@ -66,7 +66,7 @@ object ChatGptOAuthLogin {
             }
             inFlight = false
             lastStatus = message
-            ChatGptPlanLoginWaitService.stop(context.applicationContext)
+            ChatGptLoginWaitService.stop(context.applicationContext)
             onDone(message.startsWith("授权成功"), message)
         }
     }

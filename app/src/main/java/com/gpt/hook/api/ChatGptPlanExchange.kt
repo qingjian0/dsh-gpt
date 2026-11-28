@@ -20,10 +20,36 @@ internal object ChatGptPlanExchange {
         http: ChatGptPlanHttp,
         previous: ChatGptPlanProfile?,
     ): ChatGptPlanProfile {
+        try {
+            return completeInner(attempt, callback, store, http, previous)
+        } catch (error: Throwable) {
+            // release 包没有 logcat：把失败类型、消息和堆栈写进 prefs，便于设备上直接读。
+            store.recordDiagnostic(
+                "failed",
+                error.javaClass.name + ": " + (error.message ?: "") +
+                    " || " + error.stackTraceToString().lineSequence().take(12).joinToString(" | "),
+            )
+            throw error
+        }
+    }
+
+    private fun completeInner(
+        attempt: ChatGptPlanOAuth.Attempt,
+        callback: ChatGptPlanOAuth.Callback,
+        store: ChatGptPlanProfileStore,
+        http: ChatGptPlanHttp,
+        previous: ChatGptPlanProfile?,
+    ): ChatGptPlanProfile {
         // 新注册的 client 先落盘，避免 code 换 token 失败后丢失注册关系。
         if (previous == null || callback.clientId != previous.clientId) {
             store.savePendingClientId(callback.clientId)
         }
+        store.recordDiagnostic(
+            "pre-exchange",
+            "client=" + callback.clientId + " first=" + attempt.isFirstRegistration +
+                " attemptClient=" + attempt.clientId + " redirect=" + attempt.redirectUri +
+                " codeLen=" + callback.code.length,
+        )
         val tokenResponse = http.exchangeCode(attempt, callback)
         store.recordDiagnostic(
             "exchange",

@@ -35,6 +35,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import com.gpt.hook.api.ApiService
@@ -1153,7 +1154,6 @@ private fun ApiPage(
 
         item {
             UpstreamConfig(
-                context = context,
                 initialConfig = initialRelayConfig,
                 modelIds = modelIds,
                 onSave = onRelayConfigSave,
@@ -1225,12 +1225,12 @@ private fun LatencyChart(data: List<LatencyPoint>) {
 
 @Composable
 private fun UpstreamConfig(
-    context: Context,
     initialConfig: RelayConfig,
     modelIds: List<String>,
     onSave: (RelayConfig) -> Unit,
     onImportKit: () -> Unit
 ) {
+    val appContext = LocalContext.current
     var expanded by remember { mutableStateOf(false) }
     var proxyMode by remember(initialConfig) { mutableStateOf(initialConfig.proxyMode) }
     var hookToken by remember(initialConfig) { mutableStateOf(initialConfig.accessToken) }
@@ -1266,7 +1266,7 @@ private fun UpstreamConfig(
         )
         AnimatedVisibility(expanded) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                ChatGptPlanAccounts(context)
+                ChatGptPlanAccounts(appContext)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(
                         selected = proxyMode == "hook",

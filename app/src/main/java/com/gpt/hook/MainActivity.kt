@@ -302,23 +302,6 @@ private fun DshApp(
         }
     }
 
-    /** OAuth 相关请求：直接打到本机网关，成功后统一刷新状态。 */
-    fun runOauth(method: String, path: String, payload: JSONObject?, onDone: suspend (String) -> Unit) {
-        scope.launch {
-            try {
-                val response = backend.call(method, path, payload)
-                val body = response.body ?: ""
-                if (response.code !in 200..299) {
-                    notify("OAuth 失败（HTTP " + response.code + "）：" + readableError(Exception(body)))
-                    return@launch
-                }
-                onDone(body)
-            } catch (e: Exception) {
-                notify("OAuth 请求失败：" + readableError(e))
-            }
-        }
-    }
-
     suspend fun refresh() {
         state = state.copy(loading = true, error = null)
 

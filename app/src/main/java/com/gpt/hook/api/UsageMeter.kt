@@ -5,7 +5,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Calendar
 
-/** Persistent, bounded gateway usage telemetry. TTFT is measured at first assistant text delta. */
+/** Persistent, bounded gateway usage telemetry. TTFT is first assistant text delta. */
 object UsageMeter {
     private const val PREFS = "dsh_usage"
     private const val HISTORY_KEY = "recent"
@@ -60,46 +60,67 @@ object UsageMeter {
             .put("at", now))
     }
 
+    private fun dayStart(now: Long): Long = Calendar.getInstance().apply {
+        timeInMillis = now
+        set(Calendar.HOUR_OF_DAY, 0)
+        set(Calendar.MINUTE, 0)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+    }.timeInMillis
+
     @Synchronized
     private fun record(context: Context, sample: JSONObject) {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val now = sample.optLong("at")
+        val start = dayStart(now)
+        val sameDay = prefs.getLong("day_start_ms", -1L) == start
         val history = JSONArray(prefs.getString(HISTORY_KEY, "[]") ?: "[]")
         history.put(sample)
         val trimmed = JSONArray()
         for (i in (history.length() - MAX_RECORDS).coerceAtLeast(0) until history.length()) {
             trimmed.put(history.getJSONObject(i))
         }
-        prefs.edit().putString(HISTORY_KEY, trimmed.toString()).apply()
+        val requests = if (sameDay) prefs.getLong("daily_requests", 0L) else 0L
+        val ok = if (sameDay) prefs.getLong("daily_ok", 0L) else 0L
+        val ttftCount = if (sameDay) prefs.getLong("daily_ttft_count", 0L) else 0L
+        val editor = prefs.edit()
+            .putLong("day_start_ms", start)
+            .putLong("daily_requests", requests + 1L)
+            .putLong("daily_ok", ok + if (sample.optBoolean("ok")) 1L else 0L)
+            .putLong("daily_total_ms", (if (sameDay) prefs.getLong("daily_total_ms", 0L) else 0L) + sample.optLong("total_ms"))
+            .putLong("daily_ttft_ms", (if (sameDay) prefs.getLong("daily_ttft_ms", 0L) else 0L) + sample.optLong("ttft_ms"))
+            .putLong("daily_ttft_count", ttftCount + if (sample.optLong("ttft_ms") > 0L) 1L else 0L)
+            .putLong("daily_prompt_tokens", (if (sameDay) prefs.getLong("daily_prompt_tokens", 0L) else 0L) + sample.optInt("prompt_tokens"))
+            .putLong("daily_completion_tokens", (if (sameDay) prefs.getLong("daily_completion_tokens", 0L) else 0L) + sample.optInt("completion_tokens"))
+            .putString(HISTORY_KEY, trimmed.toString())
+        editor.apply()
     }
 
     @Synchronized
     fun snapshot(context: Context): JSONObject {
-        val history = JSONArray(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getString(HISTORY_KEY, "[]") ?: "[]")
-        val todayStart = Calendar.getInstance().apply {
-            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
-            set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
-        }.timeInMillis
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val history = JSONArray(prefs.getString(HISTORY_KEY, "[]") ?: "[]")
+        val start = dayStart(System.currentTimeMillis())
+        val sameDay = prefs.getLong("day_start_ms", -1L) == start
         val today = (0 until history.length()).mapNotNull { history.optJSONObject(it) }
-            .filter { it.optLong("at") >= todayStart }
+            .filter { it.optLong("at") >= start }
         val recent = JSONArray()
         for (item in today.takeLast(20)) recent.put(item)
-        val total = today.size
-        val ok = today.count { it.optBoolean("ok") }
-        fun average(key: String): Long {
-            val values = today.map { it.optLong(key) }.filter { it > 0L }
-            return if (values.isEmpty()) 0L else values.average().toLong()
-        }
-        val prompt = today.sumOf { it.optInt("prompt_tokens") }
-        val completion = today.sumOf { it.optInt("completion_tokens") }
+        val requests = if (sameDay) prefs.getLong("daily_requests", 0L) else 0L
+        val ok = if (sameDay) prefs.getLong("daily_ok", 0L) else 0L
+        val ttftCount = if (sameDay) prefs.getLong("daily_ttft_count", 0L) else 0L
+        val totalMs = if (sameDay) prefs.getLong("daily_total_ms", 0L) else 0L
+        val ttftMs = if (sameDay) prefs.getLong("daily_ttft_ms", 0L) else 0L
+        val prompt = if (sameDay) prefs.getLong("daily_prompt_tokens", 0L) else 0L
+        val completion = if (sameDay) prefs.getLong("daily_completion_tokens", 0L) else 0L
         val last = today.lastOrNull()
         return JSONObject()
-            .put("requests", total)
+            .put("requests", requests)
             .put("ok", ok)
-            .put("fail", total - ok)
-            .put("success_rate", if (total == 0) 0.0 else ok.toDouble() / total)
-            .put("avg_ms", average("total_ms"))
-            .put("avg_ttft_ms", average("ttft_ms"))
+            .put("fail", requests - ok)
+            .put("success_rate", if (requests == 0L) 0.0 else ok.toDouble() / requests)
+            .put("avg_ms", if (requests == 0L) 0L else totalMs / requests)
+            .put("avg_ttft_ms", if (ttftCount == 0L) 0L else ttftMs / ttftCount)
             .put("last_ms", last?.optLong("total_ms") ?: 0L)
             .put("last_ttft_ms", last?.optLong("ttft_ms") ?: 0L)
             .put("prompt_tokens", prompt)

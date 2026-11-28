@@ -1309,6 +1309,14 @@ private fun UpstreamConfig(
                     OutlinedButton(
                         modifier = Modifier.fillMaxWidth(),
                         onClick = {
+                            com.gpt.hook.api.ChatGptOAuthLogin.start(appContext) { _, msg ->
+                                importStatus = msg
+                            }
+                        },
+                    ) { Text("账号授权登录（自动获取凭证）") }
+                    OutlinedButton(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = {
                             when (val r = com.gpt.hook.api.ChatGptLocalImporter.import()) {
                                 is com.gpt.hook.api.ChatGptLocalImporter.Outcome.Ok -> {
                                     hookToken = r.credentials.accessToken

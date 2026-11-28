@@ -115,11 +115,18 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                     else -> null
                 }
 
+                val protectedRequestAuthorized = cfg.apiKey.isNotBlank() && authorized(headers)
+                if (protectedRequestAuthorized && method == "POST" &&
+                    (target == "/v1/chat/completions" || target == "/v1/responses" || target.startsWith("/backend-api/"))) {
+                    RequestDumpStore.record(context, method, target, headers["content-type"], body)
+                }
+
                 when {
                     method == "OPTIONS" -> corsPreflight(out)
                     target == "/health" -> json(out, 200, health())
                     cfg.apiKey.isBlank() -> json(out, 503, err("configuration_required", "configure a gateway API key before using protected API routes"))
                     !authorized(headers) -> json(out, 401, err("invalid_api_key", "missing or bad Authorization"))
+                    target == "/v1/request-dump" -> requestDumpRoute(out, method, body)
                     target == "/v1/models" -> json(out, 200, OpenAiCompat.modelsJson(OpenAiCompat.DEFAULT_MODELS))
                     target == "/v1/capabilities" && method == "GET" -> json(out, 200, OpenAiCompat.capabilitiesJson())
                     // MCP 通道：不消耗每小时消息额度，可直接调工具/读网页
@@ -877,6 +884,31 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
      * 返回 blocked_features[].resets_after 精确到秒。
      * "send" 被 block 时，生成请求必定 429，提前告诉客户端比让它干等更好。
      */
+    private fun requestDumpRoute(out: OutputStream, method: String, body: ByteArray?) {
+        try {
+            when (method) {
+                "GET" -> json(out, 200, RequestDumpStore.snapshot(context).toString())
+                "PUT" -> {
+                    val request = JSONObject(String(body ?: ByteArray(0), Charsets.UTF_8))
+                    require(request.has("enabled")) { "enabled is required" }
+                    RequestDumpStore.setEnabled(context, request.getBoolean("enabled"))
+                    json(out, 200, RequestDumpStore.snapshot(context).put("ok", true).toString())
+                }
+                "DELETE" -> {
+                    RequestDumpStore.clear(context)
+                    json(out, 200, RequestDumpStore.snapshot(context).put("ok", true).toString())
+                }
+                else -> json(out, 405, err("method_not_allowed", "use GET, PUT or DELETE"))
+            }
+        } catch (e: org.json.JSONException) {
+            json(out, 400, err("invalid_request", e.message ?: "invalid JSON body"))
+        } catch (e: IllegalArgumentException) {
+            json(out, 400, err("invalid_request", e.message ?: "invalid request"))
+        } catch (t: Throwable) {
+            json(out, 500, err("request_dump_failed", t.message ?: "Request dump operation failed"))
+        }
+    }
+
     private fun statusRoute(out: OutputStream) {
         json(out, 200, JSONObject()
             .put("ok", true)

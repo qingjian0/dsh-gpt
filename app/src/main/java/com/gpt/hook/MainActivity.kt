@@ -684,7 +684,8 @@ private fun DshApp(
                     onDiscover = { request ->
                         scope.launch {
                             try {
-                                val submitted = backend.post("/v1/hook/discover", request)
+                                val route = if (request.optString("className").isNotBlank()) "/v1/hook/inspect" else "/v1/hook/discover"
+                                val submitted = backend.post(route, request)
                                 if (submitted.code !in 200..299) throw Exception("扫描任务提交失败：HTTP ${submitted.code}")
                                 val status = backend.get("/v1/hook/status")
                                 state = state.copy(hook = JSONObjectOrEmpty(status.body))

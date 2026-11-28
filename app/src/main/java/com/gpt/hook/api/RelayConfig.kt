@@ -3,31 +3,32 @@ package com.gpt.hook.api
 import android.content.Context
 import java.util.UUID
 
-/** 本地 API / 反代网关的可持久化配置。 */
+/** Persisted ChatGPT gateway configuration. */
 data class RelayConfig(
     val enabled: Boolean = false,
     val port: Int = 8766,
     val lan: Boolean = true,
     val apiKey: String = "",
+    val proxyMode: String = "hook",
     val upstreamBase: String = "https://android.chat.openai.com",
     val accessToken: String = "",
     val oaiDid: String = "",
     val sessionId: String = "",
-    /** ChatGPT 已授权应用的 connector id，用于 system_hints: ["plugin:connector_<id>"] */
+    val webBase: String = "https://chatgpt.com",
+    val webAccessToken: String = "",
+    val webSessionToken: String = "",
+    val webUserAgent: String = "Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 Chrome/131.0.0.0 Mobile Safari/537.36",
     val connectorId: String = "",
-    /** Codex 通道的 OAuth token（独立产品线，ChatGPT token 会 401） */
-    val codexToken: String = "",
-    /**
-     * 临时对话：上游 history_and_training_disabled=true。
-     *
-     * 必须保持 false：临时对话没有 conversation_id，每轮只能全量重发历史，
-     * 历史越长越慢；续聊模式才能只发增量（服务端持有上下文）。
-     * 只在「不想在账号里留记录」时才手动打开。
-     */
+    val model: String = "auto",
+    val fastMode: Boolean = false,
+    val reasoningEffort: String = "medium",
+    val searchEnabled: Boolean = false,
     val temporaryChat: Boolean = false,
     val userAgent: String = "ChatGPT/1.2026.321 (Android 15; 22081212C)",
 ) {
-    val ready: Boolean get() = accessToken.isNotBlank() && oaiDid.isNotBlank()
+    val ready: Boolean
+        get() = if (proxyMode == "web") webAccessToken.isNotBlank()
+        else accessToken.isNotBlank() && oaiDid.isNotBlank()
 
     companion object {
         private const val PREFS = "relay"
@@ -45,13 +46,21 @@ data class RelayConfig(
                 port = p.getInt("port", defaults.port),
                 lan = p.getBoolean("lan", defaults.lan),
                 apiKey = apiKey,
+                proxyMode = p.getString("proxyMode", defaults.proxyMode) ?: defaults.proxyMode,
                 upstreamBase = p.getString("upstreamBase", defaults.upstreamBase) ?: defaults.upstreamBase,
                 accessToken = p.getString("accessToken", "") ?: "",
                 oaiDid = p.getString("oaiDid", "") ?: "",
                 sessionId = p.getString("sessionId", "") ?: "",
+                webBase = p.getString("webBase", defaults.webBase) ?: defaults.webBase,
+                webAccessToken = p.getString("webAccessToken", "") ?: "",
+                webSessionToken = p.getString("webSessionToken", "") ?: "",
+                webUserAgent = p.getString("webUserAgent", defaults.webUserAgent) ?: defaults.webUserAgent,
                 connectorId = p.getString("connectorId", "") ?: "",
-                codexToken = p.getString("codexToken", "") ?: "",
-                temporaryChat = p.getBoolean("temporaryChat", false),
+                model = p.getString("model", defaults.model) ?: defaults.model,
+                fastMode = p.getBoolean("fastMode", defaults.fastMode),
+                reasoningEffort = p.getString("reasoningEffort", defaults.reasoningEffort) ?: defaults.reasoningEffort,
+                searchEnabled = p.getBoolean("searchEnabled", defaults.searchEnabled),
+                temporaryChat = p.getBoolean("temporaryChat", defaults.temporaryChat),
                 userAgent = p.getString("userAgent", defaults.userAgent) ?: defaults.userAgent,
             )
         }
@@ -62,18 +71,33 @@ data class RelayConfig(
                 .putInt("port", cfg.port)
                 .putBoolean("lan", cfg.lan)
                 .putString("apiKey", cfg.apiKey)
+                .putString("proxyMode", if (cfg.proxyMode == "web") "web" else "hook")
                 .putString("upstreamBase", cfg.upstreamBase)
                 .putString("accessToken", cfg.accessToken)
                 .putString("oaiDid", cfg.oaiDid)
                 .putString("sessionId", cfg.sessionId)
+                .putString("webBase", cfg.webBase)
+                .putString("webAccessToken", cfg.webAccessToken)
+                .putString("webSessionToken", cfg.webSessionToken)
+                .putString("webUserAgent", cfg.webUserAgent)
                 .putString("connectorId", cfg.connectorId)
-                .putString("codexToken", cfg.codexToken)
+                .putString("model", cfg.model)
+                .putBoolean("fastMode", cfg.fastMode)
+                .putString("reasoningEffort", normalizeEffort(cfg.reasoningEffort))
+                .putBoolean("searchEnabled", cfg.searchEnabled)
                 .putBoolean("temporaryChat", cfg.temporaryChat)
                 .putString("userAgent", cfg.userAgent)
+                .remove("codexToken")
                 .apply()
         }
 
-        /** 从 kit.json 导入（{access_token, oai_did, session_id}），设备侧或 adb push 均可。 */
+        fun normalizeEffort(value: String): String = when (value.lowercase()) {
+            "low", "minimal" -> "low"
+            "high" -> "high"
+            else -> "medium"
+        }
+
+        /** Import a ChatGPT kit.json. Secrets remain local and are never returned by status APIs. */
         fun importKit(ctx: Context, json: String): RelayConfig {
             val o = org.json.JSONObject(json)
             val cur = load(ctx)
@@ -82,7 +106,9 @@ data class RelayConfig(
                 oaiDid = o.optString("oai_did", o.optString("oai-did", cur.oaiDid)),
                 sessionId = o.optString("session_id", o.optString("sessionId", cur.sessionId)),
                 connectorId = o.optString("connectorId", cur.connectorId),
-                codexToken = o.optString("codexToken", cur.codexToken),
+                webAccessToken = o.optString("web_access_token", cur.webAccessToken),
+                webSessionToken = o.optString("web_session_token", cur.webSessionToken),
+                proxyMode = o.optString("proxy_mode", cur.proxyMode).let { if (it == "web") "web" else "hook" },
                 temporaryChat = o.optBoolean("temporaryChat", cur.temporaryChat),
             )
             save(ctx, next)

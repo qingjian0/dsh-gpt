@@ -544,7 +544,7 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
 
     private fun health(): String = JSONObject()
         .put("ok", true).put("port", cfg.port)
-        .put("ready", cfg.ready).put("upstream", cfg.upstreamBase)
+        .put("ready", cfg.ready).put("upstream", if (cfg.proxyMode == "siwc") "https://api.openai.com" else if (cfg.proxyMode == "web") cfg.webBase else cfg.upstreamBase)
         .toString()
 
     /** Resolve the selected SIWC account and refresh rotating credentials when required. */
@@ -1057,7 +1057,7 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
             .put("running", running)
             .put("ready", cfg.ready)
             .put("proxy_mode", cfg.proxyMode)
-            .put("upstream", if (cfg.proxyMode == "web") cfg.webBase else cfg.upstreamBase)
+            .put("upstream", when (cfg.proxyMode) { "siwc" -> "https://api.openai.com"; "web" -> cfg.webBase; else -> cfg.upstreamBase })
             .put("usage", UsageMeter.snapshot(context))
             .toString())
     }
@@ -1072,6 +1072,7 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                 .put("has_hook_token", cfg.accessToken.isNotBlank()).put("has_oai_did", cfg.oaiDid.isNotBlank())
                 .put("has_web_token", cfg.webAccessToken.isNotBlank())
                 .put("has_web_session", cfg.webSessionToken.isNotBlank())
+                .put("has_siwc_profile", cfg.siwcProfileId.isNotBlank())
                 .put("restart_required", false).toString())
             return
         }
@@ -1079,7 +1080,8 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         val request = runCatching { JSONObject(body?.toString(Charsets.UTF_8) ?: "") }.getOrNull()
         if (request == null) { json(out, 400, err("invalid_request", "body must be JSON")); return }
         val next = cfg.copy(
-            proxyMode = request.optString("proxy_mode", cfg.proxyMode).let { if (it == "web") "web" else "hook" },
+            proxyMode = request.optString("proxy_mode", cfg.proxyMode).let { if (it in setOf("web", "siwc")) it else "hook" },
+            siwcProfileId = request.optString("siwc_profile_id", cfg.siwcProfileId),
             model = request.optString("model", cfg.model).ifBlank { cfg.model },
             fastMode = request.optBoolean("fast_mode", cfg.fastMode),
             reasoningEffort = RelayConfig.normalizeEffort(request.optString("reasoning_effort", cfg.reasoningEffort)),

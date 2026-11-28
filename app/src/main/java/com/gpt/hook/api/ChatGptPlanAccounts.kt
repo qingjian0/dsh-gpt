@@ -1,0 +1,155 @@
+package com.gpt.hook.api
+
+import android.content.Context
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+/** Standalone SIWC account vault. It does not silently change the active gateway transport. */
+@Composable
+internal fun ChatGptPlanAccounts(context: Context) {
+    val scope = rememberCoroutineScope()
+    val store = remember(context) { ChatGptPlanProfileStore(context.applicationContext) }
+    val coordinator = remember { ChatGptPlanLoginCoordinator() }
+    var profiles by remember { mutableStateOf(emptyList<ChatGptPlanProfile>()) }
+    var activeProfileId by remember { mutableStateOf<String?>(null) }
+    var pending by remember { mutableStateOf<ChatGptPlanLoginCoordinator.PendingLogin?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    var status by remember { mutableStateOf("尚未读取账号状态") }
+
+    suspend fun reload() {
+        try {
+            val snapshot = withContext(Dispatchers.IO) { store.snapshot() }
+            profiles = snapshot.profiles
+            activeProfileId = snapshot.activeProfileId
+            status = if (profiles.isEmpty()) "尚未绑定 ChatGPT 账号" else "已安全保存 ${profiles.size} 个账号"
+        } catch (error: Throwable) {
+            status = "账号读取失败：${error.message ?: error.javaClass.simpleName}"
+        }
+    }
+
+    LaunchedEffect(store) { reload() }
+    DisposableEffect(pending) {
+        onDispose { pending?.close() }
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Color.Transparent),
+        shape = RoundedCornerShape(14.dp),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("ChatGPT 官方账号授权", fontWeight = FontWeight.Bold)
+            Text(
+                "系统浏览器 OAuth · PKCE · Android Keystore 加密。独立于 Android DPoP / Web Cookie；当前用于账号授权与凭证保管，不会自动切换网关上游。",
+                color = Color.Gray,
+                fontSize = 12.sp,
+            )
+            Text(status, fontSize = 12.sp)
+            profiles.forEach { profile ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(profile.name?.takeIf { it.isNotBlank() } ?: profile.email ?: "ChatGPT 账号")
+                        Text(
+                            buildString {
+                                append(if (profile.canUseChatGptPlan) "具备 API 授权范围" else "缺少 API 使用授权范围")
+                                if (profile.email != null && profile.name != null) append(" · ${profile.email}")
+                            },
+                            color = Color.Gray,
+                            fontSize = 11.sp,
+                        )
+                        if (activeProfileId == profile.id) {
+                            Text("当前选中", color = Color(0xFF10A37F), fontSize = 11.sp)
+                        }
+                    }
+                    Column {
+                        if (activeProfileId != profile.id) {
+                            OutlinedButton(
+                                enabled = !busy,
+                                onClick = {
+                                    scope.launch {
+                                        busy = true
+                                        try {
+                                            withContext(Dispatchers.IO) { store.setActive(profile.id) }
+                                            reload()
+                                        } finally { busy = false }
+                                    }
+                                },
+                            ) { Text("选中") }
+                        }
+                        OutlinedButton(
+                            enabled = !busy,
+                            onClick = {
+                                scope.launch {
+                                    busy = true
+                                    try {
+                                        withContext(Dispatchers.IO) { store.remove(profile.id) }
+                                        reload()
+                                    } finally { busy = false }
+                                }
+                            },
+                        ) { Text("移除") }
+                    }
+                }
+            }
+            Button(
+                enabled = !busy,
+                modifier = Modifier.fillMaxWidth(),
+                onClick = {
+                    try {
+                        val login = coordinator.begin(context)
+                        pending = login
+                        busy = true
+                        status = "已打开系统浏览器，等待 ChatGPT 完成授权……"
+                        scope.launch {
+                            try {
+                                withContext(Dispatchers.IO) { login.complete() }
+                                status = "ChatGPT 授权成功，凭证已加密保存"
+                                reload()
+                            } catch (error: Throwable) {
+                                status = "授权未完成：${error.message ?: error.javaClass.simpleName}"
+                            } finally {
+                                pending = null
+                                busy = false
+                            }
+                        }
+                    } catch (error: Throwable) {
+                        status = "无法启动授权：${error.message ?: error.javaClass.simpleName}"
+                        busy = false
+                    }
+                },
+                shape = RoundedCornerShape(12.dp),
+            ) { Text(if (busy) "正在等待授权…" else "使用 ChatGPT 账号登录") }
+            Spacer(Modifier.height(2.dp))
+        }
+    }
+}

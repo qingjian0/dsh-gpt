@@ -192,6 +192,10 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                 .put("enabled", state.getBoolean(ObservationProvider.KEY_ENABLED, true))
                 .put("configRevision", state.getLong(ObservationProvider.KEY_CONFIG_UPDATED, 0L))
                 .put("configuredRuleCount", config.optJSONArray("rules")?.length() ?: 0)
+                .put("enabledConfiguredRuleCount", (config.optJSONArray("rules") ?: org.json.JSONArray()).let { rules ->
+                    (0 until rules.length()).count { rules.optJSONObject(it)?.optBoolean("enabled", false) == true }
+                })
+                .put("configuredHooks", config.optJSONArray("rules") ?: org.json.JSONArray())
                 .put("targetReportUpdatedAtMs", reportUpdatedAt)
                 .put("targetObserved", reportUpdatedAt > 0L)
                 .put("runtimeState", runtime.optString("state", "unavailable"))

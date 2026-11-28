@@ -596,9 +596,16 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
             json(out, 400, err("unsupported_feature", "SIWC gateway enforces store=false"))
             return
         }
+        val unsupportedFields = listOf(
+            "previous_response_id", "conversation", "include", "reasoning",
+            "max_output_tokens", "temperature", "top_p", "metadata", "prompt"
+        )
+        unsupportedFields.firstOrNull { request.has(it) }?.let {
+            json(out, 400, err("unsupported_feature", "SIWC text adapter does not support the '$it' Responses field yet"))
+            return
+        }
         val input = StringBuilder()
         val instructions = request.optString("instructions").trim()
-        if (instructions.isNotEmpty()) input.append("Instructions: ").append(instructions).append("\n\n")
         when (val value = request.opt("input")) {
             is String -> input.append(value)
             is JSONArray -> {
@@ -631,7 +638,7 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                 ?: throw IllegalStateException("No ChatGPT models are available for this account")
             val id = "resp_" + UUID.randomUUID().toString().replace("-", "").take(24)
             if (!request.optBoolean("stream", false)) {
-                val output = http.streamResponse(profile.accessToken!!, model, prompt)
+                val output = http.streamResponse(profile.accessToken!!, model, prompt, instructions = instructions)
                 json(out, 200, OpenAiCompat.responseObject(id, model, output).toString())
                 UsageMeter.markSuccess()
                 return
@@ -653,7 +660,7 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                 .put("part", JSONObject().put("type", "output_text").put("text", "").put("annotations", JSONArray())))
             val collected = StringBuilder()
             try {
-                http.streamResponse(profile.accessToken!!, model, prompt) { delta ->
+                http.streamResponse(profile.accessToken!!, model, prompt, instructions = instructions) { delta ->
                     collected.append(delta)
                     writeResponseEvent(out, "response.output_text.delta", JSONObject()
                         .put("item_id", itemId).put("output_index", 0).put("content_index", 0).put("delta", delta))

@@ -14,7 +14,7 @@
 
 - Built-in Hardening hooks are catalogued by group, but the current runtime report does not include per-target install outcomes. The UI therefore labels them `not individually confirmed`; it does not infer success from configuration or aggregate hook counts.
 - The current API does not expose a complete request-dump settings/clear contract. The UI does not invent a request-capture toggle or claim that sensitive log cleanup is available.
-- Startup discovery has a separate endpoint; the current console exposes the task-based DEX discovery workflow and startup-discovery timestamp only.
+- Startup discovery has a separate endpoint; the console exposes its timestamp and class count, while the task-based DEX discovery flow renders paged results and member metadata.
 - The old `gpt-hook/` implementation is not part of the current APK and is labelled as not migrated.
 - Runtime target online status is a freshness heuristic (30 seconds), not a process heartbeat or proof that every Hook remains installed.
 

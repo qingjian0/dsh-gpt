@@ -17,6 +17,7 @@ data class RelayConfig(
     val oaiDid: String = "",
     val sessionId: String = "",
     val webBase: String = "https://chatgpt.com",
+    /** Runtime-only values. Persistence is delegated to ChatGptWebSecretStore. */
     val webAccessToken: String = "",
     val webSessionToken: String = "",
     val webUserAgent: String = "Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 Chrome/131.0.0.0 Mobile Safari/537.36",
@@ -47,6 +48,29 @@ data class RelayConfig(
                 ?: "sk-local-" + UUID.randomUUID().toString().replace("-", "") +
                     UUID.randomUUID().toString().replace("-", "")
             if (storedApiKey != apiKey) p.edit().putString("apiKey", apiKey).apply()
+
+            val webSecretStore = ChatGptWebSecretStore(ctx)
+            val encryptedWebCredentials = runCatching { webSecretStore.read() }.getOrNull()
+            val legacyWebCredentials = ChatGptWebCredentials(
+                accessToken = p.getString("webAccessToken", "") ?: "",
+                sessionToken = p.getString("webSessionToken", "") ?: "",
+            )
+            var webCredentials = encryptedWebCredentials ?: ChatGptWebCredentials("", "")
+            if (encryptedWebCredentials == null &&
+                (legacyWebCredentials.accessToken.isNotBlank() || legacyWebCredentials.sessionToken.isNotBlank())
+            ) {
+                val migrated = runCatching {
+                    webSecretStore.write(legacyWebCredentials)
+                    true
+                }.getOrDefault(false)
+                if (migrated) {
+                    check(p.edit().remove("webAccessToken").remove("webSessionToken").commit()) {
+                        "Could not remove legacy plaintext Web credentials"
+                    }
+                    webCredentials = legacyWebCredentials
+                }
+            }
+
             return RelayConfig(
                 enabled = p.getBoolean("enabled", defaults.enabled),
                 port = p.getInt("port", defaults.port),
@@ -60,8 +84,8 @@ data class RelayConfig(
                 oaiDid = p.getString("oaiDid", "") ?: "",
                 sessionId = p.getString("sessionId", "") ?: "",
                 webBase = p.getString("webBase", defaults.webBase) ?: defaults.webBase,
-                webAccessToken = p.getString("webAccessToken", "") ?: "",
-                webSessionToken = p.getString("webSessionToken", "") ?: "",
+                webAccessToken = webCredentials.accessToken,
+                webSessionToken = webCredentials.sessionToken,
                 webUserAgent = p.getString("webUserAgent", defaults.webUserAgent) ?: defaults.webUserAgent,
                 connectorId = p.getString("connectorId", "") ?: "",
                 model = p.getString("model", defaults.model) ?: defaults.model,
@@ -74,7 +98,12 @@ data class RelayConfig(
         }
 
         fun save(ctx: Context, cfg: RelayConfig) {
-            ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            // Commit encrypted credentials first. If Keystore persistence fails, do not save a
+            // configuration that appears successful while leaving secrets in plaintext.
+            ChatGptWebSecretStore(ctx).write(
+                ChatGptWebCredentials(cfg.webAccessToken, cfg.webSessionToken)
+            )
+            check(ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
                 .putBoolean("enabled", cfg.enabled)
                 .putInt("port", cfg.port)
                 .putBoolean("lan", cfg.lan)
@@ -86,8 +115,8 @@ data class RelayConfig(
                 .putString("oaiDid", cfg.oaiDid)
                 .putString("sessionId", cfg.sessionId)
                 .putString("webBase", cfg.webBase)
-                .putString("webAccessToken", cfg.webAccessToken)
-                .putString("webSessionToken", cfg.webSessionToken)
+                .remove("webAccessToken")
+                .remove("webSessionToken")
                 .putString("webUserAgent", cfg.webUserAgent)
                 .putString("connectorId", cfg.connectorId)
                 .putString("model", cfg.model)
@@ -97,7 +126,7 @@ data class RelayConfig(
                 .putBoolean("temporaryChat", cfg.temporaryChat)
                 .putString("userAgent", cfg.userAgent)
                 .remove("codexToken")
-                .apply()
+                .commit()) { "Could not durably save gateway configuration" }
         }
 
         fun normalizeEffort(value: String): String = when (value.lowercase()) {

@@ -41,24 +41,6 @@ internal fun ChatGptPlanAccounts(context: Context) {
     var busy by remember { mutableStateOf(ChatGptPlanLoginRegistry.inFlight) }
     var status by remember { mutableStateOf(ChatGptPlanLoginRegistry.lastStatus ?: "尚未读取账号状态") }
 
-    // App 内 WebView 登录的结果回调：完全不依赖端口与进程保活。
-    val webLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
-    ) {
-        busy = false
-        val profile = ChatGptPlanWebLoginSession.profile
-        if (profile != null) {
-            status = "授权成功：" + (profile.email ?: profile.subject)
-            scope.launch {
-                reload()
-                syncGatewayProfile()
-            }
-        } else {
-            status = "授权未完成：" + (ChatGptPlanWebLoginSession.error ?: "已取消")
-        }
-        ChatGptPlanWebLoginSession.clear()
-    }
-
     suspend fun reload() {
         try {
             val snapshot = withContext(Dispatchers.IO) { store.snapshot() }
@@ -84,6 +66,24 @@ internal fun ChatGptPlanAccounts(context: Context) {
             }
             if (current.enabled) ApiService.start(context)
         }
+    }
+
+    // App 内 WebView 登录的结果回调：完全不依赖端口与进程保活。
+    val webLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
+    ) {
+        busy = false
+        val profile = ChatGptPlanWebLoginSession.profile
+        if (profile != null) {
+            status = "授权成功：" + (profile.email ?: profile.subject)
+            scope.launch {
+                reload()
+                syncGatewayProfile()
+            }
+        } else {
+            status = "授权未完成：" + (ChatGptPlanWebLoginSession.error ?: "已取消")
+        }
+        ChatGptPlanWebLoginSession.clear()
     }
 
     /** App 内 WebView 登录：全程不跳出应用，成功后 Activity 自己关闭。 */

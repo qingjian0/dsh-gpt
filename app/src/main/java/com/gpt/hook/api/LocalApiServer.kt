@@ -540,17 +540,6 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         .put("ready", cfg.ready).put("upstream", if (cfg.proxyMode == "web") cfg.webBase else cfg.upstreamBase)
         .toString()
 
-    /** Resolve the selected SIWC account and refresh rotating credentials when required. */
-    /** 取 OAuth 授权保存的凭证（Custom Tabs 登录得到的 accessToken）。 */
-    private fun codexToken(): String {
-        val credential = ChatGptCredentialStore.load()
-            ?: throw IllegalStateException("尚未授权：请先在账号授权通道完成 Chrome 登录")
-        return credential.accessToken
-    }
-
-    private fun codexAccountId(): String =
-        runCatching { ChatGptCredentialStore.load()?.accountId.orEmpty() }.getOrDefault("")
-
     /** Responses 入口：text-only，拒绝本网关无法忠实转发的字段。 */
     private fun responses(out: OutputStream, body: ByteArray, headers: Map<String, String>) {
         val request = try { JSONObject(String(body, Charsets.UTF_8)) } catch (t: Throwable) {

@@ -49,6 +49,6 @@ The local gateway now has a selectable `siwc` upstream mode:
 - `GET /v1/models` refreshes the selected profile when needed and maps the official model catalog to an OpenAI-style model list.
 - `POST /v1/responses` uses the official Responses API, forces `store=false` and upstream `stream=true`, and supports text-only input. Local non-stream requests are buffered into a completed response; local stream requests receive Responses-style SSE events.
 - `POST /v1/chat/completions` is explicitly rejected in SIWC mode rather than silently routed through another protocol.
-- `/backend-api/*` is explicitly blocked in SIWC mode. Existing Android DPoP and Web modes retain their previous routes.
+- `/backend-api/*`, MCP bridge routes, and the ChatGPT web-reader route are explicitly blocked in SIWC mode because they depend on the separate backend-api channel. Existing Android DPoP and Web modes retain their previous routes.
 
 The adapter is intentionally text-only and does not claim full Responses API feature parity: tools, structured output, and multimodal input are rejected. CI and device acceptance remain separate gates; real-device OAuth, model listing, streaming, and account switching still require validation on an Android device.

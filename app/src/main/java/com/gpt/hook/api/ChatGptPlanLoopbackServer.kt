@@ -1,7 +1,6 @@
 package com.gpt.hook.api
 
-import java.io.BufferedReader
-import java.io.InputStreamReader
+import java.io.InputStream
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
@@ -39,10 +38,17 @@ internal class ChatGptPlanLoopbackServer private constructor(
                     respond(socket, 403, "Only loopback callbacks are accepted.")
                     continue
                 }
-                val reader = BufferedReader(InputStreamReader(socket.getInputStream(), StandardCharsets.ISO_8859_1))
-                val requestLine = reader.readLine().orEmpty()
+                val input = socket.getInputStream()
+                val requestLine = readAsciiLine(input, MAX_REQUEST_LINE_BYTES) ?: ""
+                var headerBytes = 0
+                var headerCount = 0
                 while (true) {
-                    val line = reader.readLine() ?: break
+                    val line = readAsciiLine(input, MAX_HEADER_LINE_BYTES) ?: break
+                    headerBytes += line.length + 2
+                    headerCount++
+                    require(headerBytes <= MAX_HEADER_BYTES && headerCount <= MAX_HEADER_COUNT) {
+                        "OAuth callback headers exceed the local request limit"
+                    }
                     if (line.isEmpty()) break
                 }
                 val parts = requestLine.split(' ')
@@ -88,6 +94,21 @@ internal class ChatGptPlanLoopbackServer private constructor(
         runCatching { server.close() }
     }
 
+    private fun readAsciiLine(input: InputStream, maxBytes: Int): String? {
+        val bytes = java.io.ByteArrayOutputStream()
+        while (true) {
+            val value = input.read()
+            if (value < 0) return if (bytes.size() == 0) null else String(bytes.toByteArray(), StandardCharsets.ISO_8859_1)
+            if (value == 10) {
+                val line = bytes.toByteArray()
+                val length = if (line.isNotEmpty() && line.last() == 13.toByte()) line.size - 1 else line.size
+                return String(line, 0, length, StandardCharsets.ISO_8859_1)
+            }
+            if (bytes.size() >= maxBytes) throw IllegalArgumentException("OAuth callback request line is too long")
+            bytes.write(value)
+        }
+    }
+
     private fun respond(socket: Socket, status: Int, message: String) {
         val body = """<!doctype html><meta charset="utf-8"><title>DSH GPT</title><main style="font:16px system-ui;padding:40px;text-align:center"><h2>$message</h2></main>"""
             .toByteArray(StandardCharsets.UTF_8)
@@ -109,6 +130,10 @@ internal class ChatGptPlanLoopbackServer private constructor(
 
     companion object {
         private const val DEFAULT_TIMEOUT_MS = 3 * 60 * 1000L
+        private const val MAX_REQUEST_LINE_BYTES = 8 * 1024
+        private const val MAX_HEADER_LINE_BYTES = 4 * 1024
+        private const val MAX_HEADER_BYTES = 16 * 1024
+        private const val MAX_HEADER_COUNT = 64
 
         /** Bind an ephemeral loopback port first, then freeze its exact redirect URI into the attempt. */
         fun create(

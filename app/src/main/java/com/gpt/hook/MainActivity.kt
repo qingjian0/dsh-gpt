@@ -390,59 +390,24 @@ private fun DshApp(
                     }
                 }
 
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(5.dp)
-                ) {
-                    listOf(
-                        "状态" to Icons.Outlined.Dashboard,
-                        "API" to Icons.Outlined.Api,
-                        "工具" to Icons.Outlined.Build,
-                        "Hook" to Icons.Outlined.Extension
-                    ).forEachIndexed { index, item ->
-                        val selected = currentTab == index
-                        Column(
-                            Modifier
-                                .weight(1f)
-                                .clickable { currentTab = index }
-                                .padding(vertical = 11.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(5.dp)
-                            ) {
-                                Icon(
-                                    item.second,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(18.dp),
-                                    tint = if (selected) Green else Muted
-                                )
-                                Text(
-                                    item.first,
-                                    color = if (selected) Green else Muted,
-                                    fontSize = 14.sp,
-                                    fontWeight = if (selected) FontWeight.Bold
-                                    else FontWeight.Medium
-                                )
-                            }
-                            Spacer(Modifier.height(8.dp))
-                            Box(
-                                Modifier
-                                    .fillMaxWidth(0.6f)
-                                    .height(3.dp)
-                                    .background(
-                                        if (selected) Green else Color.Transparent,
-                                        CircleShape
-                                    )
-                            )
-                        }
-                    }
-                }
-
                 HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+            }
+        },
+        bottomBar = {
+            NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 2.dp) {
+                listOf(
+                    Triple("概览", Icons.Outlined.Dashboard, 0),
+                    Triple("API", Icons.Outlined.Api, 1),
+                    Triple("工具", Icons.Outlined.Build, 2),
+                    Triple("Hook", Icons.Outlined.Extension, 3)
+                ).forEach { (label, icon, index) ->
+                    NavigationBarItem(
+                        selected = currentTab == index,
+                        onClick = { currentTab = index },
+                        icon = { Icon(icon, contentDescription = null) },
+                        label = { Text(label) }
+                    )
+                }
             }
         },
         snackbarHost = {
@@ -455,9 +420,17 @@ private fun DshApp(
                 .padding(padding)
         ) {
             when (currentTab) {
-                0 -> StatusPage(
-                    state = state,
+                0 -> DashboardScreen(
+                    online = state.online,
+                    loading = state.loading,
                     endpoint = endpoint,
+                    models = (0 until state.models.length()).mapNotNull { index ->
+                        val item = state.models.optJSONObject(index)
+                        item?.optString("id")?.takeIf { it.isNotBlank() }
+                            ?: state.models.optString(index).takeIf { it.isNotBlank() }
+                    },
+                    hookEnabled = state.hook.optBoolean("enabled", false),
+                    error = state.error,
                     onCopy = {
                         copyText(context, endpoint)
                         notify("接入地址已复制")

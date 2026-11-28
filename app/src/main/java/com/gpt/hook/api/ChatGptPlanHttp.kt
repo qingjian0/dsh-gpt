@@ -92,6 +92,7 @@ internal class ChatGptPlanHttp(
         accessToken: String,
         model: String,
         input: String,
+        instructions: String = "",
         onTextDelta: (String) -> Unit = {},
     ): String {
         require(accessToken.isNotBlank() && model.isNotBlank() && input.isNotBlank())
@@ -111,6 +112,7 @@ internal class ChatGptPlanHttp(
                     .put("role", "user")
                     .put("content", input)))
                 .put("store", false)
+                .apply { if (instructions.isNotBlank()) put("instructions", instructions) }
                 .put("stream", true)
                 .toString()
                 .toByteArray(StandardCharsets.UTF_8)

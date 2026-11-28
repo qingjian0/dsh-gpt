@@ -36,7 +36,9 @@ internal object RequestDumpStore {
             if (now - item.optLong("timestamp", 0L) <= RETENTION_MS) next.put(item)
         }
         val raw = body?.toString(Charsets.UTF_8).orEmpty()
-        val safeBody = RequestDumpSanitizer.sanitize(raw).take(MAX_BODY_CHARS)
+        val sanitizedBody = RequestDumpSanitizer.sanitize(raw)
+        val bodyTruncated = sanitizedBody.length > MAX_BODY_CHARS
+        val safeBody = sanitizedBody.take(MAX_BODY_CHARS)
         val id = java.util.UUID.randomUUID().toString()
         next.put(JSONObject()
             .put("id", id)
@@ -45,7 +47,7 @@ internal object RequestDumpStore {
             .put("path", target.substringBefore("?").take(240))
             .put("contentType", contentType.orEmpty().take(100))
             .put("body", safeBody)
-            .put("bodyTruncated", safeBody.length < raw.length && raw.isNotEmpty()))
+            .put("bodyTruncated", bodyTruncated))
         val bounded = JSONArray()
         val start = (next.length() - MAX_RECORDS).coerceAtLeast(0)
         for (i in start until next.length()) bounded.put(next.getJSONObject(i))

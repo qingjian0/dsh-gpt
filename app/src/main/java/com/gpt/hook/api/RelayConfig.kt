@@ -15,15 +15,16 @@ data class RelayConfig(
     val sessionId: String = "",
     /** ChatGPT 已授权应用的 connector id，用于 system_hints: ["plugin:connector_<id>"] */
     val connectorId: String = "",
+    /** Codex 通道的 OAuth token（独立产品线，ChatGPT token 会 401） */
+    val codexToken: String = "",
     /**
      * 临时对话：上游 history_and_training_disabled=true。
      *
-     * 实测收益（同一提示词、5 轮历史）：
-     *   true  -> 4.6 s，支持多轮历史，账号里不留记录
-     *   false -> 5.8 s，会新建会话
-     * 默认开启：更快，且不再往 ChatGPT 账号堆「新建对话」。
+     * 必须保持 false：临时对话没有 conversation_id，每轮只能全量重发历史，
+     * 历史越长越慢；续聊模式才能只发增量（服务端持有上下文）。
+     * 只在「不想在账号里留记录」时才手动打开。
      */
-    val temporaryChat: Boolean = true,
+    val temporaryChat: Boolean = false,
     val userAgent: String = "ChatGPT/1.2026.321 (Android 15; 22081212C)",
 ) {
     val ready: Boolean get() = accessToken.isNotBlank() && oaiDid.isNotBlank()
@@ -49,7 +50,8 @@ data class RelayConfig(
                 oaiDid = p.getString("oaiDid", "") ?: "",
                 sessionId = p.getString("sessionId", "") ?: "",
                 connectorId = p.getString("connectorId", "") ?: "",
-                temporaryChat = p.getBoolean("temporaryChat", true),
+                codexToken = p.getString("codexToken", "") ?: "",
+                temporaryChat = p.getBoolean("temporaryChat", false),
                 userAgent = p.getString("userAgent", defaults.userAgent) ?: defaults.userAgent,
             )
         }
@@ -65,6 +67,7 @@ data class RelayConfig(
                 .putString("oaiDid", cfg.oaiDid)
                 .putString("sessionId", cfg.sessionId)
                 .putString("connectorId", cfg.connectorId)
+                .putString("codexToken", cfg.codexToken)
                 .putBoolean("temporaryChat", cfg.temporaryChat)
                 .putString("userAgent", cfg.userAgent)
                 .apply()
@@ -79,6 +82,7 @@ data class RelayConfig(
                 oaiDid = o.optString("oai_did", o.optString("oai-did", cur.oaiDid)),
                 sessionId = o.optString("session_id", o.optString("sessionId", cur.sessionId)),
                 connectorId = o.optString("connectorId", cur.connectorId),
+                codexToken = o.optString("codexToken", cur.codexToken),
                 temporaryChat = o.optBoolean("temporaryChat", cur.temporaryChat),
             )
             save(ctx, next)

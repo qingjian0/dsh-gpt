@@ -38,7 +38,8 @@ object ToolBridge {
             if (name.isBlank()) continue
             sb.append("- ").append(name).append(": ")
             sb.append(fn.optString("description").replace("\n", " ").take(160))
-            val props = fn.optJSONObject("parameters")?.optJSONObject("properties")
+            val parameters = fn.optJSONObject("parameters") ?: JSONObject().put("type", "object")
+            val props = parameters.optJSONObject("properties")
             if (props != null && props.length() > 0) {
                 val keys = props.keys()
                 val names = ArrayList<String>()
@@ -48,6 +49,9 @@ object ToolBridge {
                 }
                 sb.append(" 参数(").append(names.joinToString(", ")).append(")")
             }
+            // Preserve required fields, nested objects, enums and additionalProperties
+            // instead of reducing a tool schema to a lossy list of property names.
+            sb.append("\n  JSON Schema: ").append(parameters.toString().take(4000))
             sb.append("\n")
         }
         sb.append("\n规则：\n")
@@ -87,6 +91,81 @@ object ToolBridge {
             else -> args.toString()
         }
         return ParsedCall(name, argsText, "call_" + System.nanoTime().toString(36))
+    }
+
+    /** True when the model emitted any part of the private tool envelope. */
+    fun hasEnvelope(text: String): Boolean = text.contains(OPEN) || text.contains(CLOSE)
+
+    /**
+     * Validate model-generated calls against the exact tool names and JSON parameter
+     * schemas supplied by the client. Invalid calls must never be handed to an Agent.
+     */
+    fun validateCalls(req: JSONObject, calls: List<ParsedCall>, rawText: String): String? {
+        if (!hasEnvelope(rawText)) return null
+        if (calls.isEmpty()) return "model emitted a malformed or incomplete ToolBridge envelope"
+        val declared = LinkedHashMap<String, JSONObject>()
+        val tools = req.optJSONArray("tools") ?: return "tool envelope emitted without a tools declaration"
+        for (i in 0 until tools.length()) {
+            val item = tools.optJSONObject(i) ?: continue
+            val fn = item.optJSONObject("function") ?: item
+            val name = fn.optString("name")
+            if (name.isNotBlank()) declared[name] = fn.optJSONObject("parameters") ?: JSONObject()
+        }
+        for (call in calls) {
+            val schema = declared[call.name] ?: return "model selected an undeclared tool: ${call.name}"
+            val args = runCatching { JSONObject(call.arguments) }.getOrNull()
+                ?: return "tool arguments must be a JSON object: ${call.name}"
+            validateValue(args, schema, call.name)?.let { return it }
+        }
+        return null
+    }
+
+    private fun validateValue(value: Any?, schema: JSONObject, path: String): String? {
+        val type = schema.optString("type")
+        val valid = when (type) {
+            "", "any" -> true
+            "string" -> value is String
+            "number" -> value is Number
+            "integer" -> value is Number && value.toDouble().isFinite() && value.toDouble() % 1.0 == 0.0
+            "boolean" -> value is Boolean
+            "object" -> value is JSONObject
+            "array" -> value is JSONArray
+            "null" -> value == null || value == JSONObject.NULL
+            else -> return "unsupported schema type '$type' at $path"
+        }
+        if (!valid) return "argument type mismatch at $path (expected $type)"
+        val enumValues = schema.optJSONArray("enum")
+        if (enumValues != null && (0 until enumValues.length()).none { enumValues.opt(it).toString() == value.toString() }) {
+            return "argument is not an allowed enum value at $path"
+        }
+        if (value is JSONObject) {
+            val properties = schema.optJSONObject("properties") ?: JSONObject()
+            val required = schema.optJSONArray("required") ?: JSONArray()
+            for (i in 0 until required.length()) {
+                val key = required.optString(i)
+                if (!value.has(key)) return "missing required argument: $path.$key"
+            }
+            val keys = value.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                val child = properties.optJSONObject(key)
+                if (child == null) {
+                    if (schema.optBoolean("additionalProperties", true) == false) {
+                        return "undeclared argument: $path.$key"
+                    }
+                } else {
+                    validateValue(value.opt(key), child, "$path.$key")?.let { return it }
+                }
+            }
+        } else if (value is JSONArray) {
+            val itemSchema = schema.optJSONObject("items")
+            if (itemSchema != null) {
+                for (i in 0 until value.length()) {
+                    validateValue(value.opt(i), itemSchema, "$path[$i]")?.let { return it }
+                }
+            }
+        }
+        return null
     }
 
     /** 从模型输出里解析工具调用；没有或格式非法时返回 null */

@@ -48,7 +48,7 @@ CORS preflight and common HTTP request framing (Content-Length and chunked reque
 
 ## Compatibility boundary
 
-The upstream is the ChatGPT Android conversation backend, not the public OpenAI API. The gateway translates the supported text-only subset of OpenAI Chat Completions and Responses into that backend's conversation protocol. Image/audio input, tool/function calling, JSON-schema constrained output, and other OpenAI features that the upstream adapter does not implement are not advertised as supported. A client that requires those features is not fully compatible yet.
+The upstream is the ChatGPT Android conversation backend, not the public OpenAI API. The gateway translates the supported text-only subset of OpenAI Chat Completions and Responses into that backend's conversation protocol. Image/audio input, legacy function calling, forced tool selection, Responses API tool calling, and JSON-schema constrained output are not supported. Chat Completions `tools` is supported through a text-protocol adapter: the gateway returns standard `tool_calls`, but the calling client/Agent must execute them and send `role=tool` results in a follow-up request. The gateway does not execute those model-selected calls itself. Direct `/v1/mcp/*` calls are a separate API and do not imply autonomous model tool execution.
 
 ## Quick test
 
@@ -85,8 +85,4 @@ The LAN listener binds to `0.0.0.0` when enabled. Keep the generated API key pri
 ## Capability discovery and unsupported input handling
 
 `GET /v1/capabilities` is authenticated and reports the gateway's implemented surface.
-The current adapter accepts text modalities and tool calls through the ToolBridge text-protocol
-adapter. It rejects image/audio/video/file payloads and structured JSON output with HTTP 400
-(`unsupported_feature`) rather than silently flattening or dropping those inputs. Legacy
-function-calling fields and explicit `tool_choice` are also rejected; use the supported
-`tools` array with automatic selection.
+The current adapter accepts text modalities. Chat Completions supports `tools` with automatic selection through the ToolBridge text-protocol adapter; tool-enabled SSE is buffered until the gateway can classify the response as text or `tool_calls`. The caller/Agent executes returned calls and posts tool results back. Responses API tool fields are rejected with HTTP 400 (`unsupported_feature`) until full output-item round-tripping exists. Image/audio/video/file payloads, structured JSON output, legacy function-calling fields, and forced `tool_choice` are also rejected rather than silently dropped.

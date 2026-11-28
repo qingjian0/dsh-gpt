@@ -6,6 +6,17 @@ Latest delivery fix merged: PR #42 (`d1b7fa7142a0ce8c198828f28bf61a32ee030191`)
 
 This document is the delivery truth source. Source presence and CI success are not substitutes for live upstream, DSH-host, or physical-device acceptance.
 
+## 2026-11-28 ChatGPT-only gateway delivery branch
+
+The active implementation is being consolidated on `feat/chatgpt-only-complete-gateway` from main baseline `771e976aa5d5d9cb5c2074b14749b141806a610a`.
+
+Product scope is ChatGPT only. The gateway supports two ChatGPT upstream access methods (Android DPoP/device-DID and web Bearer/session-cookie); there is no separate Codex provider, token, route, or model namespace.
+
+This branch adds persisted upstream/model controls, quick vs. thinking request shaping, reasoning effort, web-search hints, temporary-chat configuration, status/config/proxy-mode/kit-import routes, and usage telemetry. TTFT is measured at the first assistant text delta; token counts are estimates (request/response character counts divided by four), not authoritative upstream billing usage. The API page now exposes the real upstream settings and usage history.
+
+CI and physical-device acceptance are tracked separately below. Do not mark this branch release-complete until PR checks pass and a real device confirms both ChatGPT upstream modes, model/reasoning options, kit import, usage records, Hook runtime and DSH Agent integration.
+
+
 ## Current verified state
 
 | Area | Evidence | Status |

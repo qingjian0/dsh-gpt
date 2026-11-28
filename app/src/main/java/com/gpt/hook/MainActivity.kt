@@ -640,9 +640,25 @@ private fun DshApp(
                                 val config = JSONObject(current.body).optJSONObject("config")
                                     ?: throw Exception("后端未返回有效 Hook 配置")
                                 val rules = config.optJSONArray("rules") ?: JSONArray()
-                                if (rules.length() >= 64) throw Exception("规则数量已达到上限（64）")
-                                rules.put(rule)
-                                config.put("rules", rules)
+                                val id = rule.optString("id")
+                                if (id.isBlank()) throw Exception("规则 ID 不能为空")
+                                val delete = rule.optBoolean("_delete", false)
+                                val nextRules = JSONArray()
+                                var found = false
+                                for (i in 0 until rules.length()) {
+                                    val existing = rules.optJSONObject(i) ?: continue
+                                    if (existing.optString("id") == id) {
+                                        found = true
+                                        if (!delete) nextRules.put(rule)
+                                    } else {
+                                        nextRules.put(existing)
+                                    }
+                                }
+                                if (!found && !delete) {
+                                    if (nextRules.length() >= 64) throw Exception("规则数量已达到上限（64）")
+                                    nextRules.put(rule)
+                                }
+                                config.put("rules", nextRules)
                                 val response = backend.put("/v1/hook/config", config)
                                 if (response.code !in 200..299) throw Exception("规则提交失败：HTTP ${response.code}")
                                 val status = backend.get("/v1/hook/status")
@@ -662,6 +678,19 @@ private fun DshApp(
                                 state = state.copy(hook = JSONObjectOrEmpty(status.body))
                             } catch (e: Exception) {
                                 notify(e.message ?: "操作失败")
+                            }
+                        }
+                    },
+                    onDiscover = { request ->
+                        scope.launch {
+                            try {
+                                val submitted = backend.post("/v1/hook/discover", request)
+                                if (submitted.code !in 200..299) throw Exception("扫描任务提交失败：HTTP ${submitted.code}")
+                                val status = backend.get("/v1/hook/status")
+                                state = state.copy(hook = JSONObjectOrEmpty(status.body))
+                                notify("扫描任务已提交；等待目标进程执行")
+                            } catch (e: Exception) {
+                                notify(e.message ?: "扫描任务提交失败")
                             }
                         }
                     }

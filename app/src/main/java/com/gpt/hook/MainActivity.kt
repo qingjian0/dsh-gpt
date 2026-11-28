@@ -1301,52 +1301,23 @@ private fun UpstreamConfig(
                     FieldLabel("Session ID（可选）")
                     OutlinedTextField(value = sessionId, onValueChange = { sessionId = it }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                 } else if (proxyMode == "web") {
-                    OutlinedButton(
+                    // 只有一个按钮：点它 → 浏览器授权 → 回调页显示登录成功
+                    Button(
                         modifier = Modifier.fillMaxWidth(),
                         onClick = {
                             com.gpt.hook.api.ChatGptOAuthLogin.start(appContext) { ok, msg ->
                                 importStatus = msg
                                 if (ok) {
-                                    val saved = com.gpt.hook.api.ChatGptCredentialStore.load()
-                                    if (saved != null) webToken = saved.accessToken
+                                    com.gpt.hook.api.ChatGptCredentialStore.load()?.let {
+                                        webToken = it.accessToken
+                                    }
                                 }
                             }
                         },
-                    ) { Text("账号登录（浏览器授权，自动完成）") }
-                    OutlinedButton(
-                        modifier = Modifier.fillMaxWidth(),
-                        onClick = { com.gpt.hook.api.ChatGptWebToken.openHome(appContext) },
-                    ) { Text("打开 ChatGPT（登录）") }
-                    OutlinedButton(
-                        modifier = Modifier.fillMaxWidth(),
-                        onClick = { com.gpt.hook.api.ChatGptWebToken.openSessionPage(appContext) },
-                    ) { Text("打开凭证页（自动落到 accessToken）") }
-                    OutlinedButton(
-                        modifier = Modifier.fillMaxWidth(),
-                        onClick = {
-                            val token = com.gpt.hook.api.ChatGptWebToken.fromClipboard(appContext)
-                            if (token != null) {
-                                webToken = token
-                                importStatus = "已读取 accessToken"
-                            } else {
-                                importStatus = "剪贴板里没有 accessToken"
-                            }
-                        },
-                    ) { Text("从剪贴板读取") }
+                    ) { Text("登录") }
                     if (importStatus.isNotBlank()) {
-                        Text(importStatus, fontSize = 11.sp, color = Color(0xFF2F6FEB))
+                        Text(importStatus, fontSize = 12.sp, color = Color(0xFF2F6FEB))
                     }
-                    Text(
-                        "点第一个按钮，Chrome 会打开 chatgpt.com/api/auth/session（带你的登录态），页面直接显示 accessToken；全选复制后回来自动读取。",
-                        color = Color(0xFFE0A43C), fontSize = 12.sp,
-                    )
-                    FieldLabel("Web Access Token")
-                    OutlinedTextField(
-                        value = webToken, onValueChange = { webToken = it },
-                        modifier = Modifier.fillMaxWidth(), singleLine = true,
-                        visualTransformation = if (revealSecrets) VisualTransformation.None else PasswordVisualTransformation(),
-                        placeholder = { Text("eyJhbGciOi...") }
-                    )
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("显示凭证", Modifier.weight(1f), color = Muted, fontSize = 12.sp)

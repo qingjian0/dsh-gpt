@@ -2,7 +2,9 @@ package com.gpt.hook.api
 
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.BufferedReader
 import java.io.ByteArrayOutputStream
+import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
@@ -82,6 +84,106 @@ internal class ChatGptPlanHttp(
         return parseModels(result.body)
     }
 
+    /**
+     * First-party ChatGPT plan inference. SIWC plan usage must use the public
+     * Responses API with store=false and stream=true; it is not a backend-api relay.
+     */
+    fun streamResponse(
+        accessToken: String,
+        model: String,
+        input: String,
+        onTextDelta: (String) -> Unit = {},
+    ): String {
+        require(accessToken.isNotBlank() && model.isNotBlank() && input.isNotBlank())
+        val connection = connectionFactory(URL("https://api.openai.com/v1/responses"))
+        try {
+            connection.requestMethod = "POST"
+            connection.connectTimeout = CONNECT_TIMEOUT_MS
+            connection.readTimeout = RESPONSE_READ_TIMEOUT_MS
+            connection.instanceFollowRedirects = false
+            connection.doOutput = true
+            connection.setRequestProperty("Authorization", "Bearer $accessToken")
+            connection.setRequestProperty("Content-Type", "application/json")
+            connection.setRequestProperty("Accept", "text/event-stream")
+            val body = JSONObject()
+                .put("model", model)
+                .put("input", JSONArray().put(JSONObject()
+                    .put("role", "user")
+                    .put("content", input)))
+                .put("store", false)
+                .put("stream", true)
+                .toString()
+                .toByteArray(StandardCharsets.UTF_8)
+            connection.setFixedLengthStreamingMode(body.size)
+            connection.outputStream.use { it.write(body) }
+            val status = connection.responseCode
+            if (status !in 200..299) {
+                val error = read(connection)
+                throw IllegalStateException(
+                    "ChatGPT Responses API failed (HTTP ${error.status})" +
+                        error.requestId?.let { ", request_id=$it" }.orEmpty()
+                )
+            }
+            return consumeResponsesSse(
+                BufferedReader(InputStreamReader(connection.inputStream, StandardCharsets.UTF_8)),
+                onTextDelta,
+            )
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    internal fun consumeResponsesSse(
+        reader: BufferedReader,
+        onTextDelta: (String) -> Unit = {},
+    ): String {
+        val output = StringBuilder()
+        val dataLines = ArrayList<String>()
+        var completed = false
+
+        fun dispatch() {
+            if (dataLines.isEmpty()) return
+            val data = dataLines.joinToString("\\n")
+            dataLines.clear()
+            if (data == "[DONE]") return
+            val event = JSONObject(data)
+            when (event.optString("type")) {
+                "response.output_text.delta" -> {
+                    val delta = event.optString("delta")
+                    require(output.length + delta.length <= MAX_OUTPUT_CHARS) {
+                        "ChatGPT response exceeds the output size limit"
+                    }
+                    output.append(delta)
+                    onTextDelta(delta)
+                }
+                "response.completed" -> completed = true
+                "response.failed" -> {
+                    val error = event.optJSONObject("response")?.optJSONObject("error")
+                    throw IllegalStateException(
+                        "ChatGPT response failed: ${error?.optString("code")?.takeIf { it.isNotBlank() } ?: "unknown_error"}"
+                    )
+                }
+                "response.incomplete" ->
+                    throw IllegalStateException("ChatGPT response was incomplete")
+                "error" ->
+                    throw IllegalStateException("ChatGPT stream returned an error event")
+            }
+        }
+
+        while (true) {
+            val line = reader.readLine() ?: break
+            require(line.length <= MAX_SSE_LINE_BYTES) { "ChatGPT stream event exceeds the line size limit" }
+            if (line.isEmpty()) {
+                dispatch()
+            } else if (line.startsWith("data:")) {
+                dataLines += line.removePrefix("data:").trimStart()
+            }
+        }
+        dispatch()
+        require(completed) { "ChatGPT stream ended without response.completed" }
+        return output.toString()
+    }
+
     fun parseModels(raw: String): List<Model> {
         val models = JSONObject(raw).optJSONArray("models")
             ?: throw IllegalArgumentException("ChatGPT returned an invalid model catalog")
@@ -156,5 +258,8 @@ internal class ChatGptPlanHttp(
         const val CONNECT_TIMEOUT_MS = 15_000
         const val READ_TIMEOUT_MS = 30_000
         const val MAX_RESPONSE_BYTES = 1_048_576
+        const val RESPONSE_READ_TIMEOUT_MS = 120_000
+        const val MAX_SSE_LINE_BYTES = 1_048_576
+        const val MAX_OUTPUT_CHARS = 200_000
     }
 }

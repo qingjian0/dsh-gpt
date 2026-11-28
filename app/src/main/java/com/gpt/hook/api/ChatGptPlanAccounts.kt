@@ -150,6 +150,37 @@ internal fun ChatGptPlanAccounts(context: Context) {
                 },
                 shape = RoundedCornerShape(12.dp),
             ) { Text("测试 ChatGPT API 并刷新模型") }
+            OutlinedButton(
+                enabled = !busy && activeProfile?.canUseChatGptPlan == true,
+                modifier = Modifier.fillMaxWidth(),
+                onClick = {
+                    val selected = activeProfile ?: return@OutlinedButton
+                    scope.launch {
+                        busy = true
+                        try {
+                            val usable = withContext(Dispatchers.IO) {
+                                sessionManager.getUsableProfile(store, selected.id)
+                            }
+                            val model = withContext(Dispatchers.IO) {
+                                http.listModels(requireNotNull(usable.accessToken)).firstOrNull()
+                            } ?: throw IllegalStateException("该账号没有可用的可见模型")
+                            val output = withContext(Dispatchers.IO) {
+                                http.streamResponse(
+                                    requireNotNull(usable.accessToken),
+                                    model.slug,
+                                    "请只回复：DSH GPT SIWC inference OK",
+                                )
+                            }
+                            status = "真实推理成功 · ${model.displayName} · ${output.take(120)}"
+                        } catch (error: Throwable) {
+                            status = "真实推理失败：${error.message ?: error.javaClass.simpleName}"
+                        } finally {
+                            busy = false
+                        }
+                    }
+                },
+                shape = RoundedCornerShape(12.dp),
+            ) { Text("执行一次真实 Responses API 测试") }
             Button(
                 enabled = !busy,
                 modifier = Modifier.fillMaxWidth(),

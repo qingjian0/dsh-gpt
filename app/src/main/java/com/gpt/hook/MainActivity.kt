@@ -1984,13 +1984,12 @@ private fun HookPage(
                     Button(onClick = { onDiscover(JSONObject().put("prefix", prefix.trim()).put("limit", 100).put("cursor", 0)) }, enabled = prefix.startsWith("com.openai.") && prefix.length <= 180, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.Search, null); Text("开始扫描") }
                 }
             }
-            val startupResult = hook.optJSONObject("startupDiscoveryResult") ?: JSONObject()
             item {
                 CardBlock {
                     Text("启动时发现", fontWeight = FontWeight.SemiBold)
                     StatusValue("更新时间", hook.optLong("startupDiscoveryUpdatedAtMs", 0L).toString())
-                    StatusValue("发现类数", (startupResult.optJSONArray("classes")?.length() ?: 0).toString())
-                    if (startupResult.optBoolean("ok", false)) Text("启动发现结果已上报。", color = Muted, fontSize = 11.sp)
+                    StatusValue("发现类数", hook.optInt("startupDiscoveryClassCount", 0).toString())
+                    if (hook.optBoolean("startupDiscoveryAvailable", false)) Text("启动发现结果已上报，可通过启动发现接口读取详情。", color = Muted, fontSize = 11.sp)
                     else Text("尚无可用的启动发现结果。", color = Muted, fontSize = 11.sp)
                 }
             }

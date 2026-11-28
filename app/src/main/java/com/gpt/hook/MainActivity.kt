@@ -40,6 +40,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import com.gpt.hook.api.ApiService
 import com.gpt.hook.api.ChatGptPlanAccounts
+import com.gpt.hook.api.ChatGptPlanProfileStore
 import com.gpt.hook.api.RelayConfig
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp

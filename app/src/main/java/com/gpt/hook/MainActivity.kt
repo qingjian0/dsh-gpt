@@ -15,6 +15,8 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -1899,7 +1901,7 @@ private fun HookPage(
             }
         }
         item {
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
                 listOf("总览", "内置 Hook", "动态 Hook", "类发现", "事件", "诊断").forEach { name ->
                     FilterChip(selected = section == name, onClick = { section = name }, label = { Text(name, fontSize = 10.sp) })
                 }
@@ -1982,6 +1984,16 @@ private fun HookPage(
                     Button(onClick = { onDiscover(JSONObject().put("prefix", prefix.trim()).put("limit", 100).put("cursor", 0)) }, enabled = prefix.startsWith("com.openai.") && prefix.length <= 180, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.Search, null); Text("开始扫描") }
                 }
             }
+            val startupResult = hook.optJSONObject("startupDiscoveryResult") ?: JSONObject()
+            item {
+                CardBlock {
+                    Text("启动时发现", fontWeight = FontWeight.SemiBold)
+                    StatusValue("更新时间", hook.optLong("startupDiscoveryUpdatedAtMs", 0L).toString())
+                    StatusValue("发现类数", (startupResult.optJSONArray("classes")?.length() ?: 0).toString())
+                    if (startupResult.optBoolean("ok", false)) Text("启动发现结果已上报。", color = Muted, fontSize = 11.sp)
+                    else Text("尚无可用的启动发现结果。", color = Muted, fontSize = 11.sp)
+                }
+            }
             item {
                 CardBlock {
                     Text("最近扫描任务", fontWeight = FontWeight.SemiBold)
@@ -2016,14 +2028,34 @@ private fun HookPage(
                 items(classes.length()) { index ->
                     val item = classes.optJSONObject(index) ?: JSONObject()
                     val className = item.optString("className")
+                    val methods = item.optJSONArray("methods") ?: JSONArray()
+                    val inherited = item.optJSONArray("inheritedMethods") ?: JSONArray()
+                    val constructors = item.optJSONArray("constructors") ?: JSONArray()
+                    val fields = item.optJSONArray("fields") ?: JSONArray()
                     CardBlock {
                         Text(className, fontWeight = FontWeight.SemiBold)
-                        StatusValue("声明方法", (item.optJSONArray("methods")?.length() ?: 0).toString())
-                        StatusValue("继承方法", (item.optJSONArray("inheritedMethods")?.length() ?: 0).toString())
-                        StatusValue("构造器", (item.optJSONArray("constructors")?.length() ?: 0).toString())
-                        StatusValue("字段", (item.optJSONArray("fields")?.length() ?: 0).toString())
+                        StatusValue("声明方法", methods.length().toString())
+                        StatusValue("继承方法", inherited.length().toString())
+                        StatusValue("构造器", constructors.length().toString())
+                        StatusValue("字段", fields.length().toString())
+                        if (methods.length() > 0) {
+                            Text("声明方法签名", fontWeight = FontWeight.SemiBold, fontSize = 11.sp)
+                            for (methodIndex in 0 until minOf(methods.length(), 20)) Text(methods.optString(methodIndex), fontSize = 10.sp, color = Muted)
+                        }
+                        if (inherited.length() > 0) {
+                            Text("继承方法", fontWeight = FontWeight.SemiBold, fontSize = 11.sp)
+                            for (methodIndex in 0 until minOf(inherited.length(), 10)) Text(inherited.optString(methodIndex), fontSize = 10.sp, color = Muted)
+                        }
+                        if (constructors.length() > 0) {
+                            Text("构造器", fontWeight = FontWeight.SemiBold, fontSize = 11.sp)
+                            for (methodIndex in 0 until minOf(constructors.length(), 10)) Text(constructors.optString(methodIndex), fontSize = 10.sp, color = Muted)
+                        }
+                        if (fields.length() > 0) {
+                            Text("字段", fontWeight = FontWeight.SemiBold, fontSize = 11.sp)
+                            for (fieldIndex in 0 until minOf(fields.length(), 20)) Text(fields.optString(fieldIndex), fontSize = 10.sp, color = Muted)
+                        }
                         if (item.optBoolean("metadataTruncated", false)) Text("此类的成员元数据已截断。", color = MaterialTheme.colorScheme.error, fontSize = 11.sp)
-                        TextButton(onClick = { onDiscover(JSONObject().put("className", className).put("limit", 100).put("cursor", 0)) }) { Text("检查该类成员") }
+                        TextButton(onClick = { onDiscover(JSONObject().put("className", className).put("limit", 100).put("cursor", 0)) }) { Text("重新检查该类") }
                     }
                 }
                 val candidates = discoveryResult.optJSONArray("candidateProposals") ?: JSONArray()

@@ -127,9 +127,8 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                     cfg.apiKey.isBlank() -> json(out, 503, err("configuration_required", "configure a gateway API key before using protected API routes"))
                     !authorized(headers) -> json(out, 401, err("invalid_api_key", "missing or bad Authorization"))
                     target == "/v1/request-dump" -> requestDumpRoute(out, method, body)
-                    target == "/v1/models" && method == "GET" -> {
-                        else json(out, 200, OpenAiCompat.modelsJson(OpenAiCompat.DEFAULT_MODELS))
-                    }
+                    target == "/v1/models" && method == "GET" ->
+                        json(out, 200, OpenAiCompat.modelsJson(OpenAiCompat.DEFAULT_MODELS))
                     target == "/v1/capabilities" && method == "GET" ->
                         json(out, 200, OpenAiCompat.capabilitiesJson())
                     // MCP 通道：不消耗每小时消息额度，可直接调工具/读网页
@@ -550,13 +549,10 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
     }
 
     private fun codexAccountId(): String =
-        runCatching { ChatGptOAuth.claimAccountId(ChatGptCredentialStore.load()!!.accessToken) }.getOrDefault("")
+        runCatching { ChatGptCredentialStore.load()?.accountId.orEmpty() }.getOrDefault("")
 
-        /**
-     * SIWC uses only the public Responses API. This deliberately accepts text-only
-     * input and rejects storage/tool features that this gateway cannot faithfully relay.
-     */
-        private fun responses(out: OutputStream, body: ByteArray, headers: Map<String, String>) {
+    /** Responses 入口：text-only，拒绝本网关无法忠实转发的字段。 */
+    private fun responses(out: OutputStream, body: ByteArray, headers: Map<String, String>) {
         val request = try { JSONObject(String(body, Charsets.UTF_8)) } catch (t: Throwable) {
             json(out, 400, err("invalid_request", "body is not JSON")); return
         }

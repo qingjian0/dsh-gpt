@@ -39,7 +39,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import com.gpt.hook.api.ApiService
-import com.gpt.hook.api.ChatGptPlanProfileStore
 import com.gpt.hook.api.RelayConfig
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -1383,9 +1382,6 @@ private fun UpstreamConfig(
                     onClick = {
                         onSave(initialConfig.copy(
                             proxyMode = proxyMode,
-                            siwcProfileId = if (proxyMode == "siwc")
-                                ChatGptPlanProfileStore(appContext).snapshot().activeProfileId.orEmpty()
-                            else initialConfig.siwcProfileId,
                             accessToken = hookToken.trim(), oaiDid = did.trim(), sessionId = sessionId.trim(),
                             webAccessToken = webToken.trim(), webSessionToken = webSession.trim(),
                             connectorId = connector.trim(), model = model,

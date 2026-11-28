@@ -131,7 +131,8 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                         if (cfg.proxyMode == "siwc") siwcModels(out)
                         else json(out, 200, OpenAiCompat.modelsJson(OpenAiCompat.DEFAULT_MODELS))
                     }
-                    target == "/v1/capabilities" && method == "GET" -> json(out, 200, OpenAiCompat.capabilitiesJson())
+                    target == "/v1/capabilities" && method == "GET" ->
+                        json(out, 200, if (cfg.proxyMode == "siwc") siwcCapabilitiesJson() else OpenAiCompat.capabilitiesJson())
                     // MCP 通道：不消耗每小时消息额度，可直接调工具/读网页
                     target == "/v1/status" && method == "GET" -> statusRoute(out)
                     target == "/v1/config" -> configRoute(out, method, body)
@@ -559,6 +560,23 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         require(profile.canUseChatGptPlan) { "Selected ChatGPT account is not authorized for direct plan usage" }
         return profile
     }
+
+    private fun siwcCapabilitiesJson(): String = JSONObject()
+        .put("object", "dsh.capabilities")
+        .put("chat_completions", false)
+        .put("responses", true)
+        .put("streaming", true)
+        .put("conversations", false)
+        .put("hook_control", true)
+        .put("tool_calling", false)
+        .put("upstream", "OpenAI Responses API via SIWC")
+        .put("modalities", JSONArray().put("text"))
+        .put("unsupported", JSONArray()
+            .put("chat_completions").put("tool_calling").put("structured_output")
+            .put("image_input").put("audio_input").put("audio_output")
+            .put("video_input").put("file_input").put("previous_response_id")
+            .put("mcp_backend_api").put("chatgpt_web_reader"))
+        .toString()
 
     private fun siwcModels(out: OutputStream) {
         try {

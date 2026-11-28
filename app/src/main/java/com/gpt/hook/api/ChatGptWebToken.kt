@@ -13,7 +13,11 @@ import org.json.JSONObject
  */
 object ChatGptWebToken {
 
-    const val SESSION_URL = "https://chatgpt.com/api/auth/session"
+    /**
+     * 官方网页登录入口。未登录时先走登录流程，完成后落到 callback_path；
+     * 这里指到 /api/auth/session，于是最终页面直接是含 accessToken 的 JSON。
+     */
+    const val SESSION_URL = "https://chatgpt.com/auth/login_with?callback_path=%2Fapi%2Fauth%2Fsession"
 
     fun openSessionPage(context: Context): Boolean {
         val viaTabs = runCatching {

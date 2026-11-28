@@ -41,6 +41,24 @@ internal fun ChatGptPlanAccounts(context: Context) {
     var busy by remember { mutableStateOf(ChatGptPlanLoginRegistry.inFlight) }
     var status by remember { mutableStateOf(ChatGptPlanLoginRegistry.lastStatus ?: "尚未读取账号状态") }
 
+    // App 内 WebView 登录的结果回调：完全不依赖端口与进程保活。
+    val webLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
+    ) {
+        busy = false
+        val profile = ChatGptPlanWebLoginSession.profile
+        if (profile != null) {
+            status = "授权成功：" + (profile.email ?: profile.subject)
+            scope.launch {
+                reload()
+                syncGatewayProfile()
+            }
+        } else {
+            status = "授权未完成：" + (ChatGptPlanWebLoginSession.error ?: "已取消")
+        }
+        ChatGptPlanWebLoginSession.clear()
+    }
+
     suspend fun reload() {
         try {
             val snapshot = withContext(Dispatchers.IO) { store.snapshot() }
@@ -65,6 +83,19 @@ internal fun ChatGptPlanAccounts(context: Context) {
                 RelayConfig.save(context, current.copy(siwcProfileId = activeId))
             }
             if (current.enabled) ApiService.start(context)
+        }
+    }
+
+    /** App 内 WebView 登录：全程不跳出应用，成功后 Activity 自己关闭。 */
+    fun startWebLogin(selectedProfileId: String?, forceNewRegistration: Boolean = false) {
+        try {
+            val intent = coordinator.beginWebIntent(context, selectedProfileId, forceNewRegistration)
+            busy = true
+            status = "在应用内完成 ChatGPT 授权…"
+            webLauncher.launch(intent)
+        } catch (error: Throwable) {
+            status = "无法启动应用内登录：${error.message ?: error.javaClass.simpleName}"
+            busy = false
         }
     }
 
@@ -248,9 +279,15 @@ internal fun ChatGptPlanAccounts(context: Context) {
             Button(
                 enabled = !busy,
                 modifier = Modifier.fillMaxWidth(),
+                onClick = { startWebLogin(null, forceNewRegistration = true) },
+                shape = RoundedCornerShape(12.dp),
+            ) { Text(if (busy) "正在等待授权…" else "应用内登录（推荐）") }
+            OutlinedButton(
+                enabled = !busy,
+                modifier = Modifier.fillMaxWidth(),
                 onClick = { startLogin(null, forceNewRegistration = true) },
                 shape = RoundedCornerShape(12.dp),
-            ) { Text(if (busy) "正在等待授权…" else "添加另一个 ChatGPT 账号") }
+            ) { Text("改用系统浏览器登录") }
             Spacer(Modifier.height(2.dp))
         }
     }

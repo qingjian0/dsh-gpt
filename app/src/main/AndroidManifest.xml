@@ -39,6 +39,11 @@
             android:name=".api.ChatGptPlanLoginWaitService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+        <activity
+            android:name=".api.ChatGptPlanWebLoginActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar" />
         <provider
             android:name=".ObservationProvider"
             android:authorities="com.gpt.hook.observations"

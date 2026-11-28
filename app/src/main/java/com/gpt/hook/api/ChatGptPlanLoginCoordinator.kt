@@ -49,6 +49,43 @@ internal class ChatGptPlanLoginCoordinator(
         }
     }
 
+    /**
+     * App 内 WebView 登录：只创建 attempt 与授权 URL，不绑定任何监听端口。
+     * 回调由 [ChatGptPlanWebLoginActivity] 在 WebView 内拦截，因此
+     * 不存在「进程被冻结、socket 不再 accept」的问题，也不需要前台服务保活。
+     */
+    fun beginWebIntent(
+        context: Context,
+        selectedProfileId: String? = null,
+        forceNewRegistration: Boolean = false,
+    ): android.content.Intent {
+        val store = ChatGptPlanProfileStore(context)
+        val previous = selectedProfileId?.let { id ->
+            store.snapshot().profiles.firstOrNull { it.id == id }
+                ?: throw IllegalArgumentException("Selected ChatGPT profile was not found")
+        }
+        val savedRegistration = when {
+            forceNewRegistration -> null
+            previous != null -> previous.clientId
+            else -> store.pendingClientId()
+        }
+        // 端口只为了让 redirect_uri 合法；WebView 在请求发出前就截获它，端口不会被真正监听。
+        val probe = java.net.ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1"))
+        val port = probe.use { it.localPort }
+        val attempt = ChatGptPlanOAuth.createAttempt(
+            "http://127.0.0.1:$port/auth/callback",
+            store.hostId(),
+            savedRegistration,
+        )
+        val url = ChatGptPlanOAuth.buildAuthorizationUrl(
+            attempt = attempt,
+            appName = APP_NAME,
+            idTokenHint = previous?.idToken,
+            loginHint = previous?.email,
+        )
+        return ChatGptPlanWebLoginActivity.intent(context, url, attempt, store, http, previous)
+    }
+
     internal class PendingLogin(
         private val listener: ChatGptPlanLoopbackServer,
         private val store: ChatGptPlanProfileStore,

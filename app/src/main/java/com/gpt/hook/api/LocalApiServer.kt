@@ -211,6 +211,7 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                 .put("discoveryTask", taskRaw?.let { JSONObject(it) } ?: JSONObject.NULL)
                 .put("discoveryResult", state.getString(ObservationProvider.KEY_DISCOVERY_RESULT)?.let { JSONObject(it) } ?: JSONObject.NULL)
                 .put("startupDiscoveryUpdatedAtMs", state.getLong(ObservationProvider.KEY_STARTUP_DISCOVERY_UPDATED, 0L))
+                .put("startupDiscoveryResult", state.getString(ObservationProvider.KEY_STARTUP_DISCOVERY)?.let { JSONObject(it) } ?: JSONObject.NULL)
             json(out, 200, result.toString())
         } catch (t: Throwable) {
             json(out, 503, err("hook_control_unavailable", t.message ?: "Hook status unavailable"))

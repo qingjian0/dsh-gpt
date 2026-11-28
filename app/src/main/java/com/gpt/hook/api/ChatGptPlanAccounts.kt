@@ -51,7 +51,12 @@ internal fun ChatGptPlanAccounts(context: Context) {
     }
 
     suspend fun syncGatewayProfile() {
-        val activeId = withContext(Dispatchers.IO) { store.snapshot().activeProfileId.orEmpty() }
+        val activeId = withContext(Dispatchers.IO) {
+            val snapshot = store.snapshot()
+            snapshot.profiles.firstOrNull {
+                it.id == snapshot.activeProfileId && it.canUseChatGptPlan
+            }?.id.orEmpty()
+        }
         val current = withContext(Dispatchers.IO) { RelayConfig.load(context) }
         if (current.proxyMode == "siwc") {
             withContext(Dispatchers.IO) {
@@ -155,6 +160,7 @@ internal fun ChatGptPlanAccounts(context: Context) {
                                             sessionManager.signOut(store, profile.id)
                                         }
                                         reload()
+                                        syncGatewayProfile()
                                         status = if (revoked) {
                                             "已退出账号，OpenAI 已确认撤销会话"
                                         } else {

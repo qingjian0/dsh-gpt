@@ -1,12 +1,8 @@
 /**
  * DSH Agent tools for the standalone dsh-gpt LSPosed module.
  *
- * Reads the API endpoint and key from:
- *   $DSH_HOME/config/dsh-gpt-hook.json
- * {
- *   "baseUrl": "http://127.0.0.1:8766",
- *   "apiKey": "<dsh-gpt local API key>"
- * }
+ * Reads the endpoint and API key from the engine environment. DSH injects
+ * the key only after decrypting its Android-Keystore-backed app-private value.
  *
  * This adapter never calls the retired 3083 DSH Bridge.
  */
@@ -25,25 +21,17 @@ const REQUEST_TIMEOUT_MS = 10000;
 const MAX_DISCOVERY_LIMIT = 200;
 
 function readConnectionConfig() {
-  const home = process.env.DSH_HOME;
-  if (!home) throw new Error("DSH_HOME is unavailable; Hook Agent is not configured");
-  const file = path.join(home, "config", "dsh-gpt-hook.json");
-  let parsed;
-  try {
-    parsed = JSON.parse(fs.readFileSync(file, "utf8"));
-  } catch {
-    throw new Error("dsh-gpt Hook connection config is missing or invalid");
-  }
-  const base = new URL(String(parsed.baseUrl || "http://127.0.0.1:8766"));
+  const base = new URL(process.env.DSH_GPT_HOOK_BASE_URL || "http://127.0.0.1:8766");
   const loopback = base.hostname === "127.0.0.1" || base.hostname === "localhost" ||
     base.hostname === "[::1]" || base.hostname === "::1";
   if (base.protocol !== "http:" || !loopback || base.username || base.password ||
       base.pathname !== "/" || base.search || base.hash) {
     throw new Error("Hook API must use a plain HTTP loopback URL");
   }
-  const apiKey = typeof parsed.apiKey === "string" ? parsed.apiKey.trim() : "";
-  if (apiKey.length < 16 || apiKey.length > 512 || /[\r\n]/.test(apiKey)) {
-    throw new Error("dsh-gpt API key is missing or invalid");
+  const apiKey = typeof process.env.DSH_GPT_HOOK_API_KEY === "string"
+    ? process.env.DSH_GPT_HOOK_API_KEY.trim() : "";
+  if (apiKey.length < 16 || apiKey.length > 512 || /[\\r\\n]/.test(apiKey)) {
+    throw new Error("dsh-gpt API key is missing or invalid; configure it in DSH Developer Options");
   }
   return { baseUrl: base.origin, apiKey };
 }

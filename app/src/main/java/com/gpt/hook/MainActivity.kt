@@ -177,6 +177,9 @@ private class Backend(
     suspend fun put(path: String, body: JSONObject): ApiResponse =
         request("PUT", path, body.toString())
 
+    suspend fun delete(path: String): ApiResponse =
+        request("DELETE", path, null)
+
     private suspend fun request(
         method: String,
         path: String,
@@ -242,6 +245,7 @@ private data class AppState(
     val resources: JSONArray = JSONArray(),
     val hook: JSONObject = JSONObject(),
     val events: JSONArray = JSONArray(),
+    val requestDump: JSONObject = JSONObject(),
     val usage: JSONObject = JSONObject(),
     val latency: List<LatencyPoint> = emptyList(),
     val history: List<ToolCallRecord> = emptyList(),
@@ -292,6 +296,7 @@ private fun DshApp(
             val health = backend.get("/health")
             val models = backend.get("/v1/models")
             val hook = backend.get("/v1/hook/status")
+            val requestDump = backend.get("/v1/request-dump")
             val usage = backend.get("/v1/usage")
 
             state = state.copy(
@@ -299,6 +304,7 @@ private fun DshApp(
                 health = JSONObjectOrEmpty(health.body),
                 models = if (models.code in 200..299) extractArray(models.body, "data", "models") else JSONArray(),
                 hook = if (hook.code in 200..299) JSONObjectOrEmpty(hook.body) else JSONObject().put("statusUnavailable", true).put("error", "HTTP ${hook.code}"),
+                requestDump = if (requestDump.code in 200..299) JSONObjectOrEmpty(requestDump.body) else JSONObject().put("available", false).put("error", "HTTP ${requestDump.code}"),
                 usage = JSONObjectOrEmpty(usage.body),
                 loading = false
             )
@@ -619,14 +625,41 @@ private fun DshApp(
                 3 -> HookPage(
                     hook = state.hook,
                     events = state.events,
+                    requestDump = state.requestDump,
+                    onSetDumpEnabled = { enabled ->
+                        scope.launch {
+                            try {
+                                val result = backend.put("/v1/request-dump", JSONObject().put("enabled", enabled))
+                                if (result.code !in 200..299) throw Exception("请求抓取设置失败：HTTP ${result.code}")
+                                state = state.copy(requestDump = JSONObjectOrEmpty(result.body))
+                                notify(if (enabled) "请求抓取已启用" else "请求抓取已关闭")
+                            } catch (e: Exception) {
+                                notify(e.message ?: "请求抓取设置失败")
+                            }
+                        }
+                    },
+                    onClearDump = {
+                        scope.launch {
+                            try {
+                                val result = backend.delete("/v1/request-dump")
+                                if (result.code !in 200..299) throw Exception("清理请求记录失败：HTTP ${result.code}")
+                                state = state.copy(requestDump = JSONObjectOrEmpty(result.body))
+                                notify("请求记录已清理")
+                            } catch (e: Exception) {
+                                notify(e.message ?: "清理失败")
+                            }
+                        }
+                    },
                     onRefresh = {
                         scope.launch {
                             try {
                                 val result = backend.get("/v1/hook/status")
                                 val eventResult = backend.get("/v1/hook/events")
+                                val dumpResult = backend.get("/v1/request-dump")
                                 state = state.copy(
                                     hook = if (result.code in 200..299) JSONObjectOrEmpty(result.body) else JSONObject().put("statusUnavailable", true).put("error", "HTTP ${result.code}"),
-                                    events = extractArray(eventResult.body, "events", "data")
+                                    events = extractArray(eventResult.body, "events", "data"),
+                                    requestDump = if (dumpResult.code in 200..299) JSONObjectOrEmpty(dumpResult.body) else JSONObject().put("available", false).put("error", "HTTP ${dumpResult.code}")
                                 )
                                 notify("Hook 状态已更新")
                             } catch (e: Exception) {
@@ -1811,6 +1844,9 @@ private fun ToolHistoryPage(history: List<ToolCallRecord>) {
 private fun HookPage(
     hook: JSONObject,
     events: JSONArray,
+    requestDump: JSONObject,
+    onSetDumpEnabled: (Boolean) -> Unit,
+    onClearDump: () -> Unit,
     onRefresh: () -> Unit,
     onSaveRule: (JSONObject) -> Unit,
     onSetEnabled: (Boolean) -> Unit,
@@ -1902,7 +1938,7 @@ private fun HookPage(
         }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
-                listOf("总览", "内置 Hook", "动态 Hook", "类发现", "事件", "诊断").forEach { name ->
+                listOf("总览", "内置 Hook", "动态 Hook", "类发现", "事件", "请求抓取", "诊断").forEach { name ->
                     FilterChip(selected = section == name, onClick = { section = name }, label = { Text(name, fontSize = 10.sp) })
                 }
             }
@@ -2095,6 +2131,44 @@ private fun HookPage(
                     StatusValue("耗时", "${event.optLong("elapsedMs", event.optLong("durationMs", 0L))} ms")
                     StatusValue("异常", event.optString("exception", "无"))
                     StatusValue("时间", event.optString("timestamp", "—"))
+                }
+            }
+        }
+        if (section == "请求抓取") {
+            val dumpEnabled = requestDump.optBoolean("enabled", false)
+            val dumpRecords = requestDump.optJSONArray("records") ?: JSONArray()
+            item {
+                CardBlock {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("请求抓取", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                            Text("默认关闭 · 仅记录网关请求，不采集认证请求头", color = Muted, fontSize = 11.sp)
+                        }
+                        Switch(checked = dumpEnabled, onCheckedChange = onSetDumpEnabled)
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+                    StatusValue("当前状态", if (dumpEnabled) "已启用" else "已关闭")
+                    StatusValue("记录数量", "${dumpRecords.length()} / ${requestDump.optInt("maxRecords", 50)}")
+                    StatusValue("保留时间", "${requestDump.optInt("retentionHours", 24)} 小时")
+                    Text("只抓取 /v1/chat/completions、/v1/responses 和 /backend-api/ 请求。请求体会递归脱敏凭证字段并截断；不记录 Authorization、Cookie 等请求头。", color = Muted, fontSize = 11.sp)
+                    Text("提示：请求正文可能包含你的对话内容。仅在需要排查问题时开启，完成后建议关闭并清理。", color = MaterialTheme.colorScheme.error, fontSize = 11.sp)
+                    TextButton(onClick = onClearDump, enabled = dumpRecords.length() > 0) { Text("清空全部记录") }
+                }
+            }
+            if (dumpRecords.length() == 0) {
+                item { CardBlock { Text(if (dumpEnabled) "等待下一次网关请求" else "暂无请求记录"); Text("启用后，新进入的请求会出现在这里。", color = Muted, fontSize = 12.sp) } }
+            } else {
+                items((0 until dumpRecords.length()).mapNotNull { dumpRecords.optJSONObject(it) }.reversed()) { record ->
+                    CardBlock {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(record.optString("method", "POST"), fontWeight = FontWeight.Bold)
+                            Text(record.optString("path", ""), color = Muted, fontSize = 11.sp, modifier = Modifier.weight(1f))
+                        }
+                        StatusValue("时间", record.optLong("timestamp", 0L).toString())
+                        StatusValue("类型", record.optString("contentType", "未知"))
+                        if (record.optBoolean("bodyTruncated", false)) Text("正文预览已截断", color = MaterialTheme.colorScheme.error, fontSize = 10.sp)
+                        Text(record.optString("body", "").ifBlank { "（空请求体）" }, fontSize = 10.sp, color = Muted)
+                    }
                 }
             }
         }

@@ -121,6 +121,7 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
                     cfg.apiKey.isBlank() -> json(out, 503, err("configuration_required", "configure a gateway API key before using protected API routes"))
                     !authorized(headers) -> json(out, 401, err("invalid_api_key", "missing or bad Authorization"))
                     target == "/v1/models" -> json(out, 200, OpenAiCompat.modelsJson(OpenAiCompat.DEFAULT_MODELS))
+                    target == "/v1/capabilities" && method == "GET" -> json(out, 200, OpenAiCompat.capabilitiesJson())
                     // MCP 通道：不消耗每小时消息额度，可直接调工具/读网页
                     // Codex 通道：模型名 codex-* 时走 /backend-api/codex/responses
                     target == "/v1/codex/status" && method == "GET" -> json(out, 200,
@@ -503,6 +504,9 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
         val request = try { JSONObject(String(body, Charsets.UTF_8)) } catch (t: Throwable) {
             json(out, 400, err("invalid_request", "body is not JSON")); return
         }
+        OpenAiCompat.unsupportedResponsesFeature(request)?.let {
+            json(out, 400, err("unsupported_feature", it)); return
+        }
         val messages = org.json.JSONArray()
         val instructions = request.optString("instructions").trim()
         if (instructions.isNotEmpty()) messages.put(JSONObject().put("role", "system").put("content", instructions))
@@ -570,6 +574,9 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
     ) {
         val req = try { JSONObject(String(body, Charsets.UTF_8)) } catch (t: Throwable) {
             json(out, 400, err("invalid_request", "body is not JSON")); return
+        }
+        OpenAiCompat.unsupportedChatFeature(req)?.let {
+            json(out, 400, err("unsupported_feature", it)); return
         }
         val caller = callerId(headers)
         val model = req.optString("model", "auto").ifBlank { "auto" }

@@ -44,4 +44,11 @@ The loopback listener accepts only local connections and bounds request-line/hea
 
 The account vault, browser login, model catalog request, explicit Responses API smoke test, refresh, and sign-out lifecycle are implemented in the SIWC development branch.
 
-This remains a separate account/API test path. It is not yet wired as a selectable upstream mode in the local OpenAI-compatible gateway. The Android DPoP and Web gateway paths remain unchanged until a separately tested Responses-compatible gateway adapter is implemented.
+The local gateway now has a selectable `siwc` upstream mode:
+
+- `GET /v1/models` refreshes the selected profile when needed and maps the official model catalog to an OpenAI-style model list.
+- `POST /v1/responses` uses the official Responses API, forces `store=false` and upstream `stream=true`, and supports text-only input. Local non-stream requests are buffered into a completed response; local stream requests receive Responses-style SSE events.
+- `POST /v1/chat/completions` is explicitly rejected in SIWC mode rather than silently routed through another protocol.
+- `/backend-api/*` is explicitly blocked in SIWC mode. Existing Android DPoP and Web modes retain their previous routes.
+
+The adapter is intentionally text-only and does not claim full Responses API feature parity: tools, structured output, and multimodal input are rejected. CI and device acceptance remain separate gates; real-device OAuth, model listing, streaming, and account switching still require validation on an Android device.

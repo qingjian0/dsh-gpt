@@ -1277,7 +1277,7 @@ private fun UpstreamConfig(
                     FilterChip(
                         selected = proxyMode == "web",
                         onClick = { proxyMode = "web" },
-                        label = { Text("网页版 API") }
+                        label = { Text("网页会话（手动凭证）") }
                     )
                     FilterChip(
                         selected = proxyMode == "siwc",
@@ -1298,6 +1298,10 @@ private fun UpstreamConfig(
                     FieldLabel("Session ID（可选）")
                     OutlinedTextField(value = sessionId, onValueChange = { sessionId = it }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                 } else if (proxyMode == "web") {
+                    Text(
+                        "兼容旧版 ChatGPT 网页会话：需要手动提供凭证，不提供网页登录后自动提取。网页 backend-api 属于非公开接口，可能随时变化。若要通过 ChatGPT 账号登录并使用订阅授权，请选择「ChatGPT 订阅授权（SIWC）」并在上方账号管理中登录。",
+                        color = Color(0xFFE0A43C), fontSize = 12.sp
+                    )
                     FieldLabel("Web Access Token")
                     OutlinedTextField(
                         value = webToken, onValueChange = { webToken = it },

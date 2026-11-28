@@ -33,6 +33,10 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import com.gpt.hook.api.ApiService
+import com.gpt.hook.api.RelayConfig
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
@@ -58,6 +62,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         val prefs = getSharedPreferences("dsh_gpt", MODE_PRIVATE)
+        val relayConfig = RelayConfig.load(this)
 
         setContent {
             val dark = remember {
@@ -69,11 +74,16 @@ class MainActivity : ComponentActivity() {
                     context = this,
                     baseUrl = prefs.getString("base_url", "http://127.0.0.1:8766") ?: "",
                     initialKey = prefs.getString("api_key", "") ?: "",
+                    initialRelayConfig = relayConfig,
                     onConfigChange = { url, key ->
                         prefs.edit()
                             .putString("base_url", url)
                             .putString("api_key", key)
                             .apply()
+                    },
+                    onRelayConfigChange = { next ->
+                        RelayConfig.save(this, next)
+                        ApiService.start(this)
                     },
                     dark = dark.value,
                     onDarkChange = {
@@ -230,6 +240,7 @@ private data class AppState(
     val resources: JSONArray = JSONArray(),
     val hook: JSONObject = JSONObject(),
     val events: JSONArray = JSONArray(),
+    val usage: JSONObject = JSONObject(),
     val latency: List<LatencyPoint> = emptyList(),
     val history: List<ToolCallRecord> = emptyList(),
     val loading: Boolean = false,
@@ -241,12 +252,15 @@ private fun DshApp(
     context: Context,
     baseUrl: String,
     initialKey: String,
+    initialRelayConfig: RelayConfig,
     onConfigChange: (String, String) -> Unit,
+    onRelayConfigChange: (RelayConfig) -> Unit,
     dark: Boolean,
     onDarkChange: (Boolean) -> Unit
 ) {
     var endpoint by remember { mutableStateOf(baseUrl) }
     var apiKey by remember { mutableStateOf(initialKey) }
+    var relayConfig by remember { mutableStateOf(initialRelayConfig) }
     var currentTab by remember { mutableIntStateOf(0) }
     var state by remember { mutableStateOf(AppState()) }
     var configExpanded by remember { mutableStateOf(false) }
@@ -255,6 +269,10 @@ private fun DshApp(
     val scope = rememberCoroutineScope()
     val backend = remember(endpoint, apiKey) {
         Backend(endpoint, apiKey)
+    }
+    val modelIds = remember(state.models) {
+        (0 until state.models.length()).mapNotNull { state.models.optJSONObject(it)?.optString("id") }
+            .filter { it.isNotBlank() }.ifEmpty { listOf("auto", "gpt-6", "gpt-6-think", "gpt-6-deep", "gpt-6-search", "gpt-6-tools") }
     }
 
     fun notify(message: String) {
@@ -269,12 +287,14 @@ private fun DshApp(
             val health = backend.get("/health")
             val models = backend.get("/v1/models")
             val hook = backend.get("/v1/hook/status")
+            val usage = backend.get("/v1/usage")
 
             state = state.copy(
                 online = health.code in 200..299,
                 health = JSONObjectOrEmpty(health.body),
                 models = extractArray(models.body, "data", "models"),
                 hook = JSONObjectOrEmpty(hook.body),
+                usage = JSONObjectOrEmpty(usage.body),
                 loading = false
             )
         } catch (e: Exception) {
@@ -448,6 +468,27 @@ private fun DshApp(
                     apiKey = apiKey,
                     expanded = configExpanded,
                     latency = state.latency,
+                    usage = state.usage,
+                    initialRelayConfig = relayConfig,
+                    modelIds = modelIds,
+                    onRelayConfigSave = { next ->
+                        relayConfig = next
+                        onRelayConfigChange(next)
+                        notify("ChatGPT 配置已保存，网关已重启")
+                    },
+                    onImportKit = {
+                        try {
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            val raw = clipboard.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()
+                            require(raw.isNotBlank()) { "剪贴板为空" }
+                            val imported = RelayConfig.importKit(context, raw)
+                            relayConfig = imported
+                            onRelayConfigChange(imported)
+                            notify(if (imported.ready) "ChatGPT 配置导入成功" else "Kit 已导入，请补齐当前通道凭证")
+                        } catch (e: Exception) {
+                            notify("导入失败：${e.message ?: "无效 kit.json"}")
+                        }
+                    },
                     onExpand = { configExpanded = !configExpanded },
                     onEndpointChange = { endpoint = it },
                     onKeyChange = { apiKey = it },
@@ -881,6 +922,11 @@ private fun ApiPage(
     apiKey: String,
     expanded: Boolean,
     latency: List<LatencyPoint>,
+    usage: JSONObject,
+    initialRelayConfig: RelayConfig,
+    modelIds: List<String>,
+    onRelayConfigSave: (RelayConfig) -> Unit,
+    onImportKit: () -> Unit,
     onExpand: () -> Unit,
     onEndpointChange: (String) -> Unit,
     onKeyChange: (String) -> Unit,
@@ -970,6 +1016,44 @@ private fun ApiPage(
 
         item {
             CardBlock {
+                Text("真实用量与耗时", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Text("来自网关请求记录；Token 为字符数估算", color = Muted, fontSize = 12.sp)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Metric("今日请求", usage.optInt("requests").toString())
+                    Metric("成功率", "${(usage.optDouble("success_rate") * 100).toInt()}%")
+                    Metric("平均总耗时", "${usage.optLong("avg_ms")}ms")
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Metric("平均首字", "${usage.optLong("avg_ttft_ms")}ms")
+                    Metric("最近首字", "${usage.optLong("last_ttft_ms")}ms")
+                    Metric("最近总耗时", "${usage.optLong("last_ms")}ms")
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Metric("输入 Token", usage.optLong("prompt_tokens").toString())
+                    Metric("输出 Token", usage.optLong("completion_tokens").toString())
+                    Metric("总 Token", usage.optLong("total_tokens").toString())
+                }
+                val recent = usage.optJSONArray("recent") ?: JSONArray()
+                if (recent.length() == 0) {
+                    Text("完成一次 ChatGPT 请求后，这里会显示最近记录", color = Muted, fontSize = 12.sp)
+                } else {
+                    Text("最近请求", fontWeight = FontWeight.SemiBold)
+                    for (i in (recent.length() - 20).coerceAtLeast(0) until recent.length()) {
+                        val item = recent.optJSONObject(i) ?: continue
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Column(Modifier.weight(1f)) {
+                                Text("${item.optString("model", "auto")} · ${item.optString("channel", "chatgpt")}", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                                Text(if (item.optBoolean("ok")) "成功" else "失败", color = if (item.optBoolean("ok")) Green else Color(0xFFE05252), fontSize = 11.sp)
+                            }
+                            Text("首字 ${item.optLong("ttft_ms")}ms · 总计 ${item.optLong("total_ms")}ms", color = Muted, fontSize = 11.sp)
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            CardBlock {
                 Text("请求延迟", fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 Text(
                     "最近 10 次实际连接测试 · 毫秒",
@@ -1011,7 +1095,12 @@ private fun ApiPage(
         }
 
         item {
-            UpstreamConfig()
+            UpstreamConfig(
+                initialConfig = initialRelayConfig,
+                modelIds = modelIds,
+                onSave = onRelayConfigSave,
+                onImportKit = onImportKit
+            )
         }
     }
 }
@@ -1077,51 +1166,154 @@ private fun LatencyChart(data: List<LatencyPoint>) {
 }
 
 @Composable
-private fun UpstreamConfig() {
+private fun UpstreamConfig(
+    initialConfig: RelayConfig,
+    modelIds: List<String>,
+    onSave: (RelayConfig) -> Unit,
+    onImportKit: () -> Unit
+) {
     var expanded by remember { mutableStateOf(false) }
-    var token by remember { mutableStateOf("") }
-    var did by remember { mutableStateOf("") }
-    var connector by remember { mutableStateOf("") }
-    var temporary by remember { mutableStateOf(false) }
+    var proxyMode by remember(initialConfig) { mutableStateOf(initialConfig.proxyMode) }
+    var hookToken by remember(initialConfig) { mutableStateOf(initialConfig.accessToken) }
+    var did by remember(initialConfig) { mutableStateOf(initialConfig.oaiDid) }
+    var sessionId by remember(initialConfig) { mutableStateOf(initialConfig.sessionId) }
+    var webToken by remember(initialConfig) { mutableStateOf(initialConfig.webAccessToken) }
+    var webSession by remember(initialConfig) { mutableStateOf(initialConfig.webSessionToken) }
+    var connector by remember(initialConfig) { mutableStateOf(initialConfig.connectorId) }
+    var model by remember(initialConfig) { mutableStateOf(initialConfig.model) }
+    var fastMode by remember(initialConfig) { mutableStateOf(initialConfig.fastMode) }
+    var effort by remember(initialConfig) { mutableStateOf(RelayConfig.normalizeEffort(initialConfig.reasoningEffort)) }
+    var search by remember(initialConfig) { mutableStateOf(initialConfig.searchEnabled) }
+    var temporary by remember(initialConfig) { mutableStateOf(initialConfig.temporaryChat) }
+    var revealSecrets by remember { mutableStateOf(false) }
+    var modelExpanded by remember { mutableStateOf(false) }
+    var effortExpanded by remember { mutableStateOf(false) }
 
     CardBlock {
         Row(
-            Modifier
-                .fillMaxWidth()
-                .clickable { expanded = !expanded },
+            Modifier.fillMaxWidth().clickable { expanded = !expanded },
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(Modifier.weight(1f)) {
-                Text("上游配置", fontWeight = FontWeight.Bold)
-                Text("Token、设备标识与连接器", color = Muted, fontSize = 12.sp)
+                Text("ChatGPT 上游与模型", fontWeight = FontWeight.Bold)
+                Text("唯一 AI 通道 · 网页版 / Android Hook 接入", color = Muted, fontSize = 12.sp)
             }
-            Icon(
-                if (expanded) Icons.Outlined.ExpandLess
-                else Icons.Outlined.ExpandMore,
-                null
-            )
+            Icon(if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore, null)
         }
-
+        Text(
+            if (initialConfig.ready) "当前通道已配置" else "当前通道缺少必要凭证",
+            color = if (initialConfig.ready) Green else Color(0xFFE0A43C),
+            fontSize = 12.sp
+        )
         AnimatedVisibility(expanded) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                FieldLabel("上游 Token")
-                AppTextField(token, { token = it }, "Token")
-                FieldLabel("设备 DID")
-                AppTextField(did, { did = it }, "DID")
-                FieldLabel("Connector")
-                AppTextField(connector, { connector = it }, "Connector ID")
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("临时对话", Modifier.weight(1f))
-                    Switch(
-                        checked = temporary,
-                        onCheckedChange = { temporary = it }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = proxyMode == "hook",
+                        onClick = { proxyMode = "hook" },
+                        label = { Text("Android Hook") }
+                    )
+                    FilterChip(
+                        selected = proxyMode == "web",
+                        onClick = { proxyMode = "web" },
+                        label = { Text("网页版 API") }
                     )
                 }
-                Text(
-                    "以上配置仅在本地编辑。后端未提供对应配置读写接口，因此不会伪造保存成功状态。",
-                    color = Muted,
-                    fontSize = 11.sp
-                )
+                if (proxyMode == "hook") {
+                    FieldLabel("DPoP Access Token")
+                    OutlinedTextField(
+                        value = hookToken, onValueChange = { hookToken = it },
+                        modifier = Modifier.fillMaxWidth(), singleLine = true,
+                        visualTransformation = if (revealSecrets) VisualTransformation.None else PasswordVisualTransformation(),
+                        placeholder = { Text("ChatGPT Android access token") }
+                    )
+                    FieldLabel("设备 DID")
+                    OutlinedTextField(value = did, onValueChange = { did = it }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                    FieldLabel("Session ID（可选）")
+                    OutlinedTextField(value = sessionId, onValueChange = { sessionId = it }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                } else {
+                    FieldLabel("Web Access Token")
+                    OutlinedTextField(
+                        value = webToken, onValueChange = { webToken = it },
+                        modifier = Modifier.fillMaxWidth(), singleLine = true,
+                        visualTransformation = if (revealSecrets) VisualTransformation.None else PasswordVisualTransformation(),
+                        placeholder = { Text("ChatGPT web access token") }
+                    )
+                    FieldLabel("Session Cookie（可选）")
+                    OutlinedTextField(
+                        value = webSession, onValueChange = { webSession = it },
+                        modifier = Modifier.fillMaxWidth(), singleLine = true,
+                        visualTransformation = if (revealSecrets) VisualTransformation.None else PasswordVisualTransformation()
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("显示凭证", Modifier.weight(1f), color = Muted, fontSize = 12.sp)
+                    Switch(checked = revealSecrets, onCheckedChange = { revealSecrets = it })
+                }
+                FieldLabel("Connector ID（可选）")
+                AppTextField(connector, { connector = it }, "Connector ID")
+                FieldLabel("默认模型")
+                ExposedDropdownMenuBox(expanded = modelExpanded, onExpandedChange = { modelExpanded = !modelExpanded }) {
+                    OutlinedTextField(
+                        value = model, onValueChange = {}, readOnly = true,
+                        modifier = Modifier.fillMaxWidth().menuAnchor(),
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(modelExpanded) }
+                    )
+                    ExposedDropdownMenu(expanded = modelExpanded, onDismissRequest = { modelExpanded = false }) {
+                        modelIds.distinct().forEach { id ->
+                            DropdownMenuItem(text = { Text(id) }, onClick = { model = id; modelExpanded = false })
+                        }
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("快速模式", fontWeight = FontWeight.Medium)
+                        Text("不注入 reason 和推理强度", color = Muted, fontSize = 11.sp)
+                    }
+                    Switch(checked = fastMode, onCheckedChange = { fastMode = it })
+                }
+                if (!fastMode) {
+                    FieldLabel("推理强度")
+                    ExposedDropdownMenuBox(expanded = effortExpanded, onExpandedChange = { effortExpanded = !effortExpanded }) {
+                        OutlinedTextField(
+                            value = effort, onValueChange = {}, readOnly = true,
+                            modifier = Modifier.fillMaxWidth().menuAnchor(),
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(effortExpanded) }
+                        )
+                        ExposedDropdownMenu(expanded = effortExpanded, onDismissRequest = { effortExpanded = false }) {
+                            listOf("low", "medium", "high").forEach { value ->
+                                DropdownMenuItem(text = { Text(value) }, onClick = { effort = value; effortExpanded = false })
+                            }
+                        }
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("联网检索", Modifier.weight(1f))
+                    Switch(checked = search, onCheckedChange = { search = it })
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("临时对话", Modifier.weight(1f))
+                    Switch(checked = temporary, onCheckedChange = { temporary = it })
+                }
+                Text("快速模式不会发送推理提示；思考模式才会发送 reasoning_effort。Token 仅保存在本机。", color = Muted, fontSize = 11.sp)
+                Button(
+                    onClick = {
+                        onSave(initialConfig.copy(
+                            proxyMode = proxyMode,
+                            accessToken = hookToken.trim(), oaiDid = did.trim(), sessionId = sessionId.trim(),
+                            webAccessToken = webToken.trim(), webSessionToken = webSession.trim(),
+                            connectorId = connector.trim(), model = model,
+                            fastMode = fastMode, reasoningEffort = effort,
+                            searchEnabled = search, temporaryChat = temporary
+                        ))
+                    },
+                    modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)
+                ) { Text("保存并重启网关") }
+                OutlinedButton(onClick = onImportKit, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
+                    Icon(Icons.Outlined.ContentPaste, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("从剪贴板导入 ChatGPT kit.json")
+                }
             }
         }
     }

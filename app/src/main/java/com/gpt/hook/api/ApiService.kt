@@ -40,7 +40,8 @@ class ApiService : Service() {
         server = s
         val message = if (!s.start()) "端口 ${cfg.port} 绑定失败"
             else if (cfg.ready) "本地 API http://${if (cfg.lan) "0.0.0.0" else "127.0.0.1"}:${cfg.port}/v1"
-            else "本地 API 已启动；等待配置上游 access_token / oai-did"
+            else if (cfg.proxyMode == "web") "本地 API 已启动；等待配置 ChatGPT Web access token"
+            else "本地 API 已启动；等待配置 ChatGPT Android access token / oai-did"
         notify(message)
     }
 

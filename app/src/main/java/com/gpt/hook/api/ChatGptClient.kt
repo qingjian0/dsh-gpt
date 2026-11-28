@@ -4,24 +4,34 @@ import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
 
-/**
- * 直连 android.chat.openai.com 的最小客户端。
- * 实测只需要两个头：`Authorization: DPoP <token>` 与 `oai-did`。
- */
+/** ChatGPT upstream client: Android DPoP or web Bearer session. */
 class ChatGptClient(private val cfg: RelayConfig) {
 
     fun open(method: String, path: String, body: ByteArray?, accept: String): HttpURLConnection {
-        val base = cfg.upstreamBase.trimEnd('/')
-        val url = URL(base + if (path.startsWith("/backend")) path else "/backend-api$path")
-        val conn = url.openConnection() as HttpURLConnection
+        val web = cfg.proxyMode == "web"
+        val base = (if (web) cfg.webBase else cfg.upstreamBase).trimEnd('/')
+        val normalizedPath = when {
+            path.startsWith("/backend-api") -> path
+            path.startsWith("/") -> "/backend-api$path"
+            else -> "/backend-api/$path"
+        }
+        val conn = URL(base + normalizedPath).openConnection() as HttpURLConnection
         conn.requestMethod = method
         conn.connectTimeout = 15000
         conn.readTimeout = 120000
         conn.doInput = true
-        conn.setRequestProperty("Authorization", "DPoP ${cfg.accessToken}")
-        conn.setRequestProperty("oai-did", cfg.oaiDid)
-        if (cfg.sessionId.isNotBlank()) conn.setRequestProperty("oai-session-id", cfg.sessionId)
-        conn.setRequestProperty("User-Agent", cfg.userAgent)
+        if (web) {
+            conn.setRequestProperty("Authorization", "Bearer ${cfg.webAccessToken}")
+            if (cfg.webSessionToken.isNotBlank()) {
+                conn.setRequestProperty("Cookie", "__Secure-next-auth.session-token=${cfg.webSessionToken}")
+            }
+            conn.setRequestProperty("User-Agent", cfg.webUserAgent)
+        } else {
+            conn.setRequestProperty("Authorization", "DPoP ${cfg.accessToken}")
+            conn.setRequestProperty("oai-did", cfg.oaiDid)
+            if (cfg.sessionId.isNotBlank()) conn.setRequestProperty("oai-session-id", cfg.sessionId)
+            conn.setRequestProperty("User-Agent", cfg.userAgent)
+        }
         conn.setRequestProperty("Accept", accept)
         conn.setRequestProperty("Accept-Language", "zh-CN,zh;q=0.9")
         if (body != null) {

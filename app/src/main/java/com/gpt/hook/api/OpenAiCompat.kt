@@ -39,7 +39,11 @@ object OpenAiCompat {
         upstreamConversationId: String? = null,
         upstreamParentMessageId: String? = null,
         connectorId: String = "",
-        temporary: Boolean = false
+        temporary: Boolean = false,
+        fastMode: Boolean = false,
+        reasoningEffort: String = "medium",
+        searchEnabled: Boolean = false,
+        selectedModel: String = "auto"
     ): JSONObject {
         val messages = openAi.optJSONArray("messages") ?: JSONArray()
         val systemInstructions = ArrayList<String>()
@@ -64,7 +68,8 @@ object OpenAiCompat {
             systemInstructions += ToolBridge.instructions(openAi)
         }
         val toolResults = ToolBridge.toolResultsTranscript(openAi)
-        val rawModel = openAi.optString("model", "auto").ifBlank { "auto" }
+        val requested = openAi.optString("model", selectedModel).ifBlank { selectedModel }
+        val rawModel = if (requested == "auto") selectedModel.ifBlank { "auto" } else requested
         val (requestedModel, baseHints) = resolveProfile(rawModel)
         val profileHints = if (rawModel == "gpt-6-tools") toolHints(connectorId) else baseHints
         val body = JSONObject()
@@ -80,17 +85,18 @@ object OpenAiCompat {
         // request with system_hints=["reason"], which resolves to the
         // available gpt-6-t-mini-mini reasoning model.
         val finalHints = JSONArray()
-        for (h in profileHints) finalHints.put(h)
-        val clientHints = openAi.optJSONArray("system_hints")
-        if (clientHints != null) {
-            for (i in 0 until clientHints.length()) {
-                val v = clientHints.optString(i)
-                var dup = false
-                for (j in 0 until finalHints.length()) if (finalHints.optString(j) == v) dup = true
-                if (!dup) finalHints.put(v)
-            }
+        fun addHint(value: String) {
+            if (value.isBlank() || (fastMode && value == "reason") || (!searchEnabled && value == "web_search")) return
+            for (i in 0 until finalHints.length()) if (finalHints.optString(i) == value) return
+            finalHints.put(value)
         }
+        profileHints.forEach(::addHint)
+        val clientHints = openAi.optJSONArray("system_hints")
+        if (clientHints != null) for (i in 0 until clientHints.length()) addHint(clientHints.optString(i))
+        if (!fastMode) addHint("reason")
+        if (searchEnabled) addHint("web_search")
         if (finalHints.length() > 0) body.put("system_hints", finalHints)
+        if (!fastMode) body.put("reasoning_effort", RelayConfig.normalizeEffort(reasoningEffort))
 
         if (!upstreamConversationId.isNullOrBlank()) body.put("conversation_id", upstreamConversationId)
         val messagesOut = JSONArray()
@@ -246,7 +252,18 @@ object OpenAiCompat {
         upstreamIds.forEachIndexed { i, id ->
             arr.put(
                 JSONObject().put("id", id).put("object", "model")
-                    .put("created", 0).put("owned_by", "openai-session")
+                    .put("created", 0).put("owned_by", "chatgpt")
+                    .put("description", when {
+                        id == "auto" -> "自动选择可用的 ChatGPT 模型"
+                        id.contains("deep") -> "深度研究模式"
+                        id.contains("think") -> "推理模式"
+                        id.contains("search") -> "联网检索模式"
+                        else -> "ChatGPT 文本模型"
+                    })
+                    .put("reasoning", id.contains("think") || id.contains("deep") || id == "auto")
+                    .put("search", id.contains("search"))
+                    .put("active", true)
+                    .put("latency_ms", JSONObject.NULL)
             )
         }
         return JSONObject().put("object", "list").put("data", arr).toString()

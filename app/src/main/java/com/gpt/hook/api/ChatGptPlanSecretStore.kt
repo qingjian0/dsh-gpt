@@ -229,6 +229,22 @@ internal class ChatGptPlanProfileStore(
     }
 
     @Synchronized
+    fun clearTokens(profileId: String) {
+        val current = snapshot()
+        val profile = current.profiles.firstOrNull { it.id == profileId }
+            ?: throw IllegalArgumentException("ChatGPT profile not found")
+        val cleared = profile.copy(
+            idToken = null,
+            accessToken = null,
+            refreshToken = null,
+            scopes = emptySet(),
+            expiresAtMillis = null,
+            earliestRefreshAtMillis = null,
+        )
+        write(current.profiles.map { if (it.id == profileId) cleared else it }, current.activeProfileId)
+    }
+
+    @Synchronized
     fun remove(profileId: String) {
         val current = snapshot()
         val next = current.profiles.filterNot { it.id == profileId }

@@ -19,7 +19,16 @@ internal class ChatGptPlanLoopbackServer private constructor(
     fun start(): String = attempt.redirectUri
 
     /** Blocking call; invoke on a worker thread, never the Android main thread. */
-    fun await(timeoutMillis: Long = DEFAULT_TIMEOUT_MS): ChatGptPlanOAuth.Callback {
+    /**
+     * 处理一次回调就返回 HTML 响应体。返回 null 表示"还没完，继续等待下一次回调"。
+     *
+     * 首次注册后必须用新签发的 client_id 再授权一次，而那次跳转**不能由 App 发起**
+     * （Android 10+ 禁止后台启动 Activity，浏览器根本不会弹出）。改为在响应页里
+     * 用 location.replace 让浏览器自己跳过去：会话、登录态都保持，用户只需再确认一次。
+     */
+    data class ServeResult(val html: String, val finished: Boolean)
+
+    fun serve(handler: (ChatGptPlanOAuth.Callback) -> ServeResult, timeoutMillis: Long = DEFAULT_TIMEOUT_MS): ChatGptPlanOAuth.Callback {
         require(timeoutMillis > 0)
         val deadline = System.currentTimeMillis() + timeoutMillis
         server.soTimeout = 1_000
@@ -62,25 +71,29 @@ internal class ChatGptPlanLoopbackServer private constructor(
                     continue
                 }
                 val callbackUrl = "http://127.0.0.1:${server.localPort}" + parts[1]
-                try {
-                    val callback = ChatGptPlanOAuth.validateCallback(
+                val callback = try {
+                    ChatGptPlanOAuth.validateCallback(
                         callbackUrl,
                         attempt.state,
                         attempt.redirectUri,
                         if (attempt.isFirstRegistration) null else attempt.clientId,
                     )
-                    respond(socket, 200, "Sign-in received. Return to DSH GPT.")
-                    close()
-                    return callback
                 } catch (error: IllegalArgumentException) {
                     respond(socket, 400, "The sign-in callback could not be validated. Restart sign-in.")
-                    // Ignore malformed or state-mismatched local requests; keep waiting for the real callback.
+                    continue
                 } catch (error: IllegalStateException) {
-                    // A valid-state OAuth denial is terminal and must not reuse this state.
                     respond(socket, 400, "Sign-in was not completed. Return to DSH GPT and try again.")
                     close()
                     throw error
                 }
+                val outcome = handler(callback)
+                respondRaw(socket, 200, outcome.html)
+                if (!outcome.finished) {
+                    // 继续等待下一次回调（注册完成后由浏览器自动跳转重授权）
+                    continue
+                }
+                close()
+                return callback
             } finally {
                 runCatching { socket.close() }
             }
@@ -88,6 +101,10 @@ internal class ChatGptPlanLoopbackServer private constructor(
         close()
         throw IllegalStateException("ChatGPT sign-in timed out")
     }
+
+    /** 兼容旧调用：只等一次回调。 */
+    fun await(timeoutMillis: Long = DEFAULT_TIMEOUT_MS): ChatGptPlanOAuth.Callback =
+        serve({ ServeResult("Sign-in received. Return to DSH GPT.", true) }, timeoutMillis)
 
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
@@ -106,6 +123,24 @@ internal class ChatGptPlanLoopbackServer private constructor(
             }
             if (bytes.size() >= maxBytes) throw IllegalArgumentException("OAuth callback request line is too long")
             bytes.write(value)
+        }
+    }
+
+    private fun respondRaw(socket: Socket, status: Int, html: String) {
+        val body = html.toByteArray(StandardCharsets.UTF_8)
+        val reason = if (status == 200) "OK" else "Error"
+        val headers = "HTTP/1.1 $status $reason\r\n" +
+            "Content-Type: text/html; charset=utf-8\r\n" +
+            "Cache-Control: no-store\r\n" +
+            "Referrer-Policy: no-referrer\r\n" +
+            "Content-Length: ${body.size}\r\n" +
+            "Connection: close\r\n\r\n"
+        runCatching {
+            socket.getOutputStream().apply {
+                write(headers.toByteArray(StandardCharsets.ISO_8859_1))
+                write(body)
+                flush()
+            }
         }
     }
 

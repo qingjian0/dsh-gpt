@@ -131,11 +131,60 @@ internal class ChatGptPlanLoginCoordinator(
             check(!completed) { "This ChatGPT sign-in attempt has already been consumed" }
             completed = true
             try {
-                finish(listener.await(timeoutMillis))
+                var profile: ChatGptPlanProfile? = null
+                var rounds = 0
+                while (profile == null) {
+                    rounds++
+                    check(rounds <= 4) { "ChatGPT sign-in did not settle after registration" }
+                    listener.serve({ callback ->
+                        try {
+                            profile = ChatGptPlanExchange.complete(
+                                listener.attempt,
+                                callback,
+                                store,
+                                http,
+                                previous,
+                            )
+                            ChatGptPlanLoopbackServer.ServeResult(successPage(), true)
+                        } catch (completed: ChatGptPlanRegistrationCompleted) {
+                            // 首次注册的 code 换不到 token。App 在后台无法启动 Activity，
+                            // 改由响应页 location.replace 让浏览器自己跳到重授权地址：
+                            // 会话与登录态都保持，用户只需再确认一次。
+                            val url = ChatGptPlanOAuth.buildAuthorizationUrl(
+                                attempt = ChatGptPlanOAuth.createAttempt(
+                                    listener.attempt.redirectUri,
+                                    listener.attempt.hostId,
+                                    completed.clientId,
+                                ),
+                                appName = APP_NAME,
+                                idTokenHint = previous?.idToken,
+                                loginHint = previous?.email,
+                            )
+                            ChatGptPlanLoopbackServer.ServeResult(redirectPage(url), false)
+                        }
+                    }, timeoutMillis)
+                }
+                completedProfile = profile
+                return profile!!
             } finally {
                 listener.close()
             }
-            return completedProfile!!
+        }
+
+        private fun successPage(): String =
+            "<!doctype html><meta charset=utf-8><title>DSH GPT</title>" +
+                "<main style='font:16px system-ui;padding:40px;text-align:center'>" +
+                "<h2>授权成功</h2><p>可以关闭本页并返回 DSH GPT。</p></main>"
+
+        private fun redirectPage(url: String): String {
+            val htmlUrl = url.replace("&", "&amp;").replace("<", "&lt;")
+            val jsUrl = url.replace("\\", "\\\\").replace("'", "\\'")
+            return "<!doctype html><meta charset=utf-8><title>DSH GPT</title>" +
+                "<meta http-equiv='refresh' content='0;url=" + htmlUrl + "'>" +
+                "<main style='font:16px system-ui;padding:40px;text-align:center'>" +
+                "<h2>身份注册完成，正在继续授权…</h2>" +
+                "<p>如未自动跳转，请<a href='" + htmlUrl + "'>点此继续</a>。</p>" +
+                "<script>location.replace('" + jsUrl + "');</script></main>"
         }
 
         /**

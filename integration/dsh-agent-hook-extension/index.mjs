@@ -20,16 +20,24 @@ const OUTPUT = {
 const REQUEST_TIMEOUT_MS = 10000;
 const MAX_DISCOVERY_LIMIT = 200;
 
+const INJECTED_CONFIG = Object.freeze({
+  baseUrl: process.env.DSH_GPT_HOOK_BASE_URL || "http://127.0.0.1:8766",
+  apiKey: typeof process.env.DSH_GPT_HOOK_API_KEY === "string"
+    ? process.env.DSH_GPT_HOOK_API_KEY.trim() : "",
+});
+// Do not let later shell/tool subprocesses inherit the API key.
+delete process.env.DSH_GPT_HOOK_API_KEY;
+delete process.env.DSH_GPT_HOOK_BASE_URL;
+
 function readConnectionConfig() {
-  const base = new URL(process.env.DSH_GPT_HOOK_BASE_URL || "http://127.0.0.1:8766");
+  const base = new URL(INJECTED_CONFIG.baseUrl);
   const loopback = base.hostname === "127.0.0.1" || base.hostname === "localhost" ||
     base.hostname === "[::1]" || base.hostname === "::1";
   if (base.protocol !== "http:" || !loopback || base.username || base.password ||
       base.pathname !== "/" || base.search || base.hash) {
     throw new Error("Hook API must use a plain HTTP loopback URL");
   }
-  const apiKey = typeof process.env.DSH_GPT_HOOK_API_KEY === "string"
-    ? process.env.DSH_GPT_HOOK_API_KEY.trim() : "";
+  const apiKey = INJECTED_CONFIG.apiKey;
   if (apiKey.length < 16 || apiKey.length > 512 || /[\\r\\n]/.test(apiKey)) {
     throw new Error("dsh-gpt API key is missing or invalid; configure it in DSH Developer Options");
   }

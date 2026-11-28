@@ -267,12 +267,15 @@ private fun DshApp(
     var toast by remember { mutableStateOf<String?>(null) }
 
     val scope = rememberCoroutineScope()
-    val backend = remember(endpoint, apiKey) {
-        Backend(endpoint, apiKey)
+    val backend = remember(endpoint, relayConfig.apiKey) {
+        Backend(endpoint, relayConfig.apiKey)
     }
     val modelIds = remember(state.models) {
-        (0 until state.models.length()).mapNotNull { state.models.optJSONObject(it)?.optString("id") }
-            .filter { it.isNotBlank() }.ifEmpty { listOf("auto", "gpt-6", "gpt-6-think", "gpt-6-deep", "gpt-6-search", "gpt-6-tools") }
+        (0 until state.models.length()).mapNotNull { index ->
+            val item = state.models.optJSONObject(index)
+            item?.optString("id")?.takeIf { it.isNotBlank() }
+                ?: state.models.optString(index).takeIf { it.isNotBlank() }
+        }.distinct()
     }
 
     fun notify(message: String) {
@@ -292,7 +295,7 @@ private fun DshApp(
             state = state.copy(
                 online = health.code in 200..299,
                 health = JSONObjectOrEmpty(health.body),
-                models = extractArray(models.body, "data", "models"),
+                models = if (models.code in 200..299) extractArray(models.body, "data", "models") else JSONArray(),
                 hook = JSONObjectOrEmpty(hook.body),
                 usage = JSONObjectOrEmpty(usage.body),
                 loading = false
@@ -612,21 +615,16 @@ private fun DshApp(
                 )
 
                 3 -> HookPage(
-                    backend = backend,
                     hook = state.hook,
                     events = state.events,
                     onRefresh = {
                         scope.launch {
                             try {
                                 val result = backend.get("/v1/hook/status")
-                                val events = backend.get("/v1/hook/events")
+                                val eventResult = backend.get("/v1/hook/events")
                                 state = state.copy(
                                     hook = JSONObjectOrEmpty(result.body),
-                                    events = extractArray(
-                                        events.body,
-                                        "events",
-                                        "data"
-                                    )
+                                    events = extractArray(eventResult.body, "events", "data")
                                 )
                                 notify("Hook 状态已更新")
                             } catch (e: Exception) {
@@ -638,39 +636,32 @@ private fun DshApp(
                         scope.launch {
                             try {
                                 val current = backend.get("/v1/hook/config")
-                                if (current.code !in 200..299) {
-                                    throw Exception("读取现有 Hook 配置失败：HTTP ${current.code}")
-                                }
-                                val envelope = JSONObject(current.body)
-                                val config = envelope.optJSONObject("config")
+                                if (current.code !in 200..299) throw Exception("读取 Hook 配置失败：HTTP ${current.code}")
+                                val config = JSONObject(current.body).optJSONObject("config")
                                     ?: throw Exception("后端未返回有效 Hook 配置")
                                 val rules = config.optJSONArray("rules") ?: JSONArray()
-                                if (rules.length() >= 64) {
-                                    throw Exception("规则数量已达到上限（64）")
-                                }
+                                if (rules.length() >= 64) throw Exception("规则数量已达到上限（64）")
                                 rules.put(rule)
-                                config.put("schemaVersion", config.optInt("schemaVersion", 1))
-                                config.put("targetPackage", "com.openai.chatgpt")
                                 config.put("rules", rules)
-
                                 val response = backend.put("/v1/hook/config", config)
-                                if (response.code !in 200..299) {
-                                    throw Exception("规则提交失败：HTTP ${response.code} ${response.body}")
-                                }
-                                val accepted = JSONObject(response.body)
+                                if (response.code !in 200..299) throw Exception("规则提交失败：HTTP ${response.code}")
                                 val status = backend.get("/v1/hook/status")
-                                if (status.code in 200..299) {
-                                    state = state.copy(hook = JSONObjectOrEmpty(status.body))
-                                }
-                                notify(
-                                    if (accepted.optBoolean("accepted", false)) {
-                                        "规则已接受；请检查目标进程安装清单确认实际生效"
-                                    } else {
-                                        "后端未确认规则接受"
-                                    }
-                                )
+                                state = state.copy(hook = JSONObjectOrEmpty(status.body))
+                                notify("规则已保存；实际安装状态以目标进程回报为准")
                             } catch (e: Exception) {
-                                notify(readableError(e))
+                                notify(e.message ?: "规则保存失败")
+                            }
+                        }
+                    },
+                    onSetEnabled = { enabled ->
+                        scope.launch {
+                            try {
+                                val result = backend.put("/v1/hook/enabled", JSONObject().put("enabled", enabled))
+                                if (result.code !in 200..299) throw Exception("Hook 状态修改失败：HTTP ${result.code}")
+                                val status = backend.get("/v1/hook/status")
+                                state = state.copy(hook = JSONObjectOrEmpty(status.body))
+                            } catch (e: Exception) {
+                                notify(e.message ?: "操作失败")
                             }
                         }
                     }
@@ -1783,260 +1774,192 @@ private fun ToolHistoryPage(history: List<ToolCallRecord>) {
 
 @Composable
 private fun HookPage(
-    backend: Backend,
     hook: JSONObject,
     events: JSONArray,
     onRefresh: () -> Unit,
-    onSaveRule: (JSONObject) -> Unit
+    onSaveRule: (JSONObject) -> Unit,
+    onSetEnabled: (Boolean) -> Unit
 ) {
+    var selectedRule by remember { mutableStateOf<JSONObject?>(null) }
     var className by remember { mutableStateOf("") }
     var methodName by remember { mutableStateOf("") }
-    var mode by remember { mutableStateOf("observe") }
     var parameters by remember { mutableStateOf("[]") }
-    var showRuntimeDetails by remember { mutableStateOf(false) }
-
+    var showCreate by remember { mutableStateOf(false) }
+    val rules = hook.optJSONArray("configuredHooks") ?: hook.optJSONArray("configuredRules") ?: JSONArray()
+    val installed = hook.optJSONArray("installedHooks") ?: JSONArray()
     val enabled = hook.optBoolean("enabled", false)
-    val ruleCount = hook.optInt("configuredRuleCount", 0)
-    val lastApplied = hook.optJSONObject("lastApplyReport")
-        ?.optString("state")
-        ?.takeIf { !it.isNullOrBlank() && it != "unavailable" }
-        ?: "配置已保存"
-    val configuredHooks = hook.optJSONArray("configuredHooks") ?: JSONArray()
+    val targetObserved = hook.optBoolean("targetObserved", false)
+    val activeCount = hook.optInt("activeHookCount", 0)
+    val observedRuleIds = buildSet {
+        for (i in 0 until installed.length()) {
+            installed.optJSONObject(i)?.optString("ruleId")?.takeIf { it.isNotBlank() }?.let(::add)
+        }
+    }
 
-    if (showRuntimeDetails) {
-        LazyColumn(
-            Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(20.dp),
-            verticalArrangement = Arrangement.spacedBy(15.dp)
-        ) {
+    selectedRule?.let { rule ->
+        val id = rule.optString("id")
+        val actual = (0 until installed.length()).mapNotNull { installed.optJSONObject(it) }
+            .filter { it.optString("ruleId") == id }
+        val ruleEvents = (0 until events.length()).mapNotNull { events.optJSONObject(it) }
+            .filter { it.optString("ruleId") == id || it.optString("rule_id") == id }
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             item {
-                TextButton(onClick = { showRuntimeDetails = false }) {
-                    Icon(Icons.Outlined.ArrowBack, null)
-                    Spacer(Modifier.width(6.dp))
-                    Text("返回 Hook")
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { selectedRule = null }) { Icon(Icons.Outlined.ArrowBack, "返回") }
+                    Column {
+                        Text("Hook 详情", fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                        Text(id, color = Muted, fontSize = 12.sp)
+                    }
                 }
-                Text("Hook 运行详情", fontSize = 25.sp, fontWeight = FontWeight.Bold)
-                Text("目标进程回报的运行数据与观察事件", color = Muted, fontSize = 12.sp)
             }
             item {
                 CardBlock {
-                    Text("最近观察事件", fontWeight = FontWeight.Bold)
-                    Text("${events.length()} 条事件", color = Muted, fontSize = 12.sp)
-                    for (i in 0 until events.length()) {
-                        val event = events.optJSONObject(i) ?: continue
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(rule.optString("methodName"), fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.weight(1f))
+                        StatusPill(when {
+                            !enabled -> "总开关关闭"
+                            !rule.optBoolean("enabled", true) -> "规则已禁用"
+                            !targetObserved -> "待验证"
+                            actual.isNotEmpty() -> "已安装"
+                            else -> "未安装"
+                        })
+                    }
+                    Text(rule.optString("className"), color = Muted, fontSize = 12.sp)
+                    StatusValue("模式", rule.optString("mode", "observe"))
+                    StatusValue("参数类型", rule.optJSONArray("parameterTypes")?.toString() ?: "[]")
+                    StatusValue("目标进程", if (targetObserved) "已上报" else "尚未上报")
+                    HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+                    Text("实际安装的方法 · ${actual.size}", fontWeight = FontWeight.SemiBold)
+                    if (actual.isEmpty()) Text("暂无已确认安装的方法", color = Muted, fontSize = 12.sp)
+                    actual.forEach { item ->
+                        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text(item.optString("signature"), fontSize = 11.sp)
+                            Text("调用 ${item.optLong("invocations")} 次 · ${item.optString("mode")}", color = Muted, fontSize = 11.sp)
+                        }
+                    }
+                }
+            }
+            item {
+                CardBlock {
+                    Text("运行事件 · ${ruleEvents.size}", fontWeight = FontWeight.Bold)
+                    if (ruleEvents.isEmpty()) Text("暂无匹配事件。规则已配置不代表目标方法已经执行。", color = Muted, fontSize = 12.sp)
+                    ruleEvents.takeLast(30).reversed().forEach { event ->
                         HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
-                        Column(Modifier.padding(vertical = 8.dp)) {
-                            Text(event.optString("method").ifBlank { event.optString("name") }, fontWeight = FontWeight.SemiBold)
-                            Text(event.optString("class").ifBlank { event.optString("class_name") }, color = Muted, fontSize = 12.sp)
+                        Column {
+                            Text(event.optString("method").ifBlank { rule.optString("methodName") }, fontWeight = FontWeight.SemiBold)
+                            Text(event.optString("class").ifBlank { rule.optString("className") }, color = Muted, fontSize = 11.sp)
                             Text(event.optString("timestamp"), color = Muted, fontSize = 11.sp)
                         }
                     }
-                    if (events.length() == 0) Text("目标进程尚无观察事件", color = Muted, fontSize = 13.sp)
-                }
-            }
-            item {
-                CardBlock {
-                    Text("原始观察报告 JSON", fontWeight = FontWeight.Bold)
-                    Text(hook.toString(2), fontSize = 11.sp, lineHeight = 17.sp, color = Muted)
                 }
             }
         }
         return
     }
 
-    LazyColumn(
-        Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(20.dp),
-        verticalArrangement = Arrangement.spacedBy(15.dp)
-    ) {
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
-            Text("Hook 管理", fontSize = 27.sp, fontWeight = FontWeight.Bold)
-            Text("动态规则与运行观察", color = Muted, fontSize = 13.sp)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Hook", fontSize = 27.sp, fontWeight = FontWeight.Bold)
+                    Text("目标应用 · com.openai.chatgpt", color = Muted, fontSize = 12.sp)
+                }
+                IconButton(onClick = onRefresh) { Icon(Icons.Outlined.Refresh, "刷新") }
+            }
         }
-
         item {
             CardBlock {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        Modifier
-                            .size(10.dp)
-                            .background(
-                                if (enabled) Green else Color(0xFFE0A43C),
-                                CircleShape
-                            )
-                    )
-                    Spacer(Modifier.width(9.dp))
-                    Text(
-                        if (enabled) "Hook 已启用" else "Hook 已停用",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 17.sp
-                    )
-                    Spacer(Modifier.weight(1f))
-                    IconButton(onClick = onRefresh) {
-                        Icon(Icons.Outlined.Refresh, null)
-                    }
-                }
-
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Metric("已配置规则", "$ruleCount 条")
-                    Metric("配置状态", lastApplied)
-                }
-                Text(
-                    "规则清单来自本地配置，不依赖目标进程上报",
-                    color = Muted,
-                    fontSize = 12.sp
-                )
-            }
-        }
-
-        item {
-            CardBlock {
-                Text("已配置 Hook", fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                if (configuredHooks.length() == 0) {
-                    Text("暂无规则。创建规则后会立即显示在这里。", color = Muted, fontSize = 13.sp)
-                } else {
-                    for (i in 0 until configuredHooks.length()) {
-                        val rule = configuredHooks.optJSONObject(i) ?: continue
-                        val ruleEnabled = rule.optBoolean("enabled", false)
-                        Column(Modifier.fillMaxWidth().padding(vertical = 7.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Column(Modifier.weight(1f)) {
-                                    Text(
-                                        rule.optString("className") + "." + rule.optString("methodName"),
-                                        fontWeight = FontWeight.SemiBold,
-                                        fontSize = 13.sp
-                                    )
-                                    Text(
-                                        "模式：${rule.optString("mode", "observe")} · 参数：${rule.optJSONArray("parameterTypes")?.let { params ->
-                                            (0 until params.length()).joinToString(", ") { params.optString(it) }.ifBlank { "不限" }
-                                        } ?: "不限"}",
-                                        color = Muted,
-                                        fontSize = 11.sp
-                                    )
-                                }
-                                Text(
-                                    if (ruleEnabled) "已启用" else "已停用",
-                                    color = if (ruleEnabled) Green else Muted,
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = 12.sp
-                                )
-                            }
-                        }
-                        if (i < configuredHooks.length() - 1) {
-                            HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
-                        }
-                    }
-                }
-            }
-        }
-
-        item {
-            CardBlock {
-                Text("创建动态规则", fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                Text(
-                    "当前控制台仅创建 observe / dump 元数据观察规则；提交完整配置快照",
-                    color = Muted,
-                    fontSize = 12.sp
-                )
-
-                FieldLabel("类名")
-                AppTextField(className, { className = it }, "com.example.Target")
-
-                FieldLabel("方法名")
-                AppTextField(methodName, { methodName = it }, "targetMethod")
-
-                FieldLabel("Hook 模式")
-                var expanded by remember { mutableStateOf(false) }
-
-                ExposedDropdownMenuBox(
-                    expanded = expanded,
-                    onExpandedChange = { expanded = !expanded }
-                ) {
-                    OutlinedTextField(
-                        value = mode,
-                        onValueChange = {},
-                        readOnly = true,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .menuAnchor(),
-                        trailingIcon = {
-                            ExposedDropdownMenuDefaults.TrailingIcon(expanded)
-                        },
-                        shape = RoundedCornerShape(12.dp)
-                    )
-                    ExposedDropdownMenu(
-                        expanded = expanded,
-                        onDismissRequest = { expanded = false }
-                    ) {
-                        listOf("observe", "dump").forEach {
-                            DropdownMenuItem(
-                                text = { Text(it) },
-                                onClick = {
-                                    mode = it
-                                    expanded = false
-                                }
-                            )
-                        }
-                    }
-                }
-
-                FieldLabel("参数类型（JSON 数组；空数组表示不限定重载）")
-                AppTextField(
-                    parameters,
-                    { parameters = it },
-                    """["java.lang.String"]"""
-                )
-
-                Button(
-                    onClick = {
-                        try {
-                            val args = JSONArray(parameters)
-                            onSaveRule(
-                                JSONObject().apply {
-                                    put("id", "ui-" + java.util.UUID.randomUUID().toString())
-                                    put("className", className.trim())
-                                    put("methodName", methodName.trim())
-                                    put("mode", mode)
-                                    put("parameterTypes", args)
-                                    put("enabled", true)
-                                    put("sampleEvery", 1)
-                                }
-                            )
-                        } catch (_: Exception) {
-                            // 参数不是合法 JSON 时静默忽略，输入框保持原样
-                        }
-                    },
-                    enabled = className.startsWith("com.openai.") &&
-                        methodName.isNotBlank(),
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Icon(Icons.Outlined.Add, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("提交 Hook 规则")
-                }
-            }
-        }
-
-        item {
-            CardBlock {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .clickable { showRuntimeDetails = true },
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
                     Column(Modifier.weight(1f)) {
-                        Text("运行详情", fontWeight = FontWeight.Bold)
-                        Text("观察事件、运行快照与诊断数据", color = Muted, fontSize = 12.sp)
+                        Text(if (enabled) "Hook 已启用" else "Hook 已关闭", fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                        Text(when {
+                            !enabled -> "所有规则暂停"
+                            !targetObserved -> "目标进程尚未上报运行状态"
+                            else -> "已确认安装 $activeCount 个方法"
+                        }, color = Muted, fontSize = 12.sp)
                     }
-                    Icon(Icons.Outlined.ChevronRight, null)
+                    Switch(checked = enabled, onCheckedChange = onSetEnabled)
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Metric("规则", "${rules.length()}")
+                    Metric("已安装", "$activeCount")
+                    Metric("事件", "${events.length()}")
+                }
+                if (!targetObserved) {
+                    Text("启动 ChatGPT 并确认 LSPosed 已勾选本模块，随后刷新即可读取真实运行状态。未验证的规则不会显示为已生效。", color = Muted, fontSize = 12.sp)
                 }
             }
         }
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("规则列表", fontWeight = FontWeight.Bold, fontSize = 18.sp, modifier = Modifier.weight(1f))
+                TextButton(onClick = { showCreate = true }) { Icon(Icons.Outlined.Add, null); Text("新增") }
+            }
+        }
+        if (rules.length() == 0) {
+            item { CardBlock { Text("暂无 Hook 规则", fontWeight = FontWeight.SemiBold); Text("新增规则后会显示在这里。动态规则详情和运行事件放在二级页面。", color = Muted, fontSize = 12.sp) } }
+        } else {
+            items(rules.length()) { index ->
+                val rule = rules.optJSONObject(index) ?: JSONObject()
+                val id = rule.optString("id")
+                val status = when {
+                    !enabled -> "总开关关闭"
+                    !rule.optBoolean("enabled", true) -> "已禁用"
+                    !targetObserved -> "待验证"
+                    id in observedRuleIds -> "已安装"
+                    else -> "未安装"
+                }
+                Card(Modifier.fillMaxWidth().clickable { selectedRule = rule }, shape = RoundedCornerShape(14.dp)) {
+                    Row(Modifier.padding(15.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Outlined.Extension, null, tint = if (status == "已安装") Green else Muted)
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text(rule.optString("methodName", "未命名方法"), fontWeight = FontWeight.SemiBold)
+                            Text(rule.optString("className"), color = Muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(status, color = if (status == "已安装") Green else Muted, fontSize = 11.sp)
+                        }
+                        Icon(Icons.Outlined.ChevronRight, null, tint = Muted)
+                    }
+                }
+            }
+        }
+    }
+    if (showCreate) {
+        AlertDialog(
+            onDismissRequest = { showCreate = false },
+            title = { Text("新增动态规则") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AppTextField(className, { className = it }, "com.openai.example.Target")
+                    AppTextField(methodName, { methodName = it }, "methodName")
+                    AppTextField(parameters, { parameters = it }, """["java.lang.String"]""")
+                    Text("仅支持 observe / dump 观察模式", color = Muted, fontSize = 11.sp)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    runCatching {
+                        require(className.startsWith("com.openai.") && methodName.isNotBlank())
+                        onSaveRule(JSONObject().put("id", "ui-" + java.util.UUID.randomUUID())
+                            .put("className", className.trim()).put("methodName", methodName.trim())
+                            .put("mode", "observe").put("parameterTypes", JSONArray(parameters))
+                            .put("enabled", true).put("sampleEvery", 1))
+                        showCreate = false
+                        className = ""
+                        methodName = ""
+                    }
+                }) { Text("保存规则") }
+            },
+            dismissButton = { TextButton(onClick = { showCreate = false }) { Text("取消") } }
+        )
+    }
+}
+
+@Composable
+private fun StatusPill(value: String) {
+    Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(50)) {
+        Text(value, modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp), fontSize = 11.sp)
     }
 }
 

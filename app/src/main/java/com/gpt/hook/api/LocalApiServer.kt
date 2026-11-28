@@ -596,12 +596,20 @@ class LocalApiServer(private val context: Context, @Volatile var cfg: RelayConfi
             json(out, 400, err("unsupported_feature", "SIWC gateway enforces store=false"))
             return
         }
-        val unsupportedFields = listOf(
-            "previous_response_id", "conversation", "include", "reasoning",
-            "max_output_tokens", "temperature", "top_p", "metadata", "prompt"
-        )
-        unsupportedFields.firstOrNull { request.has(it) }?.let {
+        val allowedFields = setOf("model", "input", "instructions", "stream", "store", "text")
+        val requestKeys = request.keys()
+        var unsupportedField: String? = null
+        while (requestKeys.hasNext() && unsupportedField == null) {
+            val key = requestKeys.next()
+            if (key !in allowedFields) unsupportedField = key
+        }
+        unsupportedField?.let {
             json(out, 400, err("unsupported_feature", "SIWC text adapter does not support the '$it' Responses field yet"))
+            return
+        }
+        val textOptions = request.optJSONObject("text")
+        if (textOptions != null && textOptions.keys().asSequence().any { it != "format" }) {
+            json(out, 400, err("unsupported_feature", "SIWC text adapter supports only text.format.type=text"))
             return
         }
         val input = StringBuilder()

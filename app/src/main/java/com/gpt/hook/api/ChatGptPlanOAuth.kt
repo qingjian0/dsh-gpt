@@ -232,8 +232,8 @@ internal object ChatGptPlanOAuth {
         MessageDigest.isEqual(a.toByteArray(Charsets.UTF_8), b.toByteArray(Charsets.UTF_8))
 
     private fun base64Url(bytes: ByteArray): String = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
-    private fun encode(value: String): String = URLEncoder.encode(value, Charsets.UTF_8)
-    private fun decode(value: String): String = URLDecoder.decode(value, Charsets.UTF_8)
+    private fun encode(value: String): String = URLEncoder.encode(value, "UTF-8")
+    private fun decode(value: String): String = URLDecoder.decode(value, "UTF-8")
     private fun form(values: Map<String, String>): String =
         values.entries.joinToString("&") { (k, v) -> "${encode(k)}=${encode(v)}" }
 }

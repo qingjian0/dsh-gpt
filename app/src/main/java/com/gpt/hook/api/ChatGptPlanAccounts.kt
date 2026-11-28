@@ -31,6 +31,7 @@ internal fun ChatGptPlanAccounts(context: Context) {
     val scope = rememberCoroutineScope()
     val store = remember(context) { ChatGptPlanProfileStore(context.applicationContext) }
     val coordinator = remember { ChatGptPlanLoginCoordinator() }
+    val sessionManager = remember { ChatGptPlanSessionManager() }
     var profiles by remember { mutableStateOf(emptyList<ChatGptPlanProfile>()) }
     var activeProfileId by remember { mutableStateOf<String?>(null) }
     var pending by remember { mutableStateOf<ChatGptPlanLoginCoordinator.PendingLogin?>(null) }
@@ -106,12 +107,19 @@ internal fun ChatGptPlanAccounts(context: Context) {
                                 scope.launch {
                                     busy = true
                                     try {
-                                        withContext(Dispatchers.IO) { store.remove(profile.id) }
+                                        val revoked = withContext(Dispatchers.IO) {
+                                            sessionManager.signOut(store, profile.id)
+                                        }
                                         reload()
+                                        status = if (revoked) {
+                                            "已退出账号，OpenAI 已确认撤销会话"
+                                        } else {
+                                            "本地凭证已清除；远程撤销未确认，可在 ChatGPT 设置中断开此应用"
+                                        }
                                     } finally { busy = false }
                                 }
                             },
-                        ) { Text("移除") }
+                        ) { Text("退出账号") }
                     }
                 }
             }

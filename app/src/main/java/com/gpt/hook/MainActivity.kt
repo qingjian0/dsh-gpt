@@ -1332,7 +1332,16 @@ private fun UpstreamConfig(
                 } else if (proxyMode == "web") {
                     Button(
                         modifier = Modifier.fillMaxWidth(),
-                        onClick = { com.gpt.hook.api.ChatGptWebToken.openSessionPage(appContext) },
+                        onClick = {
+                            com.gpt.hook.api.ChatGptOAuthLogin.start(appContext) { ok, msg ->
+                                importStatus = msg
+                                if (ok) {
+                                    com.gpt.hook.api.ChatGptCredentialStore.load()?.let {
+                                        webToken = it.accessToken
+                                    }
+                                }
+                            }
+                        },
                     ) { Text("登录 ChatGPT") }
                     if (importStatus.isNotBlank()) {
                         Text(importStatus, fontSize = 12.sp, color = Color(0xFF2F6FEB))

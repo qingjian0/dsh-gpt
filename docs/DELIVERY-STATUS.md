@@ -1,20 +1,20 @@
 # DSH-GPT Delivery Status
 
-Last reviewed: 2026-11-26 (post-PR #42 merge)
-Main baseline reviewed: `d1b7fa7142a0ce8c198828f28bf61a32ee030191`
-Latest delivery fix merged: PR #42 (`d1b7fa7142a0ce8c198828f28bf61a32ee030191`)
+Last reviewed: 2026-11-28 (post-PR #50 merge)
+Main baseline reviewed: `273412641132346c6d53f67527e6431b58dafea5`
+Latest delivery fix merged: PR #50 (`273412641132346c6d53f67527e6431b58dafea5`)
 
 This document is the delivery truth source. Source presence and CI success are not substitutes for live upstream, DSH-host, or physical-device acceptance.
 
 ## 2026-11-28 ChatGPT-only gateway delivery branch
 
-The active implementation is being consolidated on `feat/chatgpt-only-complete-gateway` from main baseline `771e976aa5d5d9cb5c2074b14749b141806a610a`.
+The implementation was merged from PR #50 (`feat/chatgpt-only-complete-gateway`) into main as `273412641132346c6d53f67527e6431b58dafea5`, closing Issue #45.
 
 Product scope is ChatGPT only. The gateway supports two ChatGPT upstream access methods (Android DPoP/device-DID and web Bearer/session-cookie); there is no separate Codex provider, token, route, or model namespace.
 
 This branch adds persisted upstream/model controls, quick vs. thinking request shaping, reasoning effort, web-search hints, temporary-chat configuration, status/config/proxy-mode/kit-import routes, and usage telemetry. TTFT is measured at the first assistant text delta; token counts are estimates (request/response character counts divided by four), not authoritative upstream billing usage. The API page now exposes the real upstream settings and usage history.
 
-CI and physical-device acceptance are tracked separately below. Do not mark this branch release-complete until PR checks pass and a real device confirms both ChatGPT upstream modes, model/reasoning options, kit import, usage records, Hook runtime and DSH Agent integration.
+PR #50 CI passed: Release APK build, JVM unit tests, LSPosed metadata verification and artifact upload (run `46100577019`; artifact size 1,192,924 bytes). Physical-device acceptance remains open: confirm both ChatGPT upstream modes, model/reasoning options, kit import and usage records on-device. Hook runtime and DSH Agent host integration remain separate acceptance gates.
 
 
 ## Current verified state
@@ -26,6 +26,7 @@ CI and physical-device acceptance are tracked separately below. Do not mark this
 | Dynamic Hook runtime | PR #14 merged: authenticated `/v1/hook/*` routes, full config snapshots, revision polling, late ClassLoader attachment, HookHandle inventory and apply reports | Constrained dynamic execution exists; actual device application and end-to-end AI feedback loop unverified |
 | Hook action policy | Runtime parser supports `observe`, `dump`, `return`, `args`, `noop`, and `throw`; behavior-changing actions are blocked for sensitive authentication, session, credential, network, payment, security and cryptographic targets | Policy exists in source; keep the console's default workflow metadata-only |
 | Hook console | Mainline PR #38 four-tab UI had a protocol mismatch: it used POST, legacy mode names and legacy parameter keys. PR #40 merged the console fix: GET current config → append a valid rule → PUT the complete snapshot | Merged; PR CI passed Debug build, JVM tests, LSPosed metadata verification and APK artifact upload |
+| ChatGPT gateway settings and usage | PR #50 merged: Android DPoP + web Bearer/session modes, persisted model/fast/thinking/reasoning/search settings, `/v1/status`, `/v1/config`, `/v1/proxy/mode`, `/v1/kit/import`, TTFT/total timing and daily usage aggregates; API UI exposes credential settings and recent 20 records | Release CI passed; web upstream and physical-device behavior still require live credentials/device acceptance |
 | OpenAI-compatible gateway | Local API listener can start independently of upstream credentials; `/health` reports readiness, and Chat Completions/Responses return explicit HTTP 503 until upstream credentials are configured. Authenticated routes include models, `/v1/capabilities`, text Responses, SSE, ToolBridge-mediated tool calls and local conversations | Text and ToolBridge are supported; image/audio/video/file inputs and structured JSON output are explicitly rejected with HTTP 400 rather than silently flattened |
 | MCP gateway | PR #37 merged MCP tool/resource listing and calls plus web reading | MCP routes exist; this is not equivalent to OpenAI standard Function Calling |
 | DSH Agent plugin | PR #12 merged plugin package, 9 modes, task-state tools and 7 Skills | Package/source present; real DSH Profile installation, tool visibility and workflow execution unverified |

@@ -37,4 +37,4 @@
 ## Data handling
 
 - The console displays rule/class/method metadata, elapsed time, invocation counts, and exception types.
-- It does not display method arguments, return values, cookies, tokens, request headers, or request bodies.
+- The ordinary Hook event stream does not display method arguments, return values, cookies, tokens, request headers, or request bodies. The separate opt-in Gateway Request Dump page displays only sanitized/truncated relay ingress body previews.

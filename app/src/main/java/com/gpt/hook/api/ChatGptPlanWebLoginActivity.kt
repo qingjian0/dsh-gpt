@@ -160,7 +160,7 @@ class ChatGptPlanWebLoginActivity : Activity() {
     }
 
     companion object {
-        fun intent(
+        internal fun intent(
             context: Context,
             authorizationUrl: String,
             attempt: ChatGptPlanOAuth.Attempt,

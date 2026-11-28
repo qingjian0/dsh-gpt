@@ -1,0 +1,70 @@
+# Sign in with ChatGPT (SIWC) integration
+
+## Scope
+
+SIWC is an independent, first-party ChatGPT plan authorization channel. It does not replace the existing ChatGPT Android DPoP relay or the legacy ChatGPT Web relay. It does not use Codex OAuth, Codex CLI credentials, or Codex Responses.
+
+The SIWC plan-usage flow is restricted to the public OpenAI Responses API:
+
+- Model catalog: `GET https://api.openai.com/v1/models`
+- Inference: `POST https://api.openai.com/v1/responses`
+- Every inference request sets `store=false` and `stream=true`.
+- A stream is successful only after `response.completed`.
+- ChatGPT `backend-api` endpoints are not used by this channel.
+
+Official protocol references:
+
+- https://developers.openai.com/siwc/token-sharing-open-source
+- https://developers.openai.com/siwc/token-sharing-open-source/sign-in
+- https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions
+- https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference
+
+## Authorization and account isolation
+
+1. Persist one opaque host ID for this app installation. The current implementation uses a UUIDv4 URI.
+2. Bind an ephemeral loopback listener to `127.0.0.1` before launching the system browser.
+3. Keep the exact `http://127.0.0.1:<port>/auth/callback` URI for both authorization and token exchange.
+4. Generate fresh PKCE verifier/challenge, state, and OIDC nonce for every attempt.
+5. Use `dynamic_agent_client` only for first-time registration. Persist and reuse the issued `oaiapp_...` client ID for that account registration.
+6. Verify the ID-token signature against the discovered JWKS and validate issuer, audience, nonce, expiry, and subject before saving the profile.
+7. Keep each issued client ID, verified subject, granted scopes, and token set isolated in its own profile.
+
+The loopback listener accepts only local connections and bounds request-line/header sizes. OAuth authorization URLs and bearer credentials must never be logged.
+
+## Credential protection and lifecycle
+
+- Access, refresh, and ID tokens are stored together in an AES-GCM encrypted profile document.
+- The AES key is generated and held by Android Keystore.
+- There is no plaintext fallback if Keystore is unavailable.
+- Refresh is serialized per client/subject pair and commits the replacement access token and rotating refresh token together.
+- Sign-out attempts provider-side refresh-token revocation, retries transient failures, then clears local tokens regardless of remote confirmation.
+- Sign-out retains the account registration mapping and stable host ID for later reauthorization.
+
+## Current implementation boundary
+
+The account vault, browser login, model catalog request, explicit Responses API smoke test, refresh, and sign-out lifecycle are implemented in the SIWC development branch.
+
+The local gateway now has a selectable `siwc` upstream mode:
+
+- `GET /v1/models` refreshes the selected profile when needed and maps the official model catalog to an OpenAI-style model list.
+- `POST /v1/responses` uses the official Responses API, forces `store=false` and upstream `stream=true`, and supports text-only input. Local non-stream requests are buffered into a completed response; local stream requests receive Responses-style SSE events.
+- `POST /v1/chat/completions` is explicitly rejected in SIWC mode rather than silently routed through another protocol.
+- `/backend-api/*`, MCP bridge routes, and the ChatGPT web-reader route are explicitly blocked in SIWC mode because they depend on the separate backend-api channel. Existing Android DPoP and Web modes retain their previous routes.
+
+The adapter is intentionally text-only and does not claim full Responses API feature parity: tools, structured output, and multimodal input are rejected. CI and device acceptance remain separate gates; real-device OAuth, model listing, streaming, and account switching still require validation on an Android device.
+
+## ChatGPT Web session channel: explicit limitation
+
+The legacy `web` mode is a separate, compatibility-oriented `chatgpt.com/backend-api` relay. It currently consumes a user-supplied Web access token and optional session-cookie value; it is not an OAuth flow and does not automatically obtain browser credentials.
+
+There is no documented public third-party OAuth flow that exchanges a ChatGPT website login for the website's private `backend-api` session credentials. SIWC credentials are not interchangeable with those website credentials and must never be copied into the Web relay. The supported integration path for subscription-backed app inference is SIWC and the public Responses API.
+
+For the legacy Web mode:
+
+- Web access/session credentials are stored in a separate AES-GCM encrypted document using an Android Keystore key.
+- On upgrade, existing plaintext `webAccessToken` and `webSessionToken` preferences are migrated to encrypted storage, then removed from ordinary preferences after a successful encrypted write.
+- If Keystore encryption fails, the migration does not silently fall back to persisting new plaintext credentials.
+- This protects credentials at rest; it does not make the private Web API stable or guarantee that manually supplied credentials remain valid.
+- No hidden WebView interception, password collection, or background cookie scraping is implemented.
+
+A future first-party Web login feature requires a documented provider authorization mechanism for the specific Web API scope. Until such a mechanism exists, the supported one-login experience in this app is SIWC, not automatic acquisition of private ChatGPT website session cookies.

@@ -35,9 +35,12 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import com.gpt.hook.api.ApiService
+import com.gpt.hook.api.ChatGptPlanAccounts
+import com.gpt.hook.api.ChatGptPlanProfileStore
 import com.gpt.hook.api.RelayConfig
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -1228,6 +1231,7 @@ private fun UpstreamConfig(
     onSave: (RelayConfig) -> Unit,
     onImportKit: () -> Unit
 ) {
+    val appContext = LocalContext.current
     var expanded by remember { mutableStateOf(false) }
     var proxyMode by remember(initialConfig) { mutableStateOf(initialConfig.proxyMode) }
     var hookToken by remember(initialConfig) { mutableStateOf(initialConfig.accessToken) }
@@ -1263,6 +1267,7 @@ private fun UpstreamConfig(
         )
         AnimatedVisibility(expanded) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                ChatGptPlanAccounts(appContext)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(
                         selected = proxyMode == "hook",
@@ -1272,7 +1277,12 @@ private fun UpstreamConfig(
                     FilterChip(
                         selected = proxyMode == "web",
                         onClick = { proxyMode = "web" },
-                        label = { Text("网页版 API") }
+                        label = { Text("网页会话（手动凭证）") }
+                    )
+                    FilterChip(
+                        selected = proxyMode == "siwc",
+                        onClick = { proxyMode = "siwc" },
+                        label = { Text("ChatGPT 订阅授权") }
                     )
                 }
                 if (proxyMode == "hook") {
@@ -1287,7 +1297,11 @@ private fun UpstreamConfig(
                     OutlinedTextField(value = did, onValueChange = { did = it }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                     FieldLabel("Session ID（可选）")
                     OutlinedTextField(value = sessionId, onValueChange = { sessionId = it }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-                } else {
+                } else if (proxyMode == "web") {
+                    Text(
+                        "兼容旧版 ChatGPT 网页会话：需要手动提供凭证，不提供网页登录后自动提取。网页 backend-api 属于非公开接口，可能随时变化。若要通过 ChatGPT 账号登录并使用订阅授权，请选择「ChatGPT 订阅授权（SIWC）」并在上方账号管理中登录。",
+                        color = Color(0xFFE0A43C), fontSize = 12.sp
+                    )
                     FieldLabel("Web Access Token")
                     OutlinedTextField(
                         value = webToken, onValueChange = { webToken = it },
@@ -1300,6 +1314,11 @@ private fun UpstreamConfig(
                         value = webSession, onValueChange = { webSession = it },
                         modifier = Modifier.fillMaxWidth(), singleLine = true,
                         visualTransformation = if (revealSecrets) VisualTransformation.None else PasswordVisualTransformation()
+                    )
+                } else {
+                    Text(
+                        "使用上方账号管理中当前选中的 ChatGPT 账号。网关开放 /v1/responses 与 /v1/models；不走 backend-api，且不支持 /v1/chat/completions、MCP 和旧版网页读取通道。",
+                        color = Muted, fontSize = 12.sp
                     )
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1359,6 +1378,9 @@ private fun UpstreamConfig(
                     onClick = {
                         onSave(initialConfig.copy(
                             proxyMode = proxyMode,
+                            siwcProfileId = if (proxyMode == "siwc")
+                                ChatGptPlanProfileStore(appContext).snapshot().activeProfileId.orEmpty()
+                            else initialConfig.siwcProfileId,
                             accessToken = hookToken.trim(), oaiDid = did.trim(), sessionId = sessionId.trim(),
                             webAccessToken = webToken.trim(), webSessionToken = webSession.trim(),
                             connectorId = connector.trim(), model = model,

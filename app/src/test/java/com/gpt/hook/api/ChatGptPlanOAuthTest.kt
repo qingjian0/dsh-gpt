@@ -90,7 +90,7 @@ class ChatGptPlanOAuthTest {
             .put("token_type", "Bearer")
             .put("expires_in", 3600)
             .put("scope", ChatGptPlanOAuth.SCOPES)
-            .put("earliest_refresh_at", now + 20 * 60_000L)
+            .put("earliest_refresh_at", now + 58 * 60_000L)
             .toString()
         val token = ChatGptPlanOAuth.parseTokenResponse(raw, now)
         assertTrue(token.canUseChatGptPlan())

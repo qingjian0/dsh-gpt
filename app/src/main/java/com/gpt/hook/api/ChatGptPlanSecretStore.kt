@@ -227,6 +227,13 @@ internal class ChatGptPlanProfileStore(
         }
     }
 
+    /** 读取最近的登录诊断日志（新版在前）。 */
+    @Synchronized
+    fun diagnosticLog(): String =
+        context.getSharedPreferences(DIAG_PREFS, Context.MODE_PRIVATE)
+            .getString(DIAG_LOG, "")
+            .orEmpty()
+
     @Synchronized
     fun snapshot(): Snapshot {
         val raw = secrets.read() ?: return Snapshot(null, emptyList())

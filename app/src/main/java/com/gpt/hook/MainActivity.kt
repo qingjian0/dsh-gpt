@@ -1268,21 +1268,28 @@ private fun UpstreamConfig(
         AnimatedVisibility(expanded) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 ChatGptPlanAccounts(appContext)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // 三个通道并排放下：文案过长会被挤成竖排单字，这里统一缩短。
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     FilterChip(
                         selected = proxyMode == "hook",
                         onClick = { proxyMode = "hook" },
-                        label = { Text("Android Hook") }
+                        label = { Text("Android Hook") },
+                        modifier = Modifier.weight(1f),
                     )
                     FilterChip(
                         selected = proxyMode == "web",
                         onClick = { proxyMode = "web" },
-                        label = { Text("网页会话（手动凭证）") }
+                        label = { Text("网页凭证") },
+                        modifier = Modifier.weight(1f),
                     )
                     FilterChip(
                         selected = proxyMode == "siwc",
                         onClick = { proxyMode = "siwc" },
-                        label = { Text("ChatGPT 订阅授权") }
+                        label = { Text("订阅授权") },
+                        modifier = Modifier.weight(1f),
                     )
                 }
                 if (proxyMode == "hook") {

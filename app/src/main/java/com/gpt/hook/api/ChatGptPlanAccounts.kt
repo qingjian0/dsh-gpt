@@ -1,3 +1,4 @@
+
 package com.gpt.hook.api
 
 import android.content.Context
@@ -39,6 +40,10 @@ internal fun ChatGptPlanAccounts(context: Context) {
     var pending by remember { mutableStateOf(ChatGptPlanLoginRegistry.pending) }
     var busy by remember { mutableStateOf(ChatGptPlanLoginRegistry.inFlight) }
     var status by remember { mutableStateOf(ChatGptPlanLoginRegistry.lastStatus ?: "尚未读取账号状态") }
+    var diagnostics by remember { mutableStateOf("") }
+    fun reloadDiagnostics() {
+        diagnostics = runCatching { store.diagnosticLog() }.getOrDefault("")
+    }
 
     suspend fun reload() {
         try {
@@ -82,6 +87,7 @@ internal fun ChatGptPlanAccounts(context: Context) {
         } else {
             status = "授权未完成：" + (ChatGptPlanWebLoginSession.error ?: "已取消")
         }
+        reloadDiagnostics()
         ChatGptPlanWebLoginSession.clear()
     }
 
@@ -136,6 +142,7 @@ internal fun ChatGptPlanAccounts(context: Context) {
 
     LaunchedEffect(store) {
         reload()
+        reloadDiagnostics()
         // 从浏览器返回后重新同步（等待可能仍在进程级协程里进行）
         pending = ChatGptPlanLoginRegistry.pending
         busy = ChatGptPlanLoginRegistry.inFlight
@@ -159,7 +166,14 @@ internal fun ChatGptPlanAccounts(context: Context) {
                 color = Color.Gray,
                 fontSize = 12.sp,
             )
-            Text(status, fontSize = 12.sp)
+            StatusCard(
+                status = status,
+                port = runCatching { store.callbackPort() }.getOrNull(),
+                pending = runCatching { store.pendingClientId() }.getOrNull(),
+                busy = busy,
+                onCancel = { ChatGptPlanLoginRegistry.cancel() },
+                diagnostics = diagnostics,
+            )
             profiles.forEach { profile ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -311,6 +325,9 @@ internal object ChatGptPlanLoginRegistry {
     @Volatile
     var lastStatus: String? = null
 
+    @Volatile
+    var lastClientId: String? = null
+
     /** 授权完成后把主界面拉回前台，避免用户以为“卡在浏览器”。 */
     private fun bringToFront(context: android.content.Context) {
         runCatching {
@@ -324,6 +341,17 @@ internal object ChatGptPlanLoginRegistry {
             context.startActivity(intent)
         }
     }
+
+    /** 用户主动取消等待：关掉回环端口，不再吃内存。 */
+    fun cancel() {
+        runCatching { pending?.close() }
+        pending = null
+        inFlight = false
+        lastStatus = "已取消登录"
+    }
+
+    /** 供 UI 展示当前注册中的 client（排查用）。 */
+    fun pendingClientIdOrNull(): String? = lastClientId
 
     fun launchWait(
         context: android.content.Context,
@@ -353,3 +381,80 @@ internal object ChatGptPlanLoginRegistry {
         }
     }
 }
+
+/**
+ * 登录状态卡：把「当前在做什么 / 端口 / 注册状态 / 失败原因」放在一处。
+ *
+ * 之前只用一行灰字显示 status，失败时既看不出走了哪条链路，也无法自我排查，
+ * 只能靠翻设备上的 prefs。这里把诊断日志折叠进来，点一下就能看到 token 端点的
+ * 状态码与响应片段。
+ */
+@Composable
+private fun StatusCard(
+    status: String,
+    port: Int?,
+    pending: String?,
+    busy: Boolean,
+    onCancel: () -> Unit,
+    diagnostics: String,
+) {
+    val lower = status
+    val tone = when {
+        lower.contains("成功") || lower.contains("已连通") -> Color(0xFF10A37F)
+        lower.contains("失败") || lower.contains("未完成") || lower.contains("无法") -> Color(0xFFD14343)
+        busy -> Color(0xFF2F6FEB)
+        else -> Color(0xFF6B7280)
+    }
+    var showDiag by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0x0F000000), RoundedCornerShape(12.dp))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(status, color = tone, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            InfoChip("回调端口", port?.toString() ?: "—")
+            InfoChip("注册", pending?.takeLast(8)?.let { "…$it" } ?: "未注册")
+            InfoChip("等待", if (busy) "进行中" else "空闲")
+        }
+        if (busy) {
+            OutlinedButton(
+                onClick = onCancel,
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("取消等待", fontSize = 12.sp) }
+        }
+        if (diagnostics.isNotBlank()) {
+            Text(
+                if (showDiag) "收起登录诊断" else "查看登录诊断",
+                color = Color(0xFF2F6FEB),
+                fontSize = 12.sp,
+                modifier = Modifier.clickable { showDiag = !showDiag },
+            )
+            if (showDiag) {
+                Text(
+                    diagnostics.takeLast(1200),
+                    fontSize = 10.sp,
+                    color = Color(0xFF4B5563),
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun InfoChip(label: String, value: String) {
+    Column {
+        Text(label, fontSize = 10.sp, color = Color(0xFF9CA3AF))
+        Text(value, fontSize = 11.sp, color = Color(0xFF374151))
+    }
+}
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.text.font.FontFamily

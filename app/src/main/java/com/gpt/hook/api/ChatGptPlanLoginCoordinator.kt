@@ -36,17 +36,45 @@ internal class ChatGptPlanLoginCoordinator(
                 idTokenHint = previous?.idToken,
                 loginHint = previous?.email,
             )
-            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(authorizationUrl)).apply {
-                addCategory(Intent.CATEGORY_BROWSABLE)
-                if (context !is android.app.Activity) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
             // Never log or expose authorizationUrl: returning-account URLs can contain id_token_hint.
-            context.startActivity(intent)
+            openLoginPage(context, authorizationUrl)
             return PendingLogin(listener, store, previous, http)
         } catch (error: Throwable) {
             listener.close()
             throw error
         }
+    }
+
+    /**
+     * 用 Chrome Custom Tabs 打开授权页，而不是裸 ACTION_VIEW。
+     *
+     * 为什么是 Custom Tab 而不是 WebView：授权页需要复用浏览器里**已登录的 ChatGPT 会话**，
+     * 用户点一下就能授权；WebView 是独立 cookie 罐，每次都得重新输账号密码。
+     *
+     * 为什么还要前台服务：Custom Tab 跑在浏览器进程里，回调仍然由本进程的回环 socket 接住。
+     * MIUI 切走三秒就把本应用降为 idle 并冻结，冻结后 socket 不再 accept，浏览器回调必然失败。
+     * 所以「Custom Tab（观感 + 登录态）+ 前台服务（进程不被冻结）」两者缺一不可。
+     */
+    private fun openLoginPage(context: Context, url: String): Boolean {
+        val opened = runCatching {
+            val customTabs = androidx.browser.customtabs.CustomTabsIntent.Builder()
+                .setShowTitle(true)
+                .setUrlBarHidingEnabled(true)
+                .build()
+            customTabs.intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            customTabs.launchUrl(context, Uri.parse(url))
+            true
+        }.getOrDefault(false)
+        if (opened) return true
+        // 设备上没有 Custom Tab 提供方时退回系统浏览器。
+        return runCatching {
+            context.startActivity(
+                Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                    .addCategory(Intent.CATEGORY_BROWSABLE)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+            true
+        }.getOrDefault(false)
     }
 
     /**

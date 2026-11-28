@@ -279,15 +279,9 @@ internal fun ChatGptPlanAccounts(context: Context) {
             Button(
                 enabled = !busy,
                 modifier = Modifier.fillMaxWidth(),
-                onClick = { startWebLogin(null, forceNewRegistration = true) },
-                shape = RoundedCornerShape(12.dp),
-            ) { Text(if (busy) "正在等待授权…" else "应用内登录（推荐）") }
-            OutlinedButton(
-                enabled = !busy,
-                modifier = Modifier.fillMaxWidth(),
                 onClick = { startLogin(null, forceNewRegistration = true) },
                 shape = RoundedCornerShape(12.dp),
-            ) { Text("改用系统浏览器登录") }
+            ) { Text(if (busy) "正在等待授权…" else "登录（使用浏览器账号）") }
             Spacer(Modifier.height(2.dp))
         }
     }

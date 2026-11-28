@@ -1278,6 +1278,11 @@ private fun UpstreamConfig(
                         onClick = { proxyMode = "web" },
                         label = { Text("网页版 API") }
                     )
+                    FilterChip(
+                        selected = proxyMode == "siwc",
+                        onClick = { proxyMode = "siwc" },
+                        label = { Text("ChatGPT 订阅授权") }
+                    )
                 }
                 if (proxyMode == "hook") {
                     FieldLabel("DPoP Access Token")
@@ -1291,7 +1296,7 @@ private fun UpstreamConfig(
                     OutlinedTextField(value = did, onValueChange = { did = it }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                     FieldLabel("Session ID（可选）")
                     OutlinedTextField(value = sessionId, onValueChange = { sessionId = it }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-                } else {
+                } else if (proxyMode == "web") {
                     FieldLabel("Web Access Token")
                     OutlinedTextField(
                         value = webToken, onValueChange = { webToken = it },
@@ -1304,6 +1309,11 @@ private fun UpstreamConfig(
                         value = webSession, onValueChange = { webSession = it },
                         modifier = Modifier.fillMaxWidth(), singleLine = true,
                         visualTransformation = if (revealSecrets) VisualTransformation.None else PasswordVisualTransformation()
+                    )
+                } else {
+                    Text(
+                        "使用上方账号管理中当前选中的 ChatGPT 账号。网关仅开放 /v1/responses 与 /v1/models；不走 backend-api，也不支持 /v1/chat/completions。",
+                        color = Muted, fontSize = 12.sp
                     )
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1363,6 +1373,9 @@ private fun UpstreamConfig(
                     onClick = {
                         onSave(initialConfig.copy(
                             proxyMode = proxyMode,
+                            siwcProfileId = if (proxyMode == "siwc")
+                                ChatGptPlanProfileStore(appContext).snapshot().activeProfileId.orEmpty()
+                            else initialConfig.siwcProfileId,
                             accessToken = hookToken.trim(), oaiDid = did.trim(), sessionId = sessionId.trim(),
                             webAccessToken = webToken.trim(), webSessionToken = webSession.trim(),
                             connectorId = connector.trim(), model = model,
